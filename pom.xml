@@ -14,12 +14,15 @@
     <module>messaging-bom</module>
     <module>messaging-core</module>
     <module>messaging-testkit</module>
+    <module>messaging-aws</module>
   </modules>
 
   <properties>
     <maven.compiler.release>21</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <junit.version>5.12.2</junit.version>
+    <aws.sdk.version>2.44.7</aws.sdk.version>
+    <testcontainers.version>2.0.5</testcontainers.version>
   </properties>
 
   <dependencyManagement>
@@ -33,6 +36,20 @@
         <groupId>com.example</groupId>
         <artifactId>messaging-testkit</artifactId>
         <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>software.amazon.awssdk</groupId>
+        <artifactId>bom</artifactId>
+        <version>${aws.sdk.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.testcontainers</groupId>
+        <artifactId>testcontainers-bom</artifactId>
+        <version>${testcontainers.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
       </dependency>
       <dependency>
         <groupId>org.junit</groupId>

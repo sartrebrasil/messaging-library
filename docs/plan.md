@@ -125,7 +125,7 @@ Exceções: `MessagingException` > `DestinationNotFoundException`,
 |---|---|---|---|
 | F0 | Spike de SDKs e emuladores ([achados](spikes/f0-sdks-e-emuladores.md)) | Pendências respondidas e registradas nos ADRs | Concluída |
 | F1 | Core, exceções, validação, `InMemoryMessaging`, contratos | InMemory passa nos contratos | Concluída: 34 testes no core, 27 no contrato do InMemory |
-| F2 | `messaging-aws` (SQS + SNS) | Contrato verde com LocalStack, standard e FIFO | Pendente |
+| F2 | `messaging-aws` (SQS + SNS) | Contrato verde com LocalStack, standard e FIFO | Concluída: contrato verde no LocalStack 4.14.0 (SQS standard, FIFO, DLQ por cópia; SNS → SQS raw), 1 MiB validado. SDK 2.44.7 (cache local); subir para 2.55.x com acesso ao Nexus |
 | F3 | `messaging-azure` (Service Bus fila, tópico e subscription, com e sem sessions) | Contrato verde com o emulator nos dois modos | Pendente |
 | F4 | `messaging-gcp` (Pub/Sub) | Contrato verde com o emulator | Pendente |
 | F5 | Starter Spring Boot 4.x, métricas, `traceparent` e health check | Teste de auto-configuração por provedor | Pendente |
@@ -155,4 +155,4 @@ Ainda abertas:
 | Licença do LocalStack 4.14.0 para uso comercial | Decidido fixar a 4.14.0 (2026-10-04). Confirmar com o jurídico; se não cobrir, licença paga (Base) ou ElasticMQ só para SQS |
 | Publicação do `azure-messaging-servicebus` 7.18.0 | O changelog tem data de 2026-10-06; confirmar no Maven Central antes de fixar |
 | Peek em entidade com sessions por receiver comum | Validar no emulator na F3 (health check) |
-| SQS 1 MiB no LocalStack escolhido | Validar com um teste de 1 MiB na F2 |
+| SQS 1 MiB no LocalStack escolhido | Validado na F2 (`acceptsMessageCloseToOneMebibyte`) |
