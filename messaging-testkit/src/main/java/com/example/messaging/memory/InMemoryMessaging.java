@@ -296,7 +296,7 @@ public final class InMemoryMessaging {
             }
             String id = null;
             for (Queue queue : target.queues()) {
-                Entry entry = new Entry(message, null);
+                Entry entry = new Entry(message, message.deadLetter());
                 queue.add(entry);
                 id = id == null ? entry.id : id;
             }

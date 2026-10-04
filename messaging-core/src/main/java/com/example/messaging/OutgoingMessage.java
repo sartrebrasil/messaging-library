@@ -31,13 +31,15 @@ import java.util.regex.Pattern;
  * @param orderingKey     chave de ordem (ADR-0006); {@code null} sem ordem
  * @param deduplicationId id de deduplicação do provedor; {@code null} sem deduplicação
  * @param traceparent     contexto W3C; normalmente preenchido pelo starter
+ * @param deadLetter      origem, na cópia que um adapter envia à DLQ; {@code null} nos outros casos
  */
 public record OutgoingMessage(byte[] body,
                               Map<String, String> attributes,
                               String contentType,
                               String orderingKey,
                               String deduplicationId,
-                              String traceparent) {
+                              String traceparent,
+                              DeadLetterInfo deadLetter) {
 
     public static final int MAX_ATTRIBUTES = 16;
     public static final int MAX_KEY_LENGTH = 64;
@@ -67,13 +69,13 @@ public record OutgoingMessage(byte[] body,
     }
 
     public static OutgoingMessage of(byte[] body) {
-        return new OutgoingMessage(body, Map.of(), null, null, null, null);
+        return new OutgoingMessage(body, Map.of(), null, null, null, null, null);
     }
 
     /** Texto em UTF-8 com {@code contentType} {@code text/plain; charset=utf-8}. */
     public static OutgoingMessage ofText(String text) {
         return new OutgoingMessage(text.getBytes(StandardCharsets.UTF_8), Map.of(), "text/plain; charset=utf-8",
-                null, null, null);
+                null, null, null, null);
     }
 
     public OutgoingMessage withAttribute(String key, String value) {
@@ -83,23 +85,27 @@ public record OutgoingMessage(byte[] body,
     }
 
     public OutgoingMessage withAttributes(Map<String, String> newAttributes) {
-        return new OutgoingMessage(body, newAttributes, contentType, orderingKey, deduplicationId, traceparent);
+        return new OutgoingMessage(body, newAttributes, contentType, orderingKey, deduplicationId, traceparent, deadLetter);
     }
 
     public OutgoingMessage withContentType(String newContentType) {
-        return new OutgoingMessage(body, attributes, newContentType, orderingKey, deduplicationId, traceparent);
+        return new OutgoingMessage(body, attributes, newContentType, orderingKey, deduplicationId, traceparent, deadLetter);
     }
 
     public OutgoingMessage withOrderingKey(String newOrderingKey) {
-        return new OutgoingMessage(body, attributes, contentType, newOrderingKey, deduplicationId, traceparent);
+        return new OutgoingMessage(body, attributes, contentType, newOrderingKey, deduplicationId, traceparent, deadLetter);
     }
 
     public OutgoingMessage withDeduplicationId(String newDeduplicationId) {
-        return new OutgoingMessage(body, attributes, contentType, orderingKey, newDeduplicationId, traceparent);
+        return new OutgoingMessage(body, attributes, contentType, orderingKey, newDeduplicationId, traceparent, deadLetter);
     }
 
     public OutgoingMessage withTraceparent(String newTraceparent) {
-        return new OutgoingMessage(body, attributes, contentType, orderingKey, deduplicationId, newTraceparent);
+        return new OutgoingMessage(body, attributes, contentType, orderingKey, deduplicationId, newTraceparent, deadLetter);
+    }
+
+    public OutgoingMessage withDeadLetter(DeadLetterInfo newDeadLetter) {
+        return new OutgoingMessage(body, attributes, contentType, orderingKey, deduplicationId, traceparent, newDeadLetter);
     }
 
     private static void validateAttributes(Map<String, String> attributes) {
@@ -136,12 +142,13 @@ public record OutgoingMessage(byte[] body,
                 && Objects.equals(contentType, that.contentType)
                 && Objects.equals(orderingKey, that.orderingKey)
                 && Objects.equals(deduplicationId, that.deduplicationId)
-                && Objects.equals(traceparent, that.traceparent);
+                && Objects.equals(traceparent, that.traceparent)
+                && Objects.equals(deadLetter, that.deadLetter);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(Arrays.hashCode(body), attributes, contentType, orderingKey, deduplicationId, traceparent);
+        return Objects.hash(Arrays.hashCode(body), attributes, contentType, orderingKey, deduplicationId, traceparent, deadLetter);
     }
 
     /** Mostra o tamanho do corpo, não o conteúdo. */
@@ -149,6 +156,6 @@ public record OutgoingMessage(byte[] body,
     public String toString() {
         return "OutgoingMessage[body=" + body.length + " bytes, attributes=" + attributes
                 + ", contentType=" + contentType + ", orderingKey=" + orderingKey
-                + ", deduplicationId=" + deduplicationId + ", traceparent=" + traceparent + "]";
+                + ", deduplicationId=" + deduplicationId + ", traceparent=" + traceparent + ", deadLetter=" + deadLetter + "]";
     }
 }
