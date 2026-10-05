@@ -17,6 +17,7 @@
     <module>messaging-aws</module>
     <module>messaging-azure</module>
     <module>messaging-gcp</module>
+    <module>messaging-spring-boot-starter</module>
   </modules>
 
   <properties>
