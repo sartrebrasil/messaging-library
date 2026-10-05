@@ -185,7 +185,10 @@ public final class MessagingDestinations implements AutoCloseable {
                     problems.add(prefix + ": subscription exige topic");
                 }
                 if (d.deadLetter() != null) {
-                    problems.add(prefix + ".dead-letter: o Service Bus tem DLQ nativa; leia-a por outro caminho");
+                    problems.add(prefix + ".dead-letter: o Service Bus tem DLQ nativa; leia-a com dead-letter-queue: true");
+                }
+                if (d.deadLetterQueue() && d.topic() != null && d.subscription() == null) {
+                    problems.add(prefix + ".dead-letter-queue em tópico exige subscription");
                 }
                 if (d.redelivery() == Redelivery.RESCHEDULE && (d.sessions() || d.queue() == null || d.topic() != null)) {
                     problems.add(prefix + ".redelivery=RESCHEDULE só vale para fila sem sessions");
@@ -207,6 +210,9 @@ public final class MessagingDestinations implements AutoCloseable {
         }
         if (d.sessions() && type != Type.AZURE) {
             problems.add(prefix + ".sessions só vale para o Service Bus");
+        }
+        if (d.deadLetterQueue() && type != Type.AZURE) {
+            problems.add(prefix + ".dead-letter-queue só vale para o Service Bus; nos outros, a DLQ é um destino comum");
         }
         if (d.deadLetter() != null && type != Type.AZURE) {
             Destination target = properties.destinations().get(d.deadLetter());
