@@ -73,6 +73,11 @@ public abstract class MessagingContract {
         return null;
     }
 
+    /** Se {@link #newOrderedSender()} recusa envio sem {@code orderingKey}; o Pub/Sub aceita (ADR-0006). */
+    protected boolean orderingKeyRequired() {
+        return true;
+    }
+
     /** Receiver da DLQ de {@link #newReceiver()}; {@code null} quando o receiver não tem DLQ. */
     protected MessageReceiver newDeadLetterReceiver() {
         return null;
@@ -282,13 +287,16 @@ public abstract class MessagingContract {
     }
 
     @Test
-    void extendLeaseKeepsMessageInvisible() {
+    void extendLeaseKeepsMessageInvisible() throws InterruptedException {
         MessageReceiver receiver = receiver();
         sender().send(own(OutgoingMessage.ofText("x")));
         ReceivedMessage received = awaitOwn(receiver, 1).getFirst();
-        receiver.extendLease(received, lease().multipliedBy(3));
+        // um lease só, a partir da metade: o Service Bus renova pelo lock duration da entidade (ADR-0005)
+        Thread.sleep(lease().dividedBy(2).toMillis());
+        receiver.extendLease(received, lease());
 
-        assertNoneOwn(receiver(), lease().multipliedBy(3).dividedBy(2));
+        // cobre o vencimento original, com folga de 1/4 de lease antes do novo
+        assertNoneOwn(receiver(), lease().multipliedBy(3).dividedBy(4));
         receiver.ack(received);
     }
 
@@ -411,6 +419,7 @@ public abstract class MessagingContract {
     void orderedSenderRequiresOrderingKey() {
         MessageSender sender = track(newOrderedSender());
         assumeTrue(sender != null, "sem sender ordenado");
+        assumeTrue(orderingKeyRequired(), "provedor aceita envio sem orderingKey");
 
         assertThrows(IllegalArgumentException.class, () -> sender.send(own(OutgoingMessage.ofText("x"))));
     }
