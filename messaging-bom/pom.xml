@@ -33,6 +33,11 @@
         <artifactId>messaging-azure</artifactId>
         <version>${project.version}</version>
       </dependency>
+      <dependency>
+        <groupId>com.example</groupId>
+        <artifactId>messaging-gcp</artifactId>
+        <version>${project.version}</version>
+      </dependency>
     </dependencies>
   </dependencyManagement>
 </project>

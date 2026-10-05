@@ -16,6 +16,7 @@
     <module>messaging-testkit</module>
     <module>messaging-aws</module>
     <module>messaging-azure</module>
+    <module>messaging-gcp</module>
   </modules>
 
   <properties>
@@ -24,6 +25,7 @@
     <junit.version>5.12.2</junit.version>
     <aws.sdk.version>2.44.7</aws.sdk.version>
     <azure.servicebus.version>7.18.0</azure.servicebus.version>
+    <gcp.libraries.version>26.90.0</gcp.libraries.version>
     <testcontainers.version>2.0.5</testcontainers.version>
   </properties>
 
@@ -43,6 +45,13 @@
         <groupId>software.amazon.awssdk</groupId>
         <artifactId>bom</artifactId>
         <version>${aws.sdk.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>com.google.cloud</groupId>
+        <artifactId>libraries-bom</artifactId>
+        <version>${gcp.libraries.version}</version>
         <type>pom</type>
         <scope>import</scope>
       </dependency>
