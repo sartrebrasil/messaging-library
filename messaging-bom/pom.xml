@@ -28,6 +28,11 @@
         <artifactId>messaging-aws</artifactId>
         <version>${project.version}</version>
       </dependency>
+      <dependency>
+        <groupId>com.example</groupId>
+        <artifactId>messaging-azure</artifactId>
+        <version>${project.version}</version>
+      </dependency>
     </dependencies>
   </dependencyManagement>
 </project>

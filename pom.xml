@@ -15,6 +15,7 @@
     <module>messaging-core</module>
     <module>messaging-testkit</module>
     <module>messaging-aws</module>
+    <module>messaging-azure</module>
   </modules>
 
   <properties>
@@ -22,6 +23,7 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <junit.version>5.12.2</junit.version>
     <aws.sdk.version>2.44.7</aws.sdk.version>
+    <azure.servicebus.version>7.18.0</azure.servicebus.version>
     <testcontainers.version>2.0.5</testcontainers.version>
   </properties>
 
@@ -43,6 +45,16 @@
         <version>${aws.sdk.version}</version>
         <type>pom</type>
         <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>com.azure</groupId>
+        <artifactId>azure-messaging-servicebus</artifactId>
+        <version>${azure.servicebus.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.microsoft.sqlserver</groupId>
+        <artifactId>mssql-jdbc</artifactId>
+        <version>12.8.1.jre11</version>
       </dependency>
       <dependency>
         <groupId>org.testcontainers</groupId>
