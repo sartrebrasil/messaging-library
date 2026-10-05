@@ -33,6 +33,9 @@ final class AzureProviderFactory implements ProviderFactory {
     @Override
     public MessageSender sender(String name, MessagingProperties.Destination destination) {
         long max = maxMessageBytes(destination);
+        if (destination.deadLetterQueue()) {
+            return null;
+        }
         if (destination.topic() != null) {
             return ServiceBusMessageSender.forTopic(builder, destination.topic(), destination.sessions(), max);
         }
@@ -44,6 +47,13 @@ final class AzureProviderFactory implements ProviderFactory {
     public MessageReceiver receiver(String name, MessagingProperties.Destination destination,
                                     MessageSender deadLetterSender) {
         long max = maxMessageBytes(destination);
+        // a DLQ não tem sessions, mesmo quando a entidade tem
+        if (destination.deadLetterQueue()) {
+            return destination.subscription() != null
+                    ? ServiceBusMessageReceiver.forSubscriptionDeadLetterQueue(builder, destination.topic(),
+                    destination.subscription(), max)
+                    : ServiceBusMessageReceiver.forDeadLetterQueue(builder, destination.queue(), max);
+        }
         if (destination.subscription() != null) {
             return destination.sessions()
                     ? ServiceBusSessionMessageReceiver.forSubscription(builder, destination.topic(),
