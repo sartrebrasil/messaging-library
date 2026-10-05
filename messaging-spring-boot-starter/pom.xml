@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.example</groupId>
+    <artifactId>messaging-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+  <artifactId>messaging-spring-boot-starter</artifactId>
+  <name>messaging-spring-boot-starter</name>
+  <description>Auto-configuração Spring Boot 4 de destinos nomeados (messaging.*), métricas, traceparent e health</description>
+
+  <properties>
+    <module.name>com.example.messaging.spring</module.name>
+    <!-- Versões explícitas em vez do BOM do Boot, como na storage-lib: importá-lo aqui mudaria
+         Netty, Reactor e Jackson dos SDKs só neste módulo. A aplicação usa o BOM da própria
+         versão do Boot (ordem recomendada no ADR-0008: Boot primeiro). -->
+    <spring-boot.version>4.1.1</spring-boot.version>
+    <micrometer.version>1.17.1</micrometer.version>
+    <assertj.version>3.27.7</assertj.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.example</groupId>
+      <artifactId>messaging-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-autoconfigure</artifactId>
+      <version>${spring-boot.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-core</artifactId>
+      <version>${micrometer.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-observation</artifactId>
+      <version>${micrometer.version}</version>
+    </dependency>
+    <!-- A aplicação escolhe os provedores adicionando os adapters -->
+    <dependency>
+      <groupId>com.example</groupId>
+      <artifactId>messaging-aws</artifactId>
+      <version>${project.version}</version>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>com.example</groupId>
+      <artifactId>messaging-azure</artifactId>
+      <version>${project.version}</version>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>com.example</groupId>
+      <artifactId>messaging-gcp</artifactId>
+      <version>${project.version}</version>
+      <optional>true</optional>
+    </dependency>
+    <!-- Health indicator: só com o módulo de health do Boot 4 na aplicação -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-health</artifactId>
+      <version>${spring-boot.version}</version>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-test</artifactId>
+      <version>${spring-boot.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <version>${assertj.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>
