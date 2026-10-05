@@ -188,6 +188,11 @@ messaging:
       topic: eventos
       subscription: faturamento
       sessions: true
+    eventos-dlq:               # Service Bus: só recebe, da DLQ nativa da subscription
+      provider: azure
+      topic: eventos
+      subscription: faturamento
+      dead-letter-queue: true
     notas:
       provider: gcp
       topic: notas

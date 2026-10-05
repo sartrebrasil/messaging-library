@@ -117,10 +117,47 @@ class MessagingAutoConfigurationTest {
                         "messaging.destinations.ps.provider=gcp",
                         "messaging.destinations.ps.subscription=pedidos-sub")
                 .run(context -> assertThat(context).getFailure().rootCause()
-                        .hasMessageContaining("sb.dead-letter: o Service Bus tem DLQ nativa")
+                        .hasMessageContaining("sb.dead-letter: o Service Bus tem DLQ nativa; leia-a com dead-letter-queue")
                         .hasMessageContaining("sb.redelivery=RESCHEDULE só vale para fila sem sessions")
                         .hasMessageContaining("ps.ack-deadline é obrigatório")
                         .hasMessageContaining("ps: nome curto exige messaging.providers.gcp.project"));
+    }
+
+    @Test
+    void azureDeadLetterQueueIsReceiveOnly() {
+        ApplicationContextRunner azure = runner.withPropertyValues(
+                "messaging.providers.azure.type=azure",
+                "messaging.providers.azure.connection-string=Endpoint=sb://localhost;SharedAccessKeyName=k;"
+                        + "SharedAccessKey=v;UseDevelopmentEmulator=true;");
+
+        azure.withPropertyValues(
+                        "messaging.destinations.pedidos-dlq.provider=azure",
+                        "messaging.destinations.pedidos-dlq.queue=pedidos",
+                        "messaging.destinations.pedidos-dlq.sessions=true",
+                        "messaging.destinations.pedidos-dlq.dead-letter-queue=true",
+                        "messaging.destinations.eventos-dlq.provider=azure",
+                        "messaging.destinations.eventos-dlq.topic=eventos",
+                        "messaging.destinations.eventos-dlq.subscription=faturamento",
+                        "messaging.destinations.eventos-dlq.dead-letter-queue=true")
+                .run(context -> {
+                    MessagingDestinations destinations = context.getBean(MessagingDestinations.class);
+                    // a DLQ não tem sessions: receiver comum, mesmo com sessions na entidade
+                    assertThat(destinations.receiver("pedidos-dlq").capabilities().orderedDelivery()).isFalse();
+                    assertThat(destinations.receiver("eventos-dlq").capabilities().nativeDeadLetter()).isTrue();
+                    org.assertj.core.api.Assertions.assertThatThrownBy(() -> destinations.sender("pedidos-dlq"))
+                            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("não envia");
+                });
+
+        azure.withPropertyValues(
+                        "messaging.destinations.sem-sub.provider=azure",
+                        "messaging.destinations.sem-sub.topic=eventos",
+                        "messaging.destinations.sem-sub.dead-letter-queue=true",
+                        "messaging.destinations.sqs.provider=aws",
+                        "messaging.destinations.sqs.queue-url=" + QUEUE + "x",
+                        "messaging.destinations.sqs.dead-letter-queue=true")
+                .run(context -> assertThat(context).getFailure().rootCause()
+                        .hasMessageContaining("sem-sub.dead-letter-queue em tópico exige subscription")
+                        .hasMessageContaining("sqs.dead-letter-queue só vale para o Service Bus"));
     }
 
     @Test

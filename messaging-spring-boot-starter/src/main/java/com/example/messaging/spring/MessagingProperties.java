@@ -73,11 +73,12 @@ public record MessagingProperties(Map<String, Provider> providers, Map<String, D
      * @param ackDeadline     GCP: ack deadline da subscription (obrigatório para receber)
      * @param ordered         GCP: subscription com {@code enable_message_ordering}
      * @param exactlyOnce     GCP: subscription com exactly-once delivery
+     * @param deadLetterQueue Azure: só recebe, da DLQ nativa da fila ou da subscription
      */
     public record Destination(String provider, String queueUrl, String topicArn, String queue, String topic,
                               String subscription, String deadLetter, Set<Requirement> require, boolean sessions,
                               Redelivery redelivery, Long maxMessageBytes, Duration ackDeadline, boolean ordered,
-                              boolean exactlyOnce) {
+                              boolean exactlyOnce, boolean deadLetterQueue) {
 
         public Destination {
             require = require == null ? Set.of() : Set.copyOf(require);
