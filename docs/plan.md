@@ -27,7 +27,7 @@ lib (por exemplo, a inbox-library, que vai usá-la como uma implementação do s
 | Coordenadas | `com.example:messaging-*`, pacote `com.example.messaging`, Java 21, Spring Boot 4.x | este plano |
 | Distribuição | Igual à storage-lib: `mvn install` local; publicação decidida depois | este plano |
 | SDKs | SDK oficial de cada provedor, sem Spring Cloud AWS/Azure/GCP/OCI | [0001](adr/0001-escopo.md) |
-| ActiveMQ e RabbitMQ | Depois da v1: `messaging-jms` (ActiveMQ Classic primeiro, Artemis depois), depois `messaging-rabbitmq`; lease controlado pela lib | [0009](adr/0009-activemq-e-rabbitmq.md) |
+| ActiveMQ e RabbitMQ | Depois da v1: `messaging-jms` (ActiveMQ Classic e Artemis, por `JmsDialect`), depois `messaging-rabbitmq`; lease controlado pela lib | [0009](adr/0009-activemq-e-rabbitmq.md) |
 
 ## API alvo (v1)
 
@@ -132,8 +132,9 @@ Exceções: `MessagingException` > `DestinationNotFoundException`,
 | F5 | Starter Spring Boot 4.x, métricas, `traceparent` e health check | Teste de auto-configuração por provedor | Código escrito; 9 testes verdes (auto-configuração e validação com AWS sem rede, regras de Azure e GCP, `traceparent` e métricas). DLQ nativa do Service Bus lida por destino com `dead-letter-queue: true` |
 | F6 | `mvn install` da 0.1.0 | inbox-library usa a lib em um adapter de prova | README escrito; contratos da F2 a F4 verdes. O adapter de prova espera a inbox-library ter código (hoje só tem docs) |
 | F7 | `messaging-jms` para ActiveMQ Classic ([spike](spikes/f7-activemq-classic.md), ADR-0009) | Contrato verde contra `apache/activemq-classic:6.2.0` | Concluída: 26 testes verdes no contrato (2 pulados: destino inexistente, por causa do auto-create; envio sem `orderingKey` aceito) e 3 em `JmsErrorsTest`. Starter com o tipo `activemq-classic`: 4 testes com broker embutido (`vm://`) |
+| F8 | Artemis no `messaging-jms` ([spike](spikes/f8-activemq-artemis.md), ADR-0009) | Contrato verde contra `apache/activemq-artemis:2.40.0` sem auto-create | Concluída: `JmsDialect` com Classic e Artemis. 28 testes verdes no contrato do Artemis (1 pulado: envio sem `orderingKey` aceito), inclusive destino inexistente, `_AMQ_DUPL_ID`, multicast por FQQN e conexão com janela recusada. Starter com o tipo `artemis`: 2 testes com container |
 
-Depois da v1, nesta ordem: Artemis no `messaging-jms`, depois `messaging-rabbitmq` (ADR-0009).
+Depois da v1, a seguir: `messaging-rabbitmq` (ADR-0009).
 
 Depois da v1, sem data: `messaging-oci` (Queue; mocks e contrato manual em fila
 real), streaming pull no Pub/Sub atrás da mesma API, envio com atraso

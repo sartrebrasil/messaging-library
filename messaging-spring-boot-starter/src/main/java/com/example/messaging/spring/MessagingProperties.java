@@ -30,8 +30,8 @@ public record MessagingProperties(Map<String, Provider> providers, Map<String, D
         destinations = destinations == null ? Map.of() : Map.copyOf(destinations);
     }
 
-    /** {@code activemq-classic} no YAML. */
-    public enum Type { AWS, AZURE, GCP, ACTIVEMQ_CLASSIC }
+    /** {@code activemq-classic} e {@code artemis} no YAML. */
+    public enum Type { AWS, AZURE, GCP, ACTIVEMQ_CLASSIC, ARTEMIS }
 
     /**
      * Conexão com um provedor. Cada tipo usa só os seus campos:
@@ -43,8 +43,9 @@ public record MessagingProperties(Map<String, Provider> providers, Map<String, D
      * @param connectionString Azure: connection string do namespace; sem ela, um bean {@code ServiceBusClientBuilder}
      * @param project          GCP: projeto, usado para completar nomes curtos de tópico e subscription
      * @param emulatorHost     GCP: {@code host:porta} do emulator (canal sem TLS e sem credenciais)
-     * @param brokerUrl        ActiveMQ: URL do broker ({@code tcp://...}, {@code failover:(...)}); sem ela, o
-     *                         bean {@code jakarta.jms.ConnectionFactory} da aplicação, sem pool por cima
+     * @param brokerUrl        ActiveMQ: URL do broker ({@code tcp://...}, {@code failover:(...)} no Classic); sem
+     *                         ela, o bean {@code jakarta.jms.ConnectionFactory} da aplicação, sem pool por cima.
+     *                         No Artemis, ganha {@code consumerWindowSize=0} quando não define a janela
      * @param user             ActiveMQ: usuário da conexão
      * @param password         ActiveMQ: senha de {@code user}
      */
@@ -74,6 +75,8 @@ public record MessagingProperties(Map<String, Provider> providers, Map<String, D
      *   <tr><td>gcp</td><td>{@code topic}</td><td>{@code subscription}</td></tr>
      *   <tr><td>activemq-classic</td><td>{@code topic} ({@code VirtualTopic.*}), senão {@code queue}</td>
      *       <td>{@code topic} + {@code subscription} (fila {@code Consumer.<subscription>.<topic>}), senão {@code queue}</td></tr>
+     *   <tr><td>artemis</td><td>{@code topic} (endereço multicast), senão {@code queue}</td>
+     *       <td>{@code topic} + {@code subscription} (FQQN {@code <topic>::<subscription>}), senão {@code queue}</td></tr>
      * </table>
      *
      * @param deadLetter      destino que recebe a cópia de {@code deadLetter} (todos menos o Service Bus, que é nativo)
