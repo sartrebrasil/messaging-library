@@ -10,7 +10,7 @@
   </parent>
   <artifactId>messaging-jms</artifactId>
   <name>messaging-jms</name>
-  <description>Adapter Jakarta Messaging (ActiveMQ Classic): filas e Virtual Topics, com lease controlado pela lib</description>
+  <description>Adapter Jakarta Messaging (ActiveMQ Classic e Artemis): filas e tópicos, com lease controlado pela lib</description>
 
   <properties>
     <module.name>com.example.messaging.jms</module.name>
@@ -25,10 +25,15 @@
       <groupId>jakarta.jms</groupId>
       <artifactId>jakarta.jms-api</artifactId>
     </dependency>
-    <!-- Só o checkAccess usa classes do Classic (DestinationSource); quem usa traz o cliente do broker -->
+    <!-- Clientes dos brokers, usados só pelo JmsDialect de cada um; quem usa traz o seu -->
     <dependency>
       <groupId>org.apache.activemq</groupId>
       <artifactId>activemq-client</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.activemq</groupId>
+      <artifactId>artemis-jakarta-client</artifactId>
       <optional>true</optional>
     </dependency>
     <dependency>

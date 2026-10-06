@@ -39,11 +39,17 @@ public final class MessagingDestinations implements AutoCloseable {
             Type.AWS, "com.example.messaging.aws.SqsMessageSender",
             Type.AZURE, "com.example.messaging.azure.ServiceBusMessageSender",
             Type.GCP, "com.example.messaging.gcp.PubSubMessageSender",
-            Type.ACTIVEMQ_CLASSIC, "com.example.messaging.jms.JmsMessageSender");
+            Type.ACTIVEMQ_CLASSIC, "com.example.messaging.jms.JmsMessageSender",
+            Type.ARTEMIS, "com.example.messaging.jms.JmsMessageSender");
     private static final Map<Type, String> MODULES = Map.of(
             Type.AWS, "messaging-aws", Type.AZURE, "messaging-azure", Type.GCP, "messaging-gcp",
-            Type.ACTIVEMQ_CLASSIC, "messaging-jms");
-    private static final String ACTIVEMQ_CLIENT = "org.apache.activemq.ActiveMQConnectionFactory";
+            Type.ACTIVEMQ_CLASSIC, "messaging-jms", Type.ARTEMIS, "messaging-jms");
+    /** Cliente do broker que o messaging-jms usa em cada tipo: classe que prova a dependência e o artefato. */
+    private static final Map<Type, String[]> BROKER_CLIENTS = Map.of(
+            Type.ACTIVEMQ_CLASSIC, new String[]{"org.apache.activemq.ActiveMQConnectionFactory",
+                    "org.apache.activemq:activemq-client"},
+            Type.ARTEMIS, new String[]{"org.apache.activemq.artemis.jms.client.ActiveMQConnectionFactory",
+                    "org.apache.activemq:artemis-jakarta-client"});
     private static final String VIRTUAL_TOPIC = "VirtualTopic.";
 
     private final MessagingProperties properties;
@@ -146,12 +152,14 @@ public final class MessagingDestinations implements AutoCloseable {
     private void validateProviders(List<String> problems) {
         properties.providers().forEach((name, provider) -> {
             if (provider.type() == null) {
-                problems.add("messaging.providers." + name + ".type é obrigatório (aws, azure, gcp ou activemq-classic)");
+                problems.add("messaging.providers." + name
+                        + ".type é obrigatório (aws, azure, gcp, activemq-classic ou artemis)");
             } else if (!ClassUtils.isPresent(ADAPTERS.get(provider.type()), getClass().getClassLoader())) {
                 problems.add("messaging.providers." + name + ": adicione a dependência " + MODULES.get(provider.type()));
-            } else if (provider.type() == Type.ACTIVEMQ_CLASSIC
-                    && !ClassUtils.isPresent(ACTIVEMQ_CLIENT, getClass().getClassLoader())) {
-                problems.add("messaging.providers." + name + ": adicione a dependência org.apache.activemq:activemq-client");
+            } else if (BROKER_CLIENTS.containsKey(provider.type())
+                    && !ClassUtils.isPresent(BROKER_CLIENTS.get(provider.type())[0], getClass().getClassLoader())) {
+                problems.add("messaging.providers." + name + ": adicione a dependência "
+                        + BROKER_CLIENTS.get(provider.type())[1]);
             }
         });
     }
@@ -162,7 +170,7 @@ public final class MessagingDestinations implements AutoCloseable {
                 case AWS -> new AwsProviderFactory(provider, beans);
                 case AZURE -> new AzureProviderFactory(name, provider, beans);
                 case GCP -> new GcpProviderFactory(name, provider);
-                case ACTIVEMQ_CLASSIC -> new ActiveMqProviderFactory(name, provider, beans);
+                case ACTIVEMQ_CLASSIC, ARTEMIS -> new JmsProviderFactory(name, provider, beans);
             });
         });
     }
@@ -215,14 +223,14 @@ public final class MessagingDestinations implements AutoCloseable {
                 }
                 unexpected(prefix, problems, "queue-url", d.queueUrl(), "topic-arn", d.topicArn(), "queue", d.queue());
             }
-            case ACTIVEMQ_CLASSIC -> {
+            case ACTIVEMQ_CLASSIC, ARTEMIS -> {
                 if (d.queue() == null && d.topic() == null) {
                     problems.add(prefix + ": defina queue ou topic");
                 }
                 if (d.subscription() != null && d.topic() == null) {
                     problems.add(prefix + ": subscription exige topic");
                 }
-                if (d.topic() != null && !d.topic().startsWith(VIRTUAL_TOPIC)) {
+                if (type == Type.ACTIVEMQ_CLASSIC && d.topic() != null && !d.topic().startsWith(VIRTUAL_TOPIC)) {
                     problems.add(prefix + ".topic precisa ser um Virtual Topic (" + VIRTUAL_TOPIC + "<nome>)");
                 }
                 if (d.lease() != null && (d.lease().isNegative() || d.lease().isZero())) {
@@ -231,7 +239,7 @@ public final class MessagingDestinations implements AutoCloseable {
                 unexpected(prefix, problems, "queue-url", d.queueUrl(), "topic-arn", d.topicArn());
             }
         }
-        if (d.lease() != null && type != Type.ACTIVEMQ_CLASSIC) {
+        if (d.lease() != null && type != Type.ACTIVEMQ_CLASSIC && type != Type.ARTEMIS) {
             problems.add(prefix + ".lease só vale para o ActiveMQ; nos outros, o lease é do destino");
         }
         if (d.sessions() && type != Type.AZURE) {
