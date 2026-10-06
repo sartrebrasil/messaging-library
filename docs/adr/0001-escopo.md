@@ -44,7 +44,8 @@ Fora do escopo:
 - Kafka, Kinesis, Event Hubs, OCI Streaming: são logs com offset, não filas com
   lease (ADR-0002). A inbox-library mantém o adapter Kafka próprio.
 - RabbitMQ, ActiveMQ e IBM MQ: não são serviços de nuvem gerenciados com SDK
-  próprio. Podem entrar depois se a API aguentar, sem compromisso.
+  próprio. Podem entrar depois se a API aguentar, sem compromisso. ActiveMQ e
+  RabbitMQ entraram depois da v1 (ADR-0009).
 - Listener, polling em loop, concorrência, retry, idempotência, serialização.
   São responsabilidades de quem consome (a inbox-library, por exemplo).
 - Claim-check para payload grande: combinação da storage-lib com esta, feita por
