@@ -63,31 +63,32 @@ Nos dois adapters o lease é um prazo local, contado pelo receiver:
 
 Um adapter sobre `jakarta.jms`, que recebe a `Connection` pronta. A conexão é
 thread-safe; o adapter cria as próprias sessions e não fecha a conexão (ADR-0002).
-A primeira entrega é só para o Classic, e o que não é padrão JMS fica no próprio
-adapter: o prefetch no nome da fila, o `AMQ_SCHEDULED_DELAY` e o `checkAccess`
-pelo `DestinationSource`. Um enum de dialeto entra junto com o Artemis, quando
-houver um segundo valor. Os achados que mudaram esta seção estão no
-[spike F7](../spikes/f7-activemq-classic.md).
+O que não é padrão JMS fica no `JmsDialect` (`ACTIVEMQ_CLASSIC`, `ARTEMIS`),
+passado na construção de senders e receivers. As classes de cada cliente só são
+carregadas pelo dialeto que as usa, e os dois clientes são dependências
+opcionais. Os achados que mudaram esta seção estão nos spikes
+[F7](../spikes/f7-activemq-classic.md) (Classic) e
+[F8](../spikes/f8-activemq-artemis.md) (Artemis).
 
 | Tema | Regra |
 |---|---|
 | Receiver | Um pool de sessions `CLIENT_ACKNOWLEDGE`, cada uma com um consumer e no máximo uma mensagem pendente. Com uma mensagem por session, o ack confirma só ela e o adapter fica no JMS padrão. O tamanho do pool (`max-in-flight`, padrão 10) limita as mensagens pendentes por receiver e reduz `maxMessages`. |
-| Prefetch | Precisa ser 0: com prefetch, o broker manda mensagens a mais para o buffer do consumer, e elas ficam presas sem lease. Classic: o adapter acrescenta `?consumer.prefetchSize=0` ao nome da fila. Artemis: `consumerWindowSize=0` na connection factory, de quem cria a conexão (documentado no README). |
+| Prefetch | Precisa ser 0: com prefetch, o broker manda mensagens a mais para o buffer do consumer, e elas ficam presas sem lease. Classic: o adapter acrescenta `?consumer.prefetchSize=0` ao nome da fila. Artemis: `consumerWindowSize=0` na connection factory. O receiver recusa uma conexão com janela (`IllegalArgumentException`), e o starter acrescenta o parâmetro à `broker-url`. |
 | `receive` | `consumer.receive(restante)` na primeira session livre; depois `receiveNoWait` nas outras até `maxMessages`. |
 | Threads | Cada session é usada por uma mensagem por vez, protegida por `ReentrantLock` (não `synchronized`, por causa das virtual threads). Assim o `ack` de uma mensagem não espera o `receive` de outra. |
 | `ack` | `message.acknowledge()` e a session volta ao pool. |
 | `nack(0)` e lease vencido | Fecha a session e abre outra no lugar. O broker devolve a mensagem com o mesmo `JMSMessageID` e soma uma entrega. |
-| `nack` com atraso | Escolhido no adapter (`Redelivery`), como no Service Bus. `IMMEDIATE` (padrão): ignora o atraso. `SCHEDULED`: cópia com `AMQ_SCHEDULED_DELAY` para a mesma fila, depois `ack` da original. É a mesma ordem do `RESCHEDULE` (ADR-0005): uma falha no meio gera duplicata, nunca perda. A cópia ganha `JMSMessageID` novo e o atributo reservado `delivery_count`. O Classic não aceita o `deliveryDelay` do JMS 2.0. `SCHEDULED` exige `schedulerSupport="true"` no broker: sem ele, o broker entrega a cópia na hora sem avisar, e o adapter não consegue detectar isso. `maxRedeliveryDelay` é 12 h. |
+| `nack` com atraso | Escolhido no adapter (`Redelivery`), como no Service Bus. `IMMEDIATE` (padrão): ignora o atraso. `SCHEDULED`: cópia agendada para a mesma fila (no Artemis, para o FQQN da subscription, nunca para o endereço multicast), depois `ack` da original. É a mesma ordem do `RESCHEDULE` (ADR-0005): uma falha no meio gera duplicata, nunca perda. A cópia ganha `JMSMessageID` novo e o atributo reservado `delivery_count`. Artemis: `deliveryDelay` do JMS 2.0, sem configuração no broker. Classic: não aceita `deliveryDelay`; usa `AMQ_SCHEDULED_DELAY`, que exige `schedulerSupport="true"` no broker. Sem ele, o broker entrega a cópia na hora sem avisar, e o adapter não consegue detectar isso. `maxRedeliveryDelay` é 12 h. |
 | `deadLetter` | Cópia para o sender de DLQ configurado e depois `ack` (ADR-0005). `nativeDeadLetter = false`: o JMS não tem dead letter explícito. |
 | DLQ automática do broker | A política de reentrega do broker (`maximumRedeliveries` no Classic, `max-delivery-attempts` no Artemis) continua valendo para o `nack(0)` e para o lease vencido. As cópias de `nack` com atraso zeram a contagem do broker, então quem consome decide pela `deliveryCount`. |
 | `deliveryCount` | Atributo `delivery_count` quando existe; senão `JMSXDeliveryCount`. |
-| Corpo e atributos | Sempre `BytesMessage`. Atributos como string properties: as chaves do ADR-0004 são identificadores JMS válidos. `contentType` vai no atributo reservado `content_type`. |
-| `orderingKey` | `JMSXGroupID` (message groups). No Classic, a mensagem devolvida por session fechada volta para a frente do grupo (F7), então `orderedDelivery = true` em `IMMEDIATE`. Em `SCHEDULED` é `false`, porque a cópia agendada vai para o fim da fila. Envio sem `orderingKey` é aceito. |
-| `deduplicationId` | Classic: ignorado (`publisherDeduplication = false`). Artemis, quando entrar: `_AMQ_DUPL_ID`, e a cópia de `nack` não leva o id, senão o broker a descartaria. |
+| Corpo e atributos | Sempre `BytesMessage`. Atributos como string properties: as chaves do ADR-0004 são identificadores JMS válidos. `contentType` vai no atributo reservado `content_type`. Na leitura, as propriedades `JMS*`, `_AMQ*` e `__AMQ*` são do broker e ficam fora dos atributos. |
+| `orderingKey` | `JMSXGroupID` (message groups). Nos dois brokers, a mensagem devolvida por session fechada volta para a frente do grupo (F7, F8), então `orderedDelivery = true` em `IMMEDIATE`. Em `SCHEDULED` é `false`, porque a cópia agendada vai para o fim da fila. Envio sem `orderingKey` é aceito. |
+| `deduplicationId` | Classic: ignorado (`publisherDeduplication = false`). Artemis: `_AMQ_DUPL_ID`; a duplicata responde sucesso e é descartada em silêncio. A cópia de `nack` não leva o id, senão o broker a descartaria. |
 | Sender | Uma session por sender, protegida por lock. Envio persistente e síncrono: no Classic, `useAsyncSend=false`; no Artemis, `blockOnDurableSend=true` (padrão). `maxBatchSize = 1`; o `sendAll` padrão do core basta. |
-| Tamanho | Não há limite fixo (`wireFormat.maxFrameSize` no Classic, 100 MiB por padrão): `maxMessageBytes` é configurado no sender, como no SNS. |
-| `checkAccess` | Abrir producer, consumer ou browser cria o destino. Por isso o adapter procura o destino no `DestinationSource` da conexão (advisories), sem criá-lo; um destino inexistente custa 2 s de espera. Exige uma `ActiveMQConnection`: atrás de pool (`pooled-jms`), lança `UnsupportedOperationException`. |
-| Java 21 | O `receive(timeout)` do cliente espera dentro de `synchronized` e prende a carrier thread de uma virtual thread durante o `maxWait`. No Java 24+ (JEP 491) isso não acontece. |
+| Tamanho | Não há limite fixo (`wireFormat.maxFrameSize` no Classic, 100 MiB por padrão; large messages no Artemis): `maxMessageBytes` é configurado no sender, como no SNS. |
+| `checkAccess` | Abrir producer, consumer ou browser cria o destino. Por isso o adapter consulta o broker sem criar nada. Classic: procura o destino no `DestinationSource` da conexão (advisories); um destino inexistente custa 2 s de espera. Artemis: `queueQuery` e `addressQuery` da session Core, que respondem na hora. Os dois exigem a conexão do cliente do broker: atrás de pool (`pooled-jms`), lançam `UnsupportedOperationException`. |
+| Java 21 | O `receive(timeout)` dos dois clientes espera dentro de `synchronized` e prende a carrier thread de uma virtual thread durante o `maxWait`. No Java 24+ (JEP 491) isso não acontece. |
 | Ciclo de vida | `close()` fecha as sessions do adapter. As mensagens pendentes voltam ao broker. |
 
 Topologia, completando o ADR-0003:
@@ -143,10 +144,10 @@ RabbitMQ 3.x e 4.x. O cliente AMQP 1.0 só entra se todos os brokers forem 4.x.
 |---|---|---|---|
 | `maxMessageBytes` | Configurado no adapter | Configurado no adapter | Configurado no adapter |
 | `maxBatchSize` | 1 | 1 | 1 |
-| `delayedRedelivery` | Só em `SCHEDULED`, por cópia | Sim, por cópia (a confirmar) | Não |
-| `maxRedeliveryDelay` | 12 h em `SCHEDULED`; zero em `IMMEDIATE` | A confirmar | Zero |
+| `delayedRedelivery` | Só em `SCHEDULED`, por cópia | Só em `SCHEDULED`, por cópia | Não |
+| `maxRedeliveryDelay` | 12 h em `SCHEDULED`; zero em `IMMEDIATE` | 12 h em `SCHEDULED`; zero em `IMMEDIATE` | Zero |
 | `nativeDeadLetter` | Não | Não | Não |
-| `orderedDelivery` | Só em `IMMEDIATE` | A confirmar | Não |
+| `orderedDelivery` | Só em `IMMEDIATE` | Só em `IMMEDIATE` | Não |
 | `publisherDeduplication` | Não | Sim | Não |
 | `reportsLeaseExpiredOnAck` | Sim (lease local) | Sim (lease local) | Sim (lease local) |
 
@@ -155,29 +156,32 @@ RabbitMQ 3.x e 4.x. O cliente AMQP 1.0 só entra se todos os brokers forem 4.x.
 - O contrato roda com broker real no CI. Classic: `GenericContainer` com
   `apache/activemq-classic:6.2.0` e `schedulerSupport` ligado; o
   `testcontainers-activemq` 2.x não está no repositório local, e o container
-  genérico basta. Artemis e RabbitMQ: o container de cada um, quando entrarem.
-- No starter, os tipos de provedor são `activemq-classic` (já existe), `artemis` e
-  `rabbitmq`. A conexão vem de um bean da aplicação (`ConnectionFactory` JMS,
+  genérico basta. Artemis: `GenericContainer` com `apache/activemq-artemis:2.40.0`
+  criado com `--no-autocreate`. Os testes criam endereços e filas, e o contrato
+  de destino inexistente roda. RabbitMQ: o container dele, quando entrar.
+- No starter, os tipos de provedor são `activemq-classic` e `artemis` (já existem)
+  e `rabbitmq`. A conexão vem de um bean da aplicação (`ConnectionFactory` JMS,
   `com.rabbitmq.client.ConnectionFactory`) ou da configuração.
 - Dependências: `messaging-jms` só depende de `jakarta.jms:jakarta.jms-api`; o
-  cliente do broker é de quem usa. `messaging-rabbitmq` depende de
+  cliente do broker (`activemq-client` ou `artemis-jakarta-client`) é opcional e
+  fica com quem usa. `messaging-rabbitmq` depende de
   `com.rabbitmq:amqp-client`.
 
 ### Pendências
 
-O spike F7 respondeu as do Classic ([achados](../spikes/f7-activemq-classic.md)).
-Continuam abertas:
+Os spikes F7 ([Classic](../spikes/f7-activemq-classic.md)) e F8
+([Artemis](../spikes/f8-activemq-artemis.md)) responderam as do ActiveMQ. Ficam
+para o RabbitMQ as do `messaging-rabbitmq`.
 
-| Pendência | Impacto |
-|---|---|
-| Artemis: devolução por session fechada, ordem de grupo, `_AMQ_DUPL_ID`, `checkAccess` | Coluna do Artemis nas capabilities |
-
-O starter ganhou o tipo `activemq-classic`, completando o ADR-0008:
+O starter ganhou os tipos `activemq-classic` e `artemis`, completando o ADR-0008:
 
 - A conexão vem de `broker-url` (com `user` e `password`) ou do bean
   `jakarta.jms.ConnectionFactory`. É uma por provider, aberta no startup e
   fechada no shutdown.
-- `topic` + `subscription` recebe da fila `Consumer.<subscription>.<topic>`.
+- `topic` + `subscription` recebe da fila `Consumer.<subscription>.<topic>` no
+  Classic e do FQQN `<topic>::<subscription>` no Artemis.
+- No Artemis, a `broker-url` ganha `consumerWindowSize=0` quando não define a
+  janela.
 - `redelivery: reschedule` vira `SCHEDULED`.
 - `lease` é o prazo local, com padrão de 60 s.
 - O pool de sessions usa `max-in-flight` 10, fixo por enquanto.
