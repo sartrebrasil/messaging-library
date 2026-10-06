@@ -30,8 +30,8 @@ public record MessagingProperties(Map<String, Provider> providers, Map<String, D
         destinations = destinations == null ? Map.of() : Map.copyOf(destinations);
     }
 
-    /** {@code activemq-classic} e {@code artemis} no YAML. */
-    public enum Type { AWS, AZURE, GCP, ACTIVEMQ_CLASSIC, ARTEMIS }
+    /** {@code activemq-classic}, {@code artemis} e {@code rabbitmq} no YAML. */
+    public enum Type { AWS, AZURE, GCP, ACTIVEMQ_CLASSIC, ARTEMIS, RABBITMQ }
 
     /**
      * Conexão com um provedor. Cada tipo usa só os seus campos:
@@ -46,8 +46,10 @@ public record MessagingProperties(Map<String, Provider> providers, Map<String, D
      * @param brokerUrl        ActiveMQ: URL do broker ({@code tcp://...}, {@code failover:(...)} no Classic); sem
      *                         ela, o bean {@code jakarta.jms.ConnectionFactory} da aplicação, sem pool por cima.
      *                         No Artemis, ganha {@code consumerWindowSize=0} quando não define a janela
-     * @param user             ActiveMQ: usuário da conexão
-     * @param password         ActiveMQ: senha de {@code user}
+     *                         RabbitMQ: URI AMQP ({@code amqp://host:5672/vhost}); sem ela, o bean
+     *                         {@code com.rabbitmq.client.ConnectionFactory}
+     * @param user             ActiveMQ e RabbitMQ: usuário da conexão
+     * @param password         ActiveMQ e RabbitMQ: senha de {@code user}
      */
     public record Provider(Type type, String region, URI endpoint, String accessKey, String secretKey,
                            String connectionString, String project, String emulatorHost, String brokerUrl,
@@ -77,25 +79,30 @@ public record MessagingProperties(Map<String, Provider> providers, Map<String, D
      *       <td>{@code topic} + {@code subscription} (fila {@code Consumer.<subscription>.<topic>}), senão {@code queue}</td></tr>
      *   <tr><td>artemis</td><td>{@code topic} (endereço multicast), senão {@code queue}</td>
      *       <td>{@code topic} + {@code subscription} (FQQN {@code <topic>::<subscription>}), senão {@code queue}</td></tr>
+     *   <tr><td>rabbitmq</td><td>{@code topic} (exchange, com {@code routing-key}), senão {@code queue}</td>
+     *       <td>{@code topic} + {@code subscription} (a fila ligada ao exchange), senão {@code queue}</td></tr>
      * </table>
      *
      * @param deadLetter      destino que recebe a cópia de {@code deadLetter} (todos menos o Service Bus, que é nativo)
      * @param require         capacidades exigidas; o startup falha se o adapter não tiver
      * @param sessions        Azure: entidade com sessions
      * @param redelivery      Azure e ActiveMQ: {@code nack} imediato ({@code ABANDON}, padrão) ou por cópia
-     *                        agendada ({@code RESCHEDULE}; no Azure, só filas)
+     *                        agendada ({@code RESCHEDULE}; no Azure, só filas). RabbitMQ: só {@code ABANDON}
      * @param maxMessageBytes SNS: {@code MaximumMessageSize} do tópico; Azure: limite da entidade (padrão 256 KB);
-     *                        ActiveMQ: limite do sender (padrão perto de 100 MiB, o {@code maxFrameSize} do broker)
+     *                        ActiveMQ: limite do sender (padrão perto de 100 MiB, o {@code maxFrameSize} do broker);
+     *                        RabbitMQ: {@code max_message_size} do broker (padrão 16 MiB)
      * @param ackDeadline     GCP: ack deadline da subscription (obrigatório para receber)
      * @param ordered         GCP: subscription com {@code enable_message_ordering}
      * @param exactlyOnce     GCP: subscription com exactly-once delivery
      * @param deadLetterQueue Azure: só recebe, da DLQ nativa da fila ou da subscription
-     * @param lease           ActiveMQ: prazo controlado pela lib até a mensagem voltar ao broker (padrão 60 s)
+     * @param lease           ActiveMQ e RabbitMQ: prazo controlado pela lib até a mensagem voltar ao broker
+     *                        (padrão 60 s)
+     * @param routingKey      RabbitMQ: routing key do envio ao exchange ({@code topic}); padrão {@code ""}
      */
     public record Destination(String provider, String queueUrl, String topicArn, String queue, String topic,
                               String subscription, String deadLetter, Set<Requirement> require, boolean sessions,
                               Redelivery redelivery, Long maxMessageBytes, Duration ackDeadline, boolean ordered,
-                              boolean exactlyOnce, boolean deadLetterQueue, Duration lease) {
+                              boolean exactlyOnce, boolean deadLetterQueue, Duration lease, String routingKey) {
 
         public Destination {
             require = require == null ? Set.of() : Set.copyOf(require);
