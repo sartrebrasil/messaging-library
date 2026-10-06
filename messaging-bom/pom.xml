@@ -40,6 +40,11 @@
       </dependency>
       <dependency>
         <groupId>com.example</groupId>
+        <artifactId>messaging-jms</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.example</groupId>
         <artifactId>messaging-spring-boot-starter</artifactId>
         <version>${project.version}</version>
       </dependency>
