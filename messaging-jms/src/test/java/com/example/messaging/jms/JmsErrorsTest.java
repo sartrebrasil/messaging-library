@@ -23,6 +23,9 @@ class JmsErrorsTest {
         assertInstanceOf(AccessDeniedException.class, JmsErrors.map("op", new JMSSecurityException("x")));
         assertInstanceOf(ThrottledException.class, JmsErrors.map("op", new ResourceAllocationException("x")));
         assertEquals("jms", JmsErrors.map("op", new JMSException("x")).provider());
+        // Artemis sem auto-create
+        assertInstanceOf(DestinationNotFoundException.class,
+                JmsErrors.map("op", new JMSException("There is no queue with name nao-existe")));
     }
 
     @Test

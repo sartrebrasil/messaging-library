@@ -32,13 +32,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * Recebimento de uma fila do ActiveMQ Classic por Jakarta Messaging, com lease controlado pela
- * lib (ADR-0009). Serve também para a subscription de um Virtual Topic
- * ({@code Consumer.<s>.VirtualTopic.<t>}).
+ * Recebimento de uma fila do ActiveMQ Classic ou Artemis por Jakarta Messaging, com lease
+ * controlado pela lib (ADR-0009). Serve também para a subscription de um tópico
+ * ({@link JmsDialect#subscriptionQueue}).
  *
  * <ul>
  *   <li>Um pool de até {@code maxInFlight} sessions {@code CLIENT_ACKNOWLEDGE}, cada uma com um
- *       consumer de prefetch 0 e no máximo uma mensagem pendente. O ack confirma só aquela
+ *       consumer de prefetch 0 ({@link JmsDialect}) e no máximo uma mensagem pendente. O ack confirma só aquela
  *       mensagem, e o ack de uma não espera o {@code receive} de outra. Com o pool cheio,
  *       {@code receive} espera uma confirmação até {@code maxWait}.</li>
  *   <li>O broker não tem lease: a mensagem fica presa até a session fechar. O receiver conta o
@@ -46,14 +46,15 @@ import java.util.concurrent.locks.ReentrantLock;
  *       {@code JMSMessageID} e soma uma entrega. {@code extendLease} só move o prazo local, e
  *       {@code ack} depois do prazo sempre lança {@link LeaseExpiredException}.</li>
  *   <li>{@code nack(0)} também fecha a session. Com {@link Redelivery#SCHEDULED}, {@code nack} com
- *       atraso envia uma cópia com {@code AMQ_SCHEDULED_DELAY} e depois confirma a original: a cópia
- *       tem {@code JMSMessageID} novo e o atributo {@code delivery_count}. Exige
- *       {@code schedulerSupport="true"} no broker; sem ele, o broker entrega a cópia na hora.</li>
+ *       atraso envia uma cópia agendada e depois confirma a original: a cópia tem
+ *       {@code JMSMessageID} novo e o atributo {@code delivery_count}. Artemis: {@code deliveryDelay}.
+ *       Classic: {@code AMQ_SCHEDULED_DELAY}, que exige {@code schedulerSupport="true"} no broker; sem
+ *       ele, o broker entrega a cópia na hora.</li>
  *   <li>Ordem por {@code JMSXGroupID} (message groups): vale com {@link Redelivery#IMMEDIATE}, em
  *       que toda reentrega volta à frente do grupo. A cópia agendada iria para o fim da fila.</li>
  *   <li>{@code deadLetter} envia uma cópia ao {@code deadLetterSender} e depois confirma. A DLQ do
  *       broker ({@code maximumRedeliveries}) continua valendo para reentregas por session fechada.</li>
- *   <li>Java 21: o cliente do Classic espera mensagens com {@code Object.wait} dentro de
+ *   <li>Java 21: os clientes do Classic e do Artemis esperam mensagens com {@code Object.wait} dentro de
  *       {@code synchronized}, o que prende a carrier thread de uma virtual thread durante o
  *       {@code maxWait}. No Java 24+ (JEP 491) não prende.</li>
  * </ul>
@@ -71,9 +72,9 @@ public final class JmsMessageReceiver implements MessageReceiver {
     public static final Duration DEFAULT_LEASE = Duration.ofSeconds(60);
     public static final int DEFAULT_MAX_IN_FLIGHT = 10;
     static final Duration MAX_REDELIVERY_DELAY = Duration.ofHours(12);
-    static final String SCHEDULED_DELAY = "AMQ_SCHEDULED_DELAY";
 
     private final Connection connection;
+    private final JmsDialect dialect;
     private final String queue;
     private final Duration lease;
     private final int maxInFlight;
@@ -87,27 +88,31 @@ public final class JmsMessageReceiver implements MessageReceiver {
             Thread.ofVirtual().name("messaging-jms-lease-", 0).factory());
     private volatile boolean closed;
 
-    public JmsMessageReceiver(Connection connection, String queue) {
-        this(connection, queue, DEFAULT_LEASE, DEFAULT_MAX_IN_FLIGHT, Redelivery.IMMEDIATE, null);
+    public JmsMessageReceiver(Connection connection, JmsDialect dialect, String queue) {
+        this(connection, dialect, queue, DEFAULT_LEASE, DEFAULT_MAX_IN_FLIGHT, Redelivery.IMMEDIATE, null);
     }
 
     /**
      * A conexão continua de quem a criou: {@link #close()} não a fecha. O receiver chama
      * {@code connection.start()}.
      *
+     * @param queue            fila; no Artemis, também FQQN {@code <endereço>::<fila>}
      * @param lease            prazo de cada mensagem até voltar ao broker
      * @param maxInFlight      mensagens pendentes por receiver (uma session cada)
      * @param deadLetterSender destino de {@link #deadLetter}; {@code null} sem DLQ
+     * @throws IllegalArgumentException Artemis com {@code consumerWindowSize} diferente de 0
      */
-    public JmsMessageReceiver(Connection connection, String queue, Duration lease, int maxInFlight,
-                              Redelivery redelivery, MessageSender deadLetterSender) {
+    public JmsMessageReceiver(Connection connection, JmsDialect dialect, String queue, Duration lease,
+                              int maxInFlight, Redelivery redelivery, MessageSender deadLetterSender) {
         if (lease.isNegative() || lease.isZero()) {
             throw new IllegalArgumentException("lease precisa ser positivo: " + lease);
         }
         if (maxInFlight < 1) {
             throw new IllegalArgumentException("maxInFlight precisa ser >= 1: " + maxInFlight);
         }
+        dialect.requireNoPrefetch(connection);
         this.connection = connection;
+        this.dialect = dialect;
         this.queue = queue;
         this.lease = lease;
         this.maxInFlight = maxInFlight;
@@ -195,7 +200,7 @@ public final class JmsMessageReceiver implements MessageReceiver {
             if (slot.consumer == null) {
                 connection.start();
                 slot.session = connection.createSession(false, Session.CLIENT_ACKNOWLEDGE);
-                slot.consumer = slot.session.createConsumer(slot.session.createQueue(consumerQueue()));
+                slot.consumer = slot.session.createConsumer(slot.session.createQueue(dialect.consumerQueue(queue)));
             }
             long millis = deadline == 0 ? 0 : TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
             // receive(0) bloquearia para sempre
@@ -249,9 +254,9 @@ public final class JmsMessageReceiver implements MessageReceiver {
                 recycle(slot);
                 return;
             }
-            BytesMessage copy = JmsCodec.copy(slot.session, message, Long.MAX_VALUE);
-            copy.setLongProperty(SCHEDULED_DELAY, redeliverAfter.toMillis());
-            try (MessageProducer producer = slot.session.createProducer(slot.session.createQueue(physicalQueue()))) {
+            BytesMessage copy = JmsCodec.copy(slot.session, dialect, message);
+            try (MessageProducer producer = slot.session.createProducer(slot.session.createQueue(queue))) {
+                dialect.delay(producer, copy, redeliverAfter);
                 // Envio antes do ack: falha entre os dois gera duplicata, nunca perda (ADR-0005)
                 producer.send(copy);
             }
@@ -292,18 +297,18 @@ public final class JmsMessageReceiver implements MessageReceiver {
         ack(message);
     }
 
-    /** Lista a fila no {@code DestinationSource} do Classic, sem criá-la nem consumir (ADR-0009). */
+    /** Confere que a fila existe sem criá-la nem consumir (ver {@link JmsDialect}). */
     @Override
     public void checkAccess() {
         ensureOpen();
-        ActiveMqDestinations.check(connection, physicalQueue(), false);
+        dialect.checkAccess(connection, queue, false);
     }
 
     @Override
     public Capabilities capabilities() {
         boolean scheduled = redelivery == Redelivery.SCHEDULED;
         return new Capabilities(JmsMessageSender.DEFAULT_MAX_MESSAGE_BYTES, 1, scheduled,
-                scheduled ? MAX_REDELIVERY_DELAY : Duration.ZERO, false, !scheduled, false, true);
+                scheduled ? MAX_REDELIVERY_DELAY : Duration.ZERO, false, !scheduled, dialect.deduplicates(), true);
     }
 
     /** Fecha as sessions: as mensagens pendentes voltam ao broker. Não fecha a conexão. */
@@ -388,15 +393,6 @@ public final class JmsMessageReceiver implements MessageReceiver {
                 // a session já pode ter caído com a conexão
             }
         }
-    }
-
-    /** Prefetch 0: sem ele o broker manda mensagens a mais para o buffer do consumer, sem lease. */
-    private String consumerQueue() {
-        return queue + (queue.contains("?") ? "&" : "?") + "consumer.prefetchSize=0";
-    }
-
-    private String physicalQueue() {
-        return queue.contains("?") ? queue.substring(0, queue.indexOf('?')) : queue;
     }
 
     private Handle own(ReceivedMessage message) {
