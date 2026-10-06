@@ -122,27 +122,32 @@ Terraform. O contrato roda com auto-create ligado e pula
 
 Cliente `com.rabbitmq:amqp-client` 5.x, o mesmo da outbox-library. Funciona em
 RabbitMQ 3.x e 4.x. O cliente AMQP 1.0 só entra se todos os brokers forem 4.x.
+Os achados que mudaram esta seção estão no [spike F9](../spikes/f9-rabbitmq.md).
 
 | Tema | Regra |
 |---|---|
-| Receiver | Um channel por receiver, com `basicQos(max-in-flight)` e `basicConsume` alimentando um buffer. O `receive` lê do buffer até `maxWait`. O lease local começa quando a mensagem sai do buffer. |
-| `ack` / `nack(0)` / lease vencido | `basicAck` ou `basicNack(requeue=true)` no channel da entrega, protegido por lock. Um delivery tag desconhecido derruba o channel (406), então o adapter só confirma tags que ainda tem pendentes. |
-| `nack` com atraso | Não há atraso nativo: o plugin de delayed exchange é da comunidade, e a fila de retry com TTL e DLX é topologia. Fica `delayedRedelivery = false`, como o `ABANDON` do Service Bus. |
-| `deadLetter` | Cópia para o sender de DLQ e depois `ack`. O `basicReject(requeue=false)` para a DLX perderia o `reason`. |
-| `deliveryCount` | `x-delivery-count` em quorum queue; vazio em classic queue. |
-| `messageId` | O broker não gera: o sender grava um UUID em `message-id`. Ele se mantém no requeue. |
-| Sender | Publisher confirms e `mandatory=true` com `ReturnListener`: sem eles, mensagem sem rota é descartada em silêncio. Fila: exchange padrão com routing key igual ao nome da fila. Tópico: exchange. Um channel por sender, protegido por lock. |
+| Receiver | Um channel por receiver e pull de verdade: `basicGet` até `maxMessages`. Com a fila vazia, tenta de novo a cada 100 ms até `maxWait`. Não há consumer registrado: com `basicConsume` e prefetch, a mensagem devolvida no fim do lease voltaria ao buffer do mesmo receiver (F9), e um receiver parado seguraria mensagens. |
+| `ack` / `nack(0)` / lease vencido | `basicAck` ou `basicNack(requeue=true)` no channel da entrega, protegido por lock. Um delivery tag desconhecido derruba o channel (406) e devolve tudo o que está pendente nele. Por isso o adapter tira o tag da lista de pendentes antes de confirmar, e nunca confirma um tag duas vezes. |
+| `nack` com atraso | Não há atraso nativo: o plugin de delayed exchange é da comunidade, e a fila de retry com TTL e DLX é topologia. Fica `delayedRedelivery = false`, como o `ABANDON` do Service Bus. O atraso é ignorado. |
+| `deadLetter` | Cópia para o sender de DLQ e depois `ack`. O `basicReject(requeue=false)` para a DLX perderia o `reason`. Mensagem lida de uma DLQ da DLX traz `x-first-death-reason` em `deadLetter().reason()`. |
+| `deliveryCount` | Quorum queue: `x-delivery-count + 1`, porque o header conta as entregas anteriores e falta na primeira. Classic queue: 1 na primeira entrega, vazio depois. No 4.x, a quorum queue tem `delivery-limit` 20 por padrão. |
+| `messageId` | O broker não gera: o sender grava um UUID em `message-id`. Ele se mantém no requeue. Mensagem de outro produtor sem `message-id` recebe um UUID a cada entrega. |
+| Sender | Publisher confirms. Fila: exchange padrão, routing key igual ao nome da fila e `mandatory` com `ReturnListener`. O `NO_ROUTE` chega antes do confirm e vira `DestinationNotFoundException`. Tópico: exchange com routing key fixa na construção e sem `mandatory`: exchange sem fila ligada descarta, como tópico sem subscriptions. Um channel por sender, protegido por lock e recriado depois de erro. |
+| Atributos | Headers AMQP. Na leitura, os headers `x-*` são do broker e ficam fora dos atributos. `orderingKey` e `deduplicationId` são ignorados. |
 | Ordem e deduplicação | `orderedDelivery = false`, `publisherDeduplication = false`. |
-| Reconexão automática | Depois de reconectar, o cliente descarta acks com tags antigos sem avisar. O adapter trata as mensagens do channel antigo como lease vencido. |
-| Alarme de memória ou disco | `connection.blocked` trava o publish. O adapter usa timeout de confirm e lança `ThrottledException`. |
+| Reconexão e channel fechado | Cada channel tem uma geração. Quando ele fecha (queda, reconexão automática, erro do broker), as confirmações das mensagens dele lançam `LeaseExpiredException`, e o próximo `receive` abre outro channel. O channel antigo, se a reconexão automática o reabrir, é abortado. |
+| Alarme de memória ou disco | `connection.blocked` trava o publish. Um confirm que não chega em 30 s lança `MessagingException` com `retryable = true`. |
+| `consumer_timeout` | Não verificado se o broker aplica o timeout a entregas de `basic.get`. Por segurança, mantenha o maior `maxTotal` de `keepAlive` abaixo dele (padrão 30 min). |
 | `checkAccess` | `queueDeclarePassive` ou `exchangeDeclarePassive` num channel descartável, porque um 404 fecha o channel. |
-| Erros | Reply code 404 = `DestinationNotFoundException`, 403 = `AccessDeniedException`, 406 em ack = `LeaseExpiredException`. |
+| Tamanho | `max_message_size` do broker, 16 MiB por padrão no 4.x: `maxMessageBytes` é configurado no sender. Acima do limite do broker, o 406 vira `MessageTooLargeException`. |
+| Erros | Reply code 404 = `DestinationNotFoundException`, 403 = `AccessDeniedException`, 406 com "max size" = `MessageTooLargeException`, 406 ou channel fechado numa confirmação = `LeaseExpiredException`. |
+| Dependência | O `amqp-client` 5.35 declara Netty 4.2 como transporte opcional, e ele se mistura ao Netty 4.1 do Artemis no mesmo classpath. O módulo exclui `io.netty:*` e usa o IO por socket padrão. |
 
 ### Capabilities
 
 | Campo | ActiveMQ Classic | ActiveMQ Artemis | RabbitMQ |
 |---|---|---|---|
-| `maxMessageBytes` | Configurado no adapter | Configurado no adapter | Configurado no adapter |
+| `maxMessageBytes` | Configurado no adapter | Configurado no adapter | Configurado no adapter (16 MiB padrão) |
 | `maxBatchSize` | 1 | 1 | 1 |
 | `delayedRedelivery` | Só em `SCHEDULED`, por cópia | Só em `SCHEDULED`, por cópia | Não |
 | `maxRedeliveryDelay` | 12 h em `SCHEDULED`; zero em `IMMEDIATE` | 12 h em `SCHEDULED`; zero em `IMMEDIATE` | Zero |
@@ -158,22 +163,26 @@ RabbitMQ 3.x e 4.x. O cliente AMQP 1.0 só entra se todos os brokers forem 4.x.
   `testcontainers-activemq` 2.x não está no repositório local, e o container
   genérico basta. Artemis: `GenericContainer` com `apache/activemq-artemis:2.40.0`
   criado com `--no-autocreate`. Os testes criam endereços e filas, e o contrato
-  de destino inexistente roda. RabbitMQ: o container dele, quando entrar.
-- No starter, os tipos de provedor são `activemq-classic` e `artemis` (já existem)
-  e `rabbitmq`. A conexão vem de um bean da aplicação (`ConnectionFactory` JMS,
+  de destino inexistente roda. RabbitMQ: `GenericContainer` com
+  `rabbitmq:4.1-management-alpine` e quorum queues; o contrato de destino
+  inexistente roda.
+- No starter, os tipos de provedor são `activemq-classic`, `artemis` e
+  `rabbitmq`. A conexão vem de um bean da aplicação (`ConnectionFactory` JMS,
   `com.rabbitmq.client.ConnectionFactory`) ou da configuração.
 - Dependências: `messaging-jms` só depende de `jakarta.jms:jakarta.jms-api`; o
   cliente do broker (`activemq-client` ou `artemis-jakarta-client`) é opcional e
   fica com quem usa. `messaging-rabbitmq` depende de
-  `com.rabbitmq:amqp-client`.
+  `com.rabbitmq:amqp-client`, sem o Netty.
 
 ### Pendências
 
 Os spikes F7 ([Classic](../spikes/f7-activemq-classic.md)) e F8
-([Artemis](../spikes/f8-activemq-artemis.md)) responderam as do ActiveMQ. Ficam
-para o RabbitMQ as do `messaging-rabbitmq`.
+([Artemis](../spikes/f8-activemq-artemis.md)) responderam as do ActiveMQ, e o F9
+([RabbitMQ](../spikes/f9-rabbitmq.md)) as do RabbitMQ. Continua aberta só a
+aplicação do `consumer_timeout` a entregas de `basic.get`.
 
-O starter ganhou os tipos `activemq-classic` e `artemis`, completando o ADR-0008:
+O starter ganhou os tipos `activemq-classic`, `artemis` e `rabbitmq`, completando
+o ADR-0008:
 
 - A conexão vem de `broker-url` (com `user` e `password`) ou do bean
   `jakarta.jms.ConnectionFactory`. É uma por provider, aberta no startup e
@@ -182,6 +191,12 @@ O starter ganhou os tipos `activemq-classic` e `artemis`, completando o ADR-0008
   Classic e do FQQN `<topic>::<subscription>` no Artemis.
 - No Artemis, a `broker-url` ganha `consumerWindowSize=0` quando não define a
   janela.
+- RabbitMQ:
+  - a `broker-url` é a URI AMQP; sem ela, o starter usa o bean
+    `com.rabbitmq.client.ConnectionFactory`;
+  - `topic` é o exchange e `routing-key` a routing key do envio;
+  - `subscription` é a fila ligada ao exchange;
+  - `redelivery: reschedule` é recusado no startup.
 - `redelivery: reschedule` vira `SCHEDULED`.
 - `lease` é o prazo local, com padrão de 60 s.
 - O pool de sessions usa `max-in-flight` 10, fixo por enquanto.

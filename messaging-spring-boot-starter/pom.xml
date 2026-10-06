@@ -67,6 +67,12 @@
       <version>${project.version}</version>
       <optional>true</optional>
     </dependency>
+    <dependency>
+      <groupId>com.example</groupId>
+      <artifactId>messaging-rabbitmq</artifactId>
+      <version>${project.version}</version>
+      <optional>true</optional>
+    </dependency>
     <!-- Cliente do broker de cada tipo (activemq-classic, artemis): a aplicação traz o seu -->
     <dependency>
       <groupId>org.apache.activemq</groupId>

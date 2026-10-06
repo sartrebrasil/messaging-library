@@ -40,10 +40,11 @@ public final class MessagingDestinations implements AutoCloseable {
             Type.AZURE, "com.example.messaging.azure.ServiceBusMessageSender",
             Type.GCP, "com.example.messaging.gcp.PubSubMessageSender",
             Type.ACTIVEMQ_CLASSIC, "com.example.messaging.jms.JmsMessageSender",
-            Type.ARTEMIS, "com.example.messaging.jms.JmsMessageSender");
+            Type.ARTEMIS, "com.example.messaging.jms.JmsMessageSender",
+            Type.RABBITMQ, "com.example.messaging.rabbitmq.RabbitMessageSender");
     private static final Map<Type, String> MODULES = Map.of(
             Type.AWS, "messaging-aws", Type.AZURE, "messaging-azure", Type.GCP, "messaging-gcp",
-            Type.ACTIVEMQ_CLASSIC, "messaging-jms", Type.ARTEMIS, "messaging-jms");
+            Type.ACTIVEMQ_CLASSIC, "messaging-jms", Type.ARTEMIS, "messaging-jms", Type.RABBITMQ, "messaging-rabbitmq");
     /** Cliente do broker que o messaging-jms usa em cada tipo: classe que prova a dependência e o artefato. */
     private static final Map<Type, String[]> BROKER_CLIENTS = Map.of(
             Type.ACTIVEMQ_CLASSIC, new String[]{"org.apache.activemq.ActiveMQConnectionFactory",
@@ -153,7 +154,7 @@ public final class MessagingDestinations implements AutoCloseable {
         properties.providers().forEach((name, provider) -> {
             if (provider.type() == null) {
                 problems.add("messaging.providers." + name
-                        + ".type é obrigatório (aws, azure, gcp, activemq-classic ou artemis)");
+                        + ".type é obrigatório (aws, azure, gcp, activemq-classic, artemis ou rabbitmq)");
             } else if (!ClassUtils.isPresent(ADAPTERS.get(provider.type()), getClass().getClassLoader())) {
                 problems.add("messaging.providers." + name + ": adicione a dependência " + MODULES.get(provider.type()));
             } else if (BROKER_CLIENTS.containsKey(provider.type())
@@ -171,6 +172,7 @@ public final class MessagingDestinations implements AutoCloseable {
                 case AZURE -> new AzureProviderFactory(name, provider, beans);
                 case GCP -> new GcpProviderFactory(name, provider);
                 case ACTIVEMQ_CLASSIC, ARTEMIS -> new JmsProviderFactory(name, provider, beans);
+                case RABBITMQ -> new RabbitProviderFactory(name, provider, beans);
             });
         });
     }
@@ -223,7 +225,7 @@ public final class MessagingDestinations implements AutoCloseable {
                 }
                 unexpected(prefix, problems, "queue-url", d.queueUrl(), "topic-arn", d.topicArn(), "queue", d.queue());
             }
-            case ACTIVEMQ_CLASSIC, ARTEMIS -> {
+            case ACTIVEMQ_CLASSIC, ARTEMIS, RABBITMQ -> {
                 if (d.queue() == null && d.topic() == null) {
                     problems.add(prefix + ": defina queue ou topic");
                 }
@@ -233,13 +235,19 @@ public final class MessagingDestinations implements AutoCloseable {
                 if (type == Type.ACTIVEMQ_CLASSIC && d.topic() != null && !d.topic().startsWith(VIRTUAL_TOPIC)) {
                     problems.add(prefix + ".topic precisa ser um Virtual Topic (" + VIRTUAL_TOPIC + "<nome>)");
                 }
+                if (type == Type.RABBITMQ && d.redelivery() == Redelivery.RESCHEDULE) {
+                    problems.add(prefix + ".redelivery=RESCHEDULE: o RabbitMQ não tem atraso no nack");
+                }
                 if (d.lease() != null && (d.lease().isNegative() || d.lease().isZero())) {
                     problems.add(prefix + ".lease precisa ser positivo");
                 }
                 unexpected(prefix, problems, "queue-url", d.queueUrl(), "topic-arn", d.topicArn());
             }
         }
-        if (d.lease() != null && type != Type.ACTIVEMQ_CLASSIC && type != Type.ARTEMIS) {
+        if (d.routingKey() != null && (type != Type.RABBITMQ || d.topic() == null)) {
+            problems.add(prefix + ".routing-key só vale para o RabbitMQ com topic (exchange)");
+        }
+        if (d.lease() != null && type != Type.ACTIVEMQ_CLASSIC && type != Type.ARTEMIS && type != Type.RABBITMQ) {
             problems.add(prefix + ".lease só vale para o ActiveMQ; nos outros, o lease é do destino");
         }
         if (d.sessions() && type != Type.AZURE) {
