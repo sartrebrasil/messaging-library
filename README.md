@@ -2,7 +2,7 @@
 
 Abstração de filas e tópicos para Java 21: uma API única sobre os SDKs oficiais da AWS
 (SQS, SNS), da Azure (Service Bus) e do Google Cloud (Pub/Sub), e sobre o cliente Jakarta Messaging
-do ActiveMQ (Classic e Artemis). Trocar de provedor muda a
+do ActiveMQ (Classic e Artemis) e do RabbitMQ. Trocar de provedor muda a
 dependência e a configuração, não o código. O que não dá para igualar entre provedores fica
 explícito em `Capabilities`.
 
@@ -23,6 +23,7 @@ quem usa (a inbox-library, por exemplo).
 | `messaging-azure` | Service Bus: fila, tópico, subscription, sessions e DLQ nativa. |
 | `messaging-gcp` | Pub/Sub: publisher com ordem e pull síncrono. |
 | `messaging-jms` | ActiveMQ Classic e Artemis por Jakarta Messaging (`JmsDialect`): fila e tópico, com lease controlado pela lib (ADR-0009). Exige o cliente do broker na aplicação: `org.apache.activemq:activemq-client` ou `artemis-jakarta-client`. |
+| `messaging-rabbitmq` | RabbitMQ (AMQP 0-9-1, `amqp-client` sem Netty): fila e exchange, receive por `basicGet`, lease controlado pela lib (ADR-0009). |
 | `messaging-spring-boot-starter` | Destinos nomeados por properties (`messaging.*`), métricas, `traceparent` e health. Spring Boot 4. |
 | `messaging-bom` | Alinha as versões dos módulos acima. |
 
@@ -90,6 +91,11 @@ MessageSender topic = JmsMessageSender.forTopic(connection, dialect, "VirtualTop
 MessageReceiver receiver = new JmsMessageReceiver(connection, dialect,
         dialect.subscriptionQueue("VirtualTopic.eventos", "faturamento"),   // Artemis: "eventos::faturamento"
         Duration.ofSeconds(60), 10, JmsMessageReceiver.Redelivery.IMMEDIATE, dlqSender);
+
+// RabbitMQ: a Connection é de quem a criou; a subscription é a fila ligada ao exchange
+MessageSender sender = RabbitMessageSender.forQueue(connection, "pedidos", RabbitMessageSender.DEFAULT_MAX_MESSAGE_BYTES);
+MessageSender topic = RabbitMessageSender.forExchange(connection, "eventos", "pedido.criado", 1024 * 1024);
+MessageReceiver receiver = new RabbitMessageReceiver(connection, "faturamento", Duration.ofSeconds(60), dlqSender);
 ```
 
 O mesmo código vale para qualquer provedor:
@@ -125,15 +131,15 @@ Regras comuns:
 `sender.capabilities()` e `receiver.capabilities()` devolvem isso em tempo de execução, e o
 starter pode exigir no startup (`require`).
 
-| | SQS | SNS | Service Bus | Pub/Sub | ActiveMQ (Classic e Artemis) |
-|---|---|---|---|---|---|
-| Tamanho máximo | 1 MiB (corpo + atributos) | `MaximumMessageSize` do tópico (256 KiB padrão, até 1 MiB) | 256 KB Standard; Premium configurável | 10 MB | Configurado no sender (Classic: `maxFrameSize` do broker, 100 MiB padrão) |
-| `nack` com atraso | Sim, até 12 h desde o primeiro receive | Não se aplica | Só em `RESCHEDULE` (cópia agendada), sem sessions | Sim, até 600 s | Só em `SCHEDULED` (cópia agendada; no Classic, exige `schedulerSupport` no broker), até 12 h |
-| Dead letter explícito | Cópia para o sender de DLQ + ack | Não se aplica | Nativo | Cópia para o sender de DLQ + ack | Cópia para o sender de DLQ + ack |
-| Ordem por `orderingKey` | Só FIFO | Só FIFO | Só com sessions | Sim (subscription com ordering) | `JMSXGroupID`, só em `IMMEDIATE` |
-| Deduplicação por `deduplicationId` | Só FIFO (5 min) | Só FIFO | Sim (duplicate detection na entidade) | Não | Só Artemis (`_AMQ_DUPL_ID`) |
-| `ack` com lease vencido lança erro | Não | Não se aplica | Sim | Só com exactly-once | Sim (lease local) |
-| Lease | Visibility timeout da fila | Não se aplica | Lock duration (máx. 5 min); com sessions, o lock da session | Ack deadline da subscription (10–600 s) | Prazo local do receiver (padrão 60 s): vencido, a session fecha e o broker reentrega |
+| | SQS | SNS | Service Bus | Pub/Sub | ActiveMQ (Classic e Artemis) | RabbitMQ |
+|---|---|---|---|---|---|---|
+| Tamanho máximo | 1 MiB (corpo + atributos) | `MaximumMessageSize` do tópico (256 KiB padrão, até 1 MiB) | 256 KB Standard; Premium configurável | 10 MB | Configurado no sender (Classic: `maxFrameSize` do broker, 100 MiB padrão) | Configurado no sender (`max_message_size` do broker, 16 MiB padrão no 4.x) |
+| `nack` com atraso | Sim, até 12 h desde o primeiro receive | Não se aplica | Só em `RESCHEDULE` (cópia agendada), sem sessions | Sim, até 600 s | Só em `SCHEDULED` (cópia agendada; no Classic, exige `schedulerSupport` no broker), até 12 h | Não: `nack` é sempre imediato |
+| Dead letter explícito | Cópia para o sender de DLQ + ack | Não se aplica | Nativo | Cópia para o sender de DLQ + ack | Cópia para o sender de DLQ + ack | Cópia para o sender de DLQ + ack |
+| Ordem por `orderingKey` | Só FIFO | Só FIFO | Só com sessions | Sim (subscription com ordering) | `JMSXGroupID`, só em `IMMEDIATE` | Não |
+| Deduplicação por `deduplicationId` | Só FIFO (5 min) | Só FIFO | Sim (duplicate detection na entidade) | Não | Só Artemis (`_AMQ_DUPL_ID`) | Não |
+| `ack` com lease vencido lança erro | Não | Não se aplica | Sim | Só com exactly-once | Sim (lease local) | Sim (lease local) |
+| Lease | Visibility timeout da fila | Não se aplica | Lock duration (máx. 5 min); com sessions, o lock da session | Ack deadline da subscription (10–600 s) | Prazo local do receiver (padrão 60 s): vencido, a session fecha e o broker reentrega | Prazo local do receiver (padrão 60 s): vencido, `basicNack(requeue)` |
 
 O Service Bus com sessions segura uma session por instância de receiver: paralelismo entre
 sessions é ter mais instâncias. Como ele não tem atraso no `nack` com ordem, quem consome espera
@@ -148,6 +154,12 @@ Os dois brokers criam destinos no primeiro uso, por padrão. Com auto-create lig
 `checkAccess` informa destino inexistente. No Artemis, a fila multicast de uma subscription precisa
 existir antes do primeiro envio. No Java 21, o `receive` dos clientes prende a carrier thread de uma
 virtual thread durante o `maxWait`; no Java 24+ não prende.
+
+No RabbitMQ, o receiver faz pull com `basicGet`, sem consumer registrado. Com a fila vazia, tenta
+de novo a cada 100 ms até `maxWait`. Um receiver parado não segura mensagens. `deliveryCount` só
+existe em quorum queue; em classic queue, fica vazio a partir da segunda entrega. O sender de fila
+usa `mandatory`, então fila inexistente lança `DestinationNotFoundException`. O sender de exchange
+não usa `mandatory`: exchange sem fila ligada descarta, como um tópico sem subscriptions.
 
 ## Mensagem
 
@@ -187,7 +199,7 @@ Adicione o starter e os adapters dos provedores usados:
 messaging:
   providers:
     aws:
-      type: aws                # aws | azure | gcp | activemq-classic | artemis
+      type: aws                # aws | azure | gcp | activemq-classic | artemis | rabbitmq
       region: sa-east-1
     azure:
       type: azure
@@ -236,6 +248,10 @@ messaging:
       queue: notas-dlq
 ```
 
+No RabbitMQ (`type: rabbitmq`), `broker-url` é a URI AMQP (`amqp://host:5672/vhost`), `topic` é o
+exchange, `routing-key` a routing key do envio e `subscription` a fila ligada ao exchange.
+`redelivery: reschedule` é recusado no startup, porque o RabbitMQ não tem atraso no `nack`.
+
 No Artemis (`type: artemis`), `topic` é o endereço multicast e `topic` + `subscription` recebe do
 FQQN `<topic>::<subscription>`. A `broker-url` ganha `consumerWindowSize=0` quando não define a
 janela.
@@ -256,10 +272,11 @@ try (MessageReceiver receiver = destinations.receiver("pedidos")) {   // instân
 | `gcp` | `topic` | `subscription` (exige `ack-deadline`) |
 | `activemq-classic` | `topic` (`VirtualTopic.*`), senão `queue` | `topic` + `subscription` (fila `Consumer.<subscription>.<topic>`), senão `queue` |
 | `artemis` | `topic` (endereço multicast), senão `queue` | `topic` + `subscription` (FQQN `<topic>::<subscription>`), senão `queue` |
+| `rabbitmq` | `topic` (exchange, com `routing-key`), senão `queue` | `topic` + `subscription` (a fila ligada ao exchange), senão `queue` |
 
-Outras propriedades do destino: `max-message-bytes` (SNS, Service Bus e ActiveMQ), `sessions`
-(Service Bus), `redelivery: abandon | reschedule` (Service Bus e ActiveMQ), `ordered` e
-`exactly-once` (Pub/Sub), `lease` (ActiveMQ, padrão 60 s).
+Outras propriedades do destino: `max-message-bytes` (SNS, Service Bus, ActiveMQ e RabbitMQ),
+`sessions` (Service Bus), `redelivery: abandon | reschedule` (Service Bus e ActiveMQ), `ordered` e
+`exactly-once` (Pub/Sub), `lease` (ActiveMQ e RabbitMQ, padrão 60 s), `routing-key` (RabbitMQ).
 
 No ActiveMQ, o starter abre uma conexão por provider no startup e a fecha no shutdown. Se o bean
 `ConnectionFactory` tiver pool por cima (`pooled-jms`, `CachingConnectionFactory`), o health check
@@ -290,6 +307,7 @@ falha, porque o `checkAccess` precisa da `ActiveMQConnection`. Nesse caso, use `
 | Pub/Sub | `roles/pubsub.publisher` | `roles/pubsub.subscriber` | Nenhuma extra (`TestIamPermissions`) |
 | ActiveMQ Classic | `write` | `read` (e `write` na fila, para o `nack` em `SCHEDULED`) | Leitura das advisories (`ActiveMQ.Advisory.>`) |
 | ActiveMQ Artemis | `send` | `consume` (e `send` na fila, para o `nack` em `SCHEDULED`) | Nenhuma extra (`queueQuery`/`addressQuery`) |
+| RabbitMQ | `write` no exchange | `read` na fila (e `write` no exchange da DLQ, para `deadLetter`) | Acesso ao vhost (`queueDeclarePassive`/`exchangeDeclarePassive`; permissão exigida a confirmar) |
 
 O receiver SQS lê o visibility timeout da fila com `GetQueueAttributes`. A DLQ automática por
 contagem de entregas (redrive policy, `MaxDeliveryCount`, dead letter topic), FIFO, sessions,
@@ -306,6 +324,7 @@ duplicate detection e ordering são configuração do destino (Terraform), não 
 | Google `libraries-bom` | 26.90.0 (`google-cloud-pubsub` 1.157.0) | Pendente: `google-cloud-cli:587.0.0-emulators` |
 | `activemq-client` | 6.2.5 | Verde no `apache/activemq-classic:6.2.0` com `schedulerSupport` |
 | `artemis-jakarta-client` | 2.40.0 | Verde no `apache/activemq-artemis:2.40.0` sem auto-create |
+| `amqp-client` | 5.35.0 (sem Netty) | Verde no `rabbitmq:4.1-management-alpine` (4.1.8) |
 | Testcontainers | 2.0.5 | |
 
 Na aplicação, importe o BOM do Spring Boot antes dos BOMs dos SDKs (ADR-0008).
