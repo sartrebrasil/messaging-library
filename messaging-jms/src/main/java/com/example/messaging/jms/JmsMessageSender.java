@@ -16,16 +16,18 @@ import java.time.Duration;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * Envio para uma fila ou um Virtual Topic do ActiveMQ Classic, por Jakarta Messaging (ADR-0009).
+ * Envio para uma fila ou um tópico do ActiveMQ Classic ou Artemis, por Jakarta Messaging (ADR-0009).
  *
  * <ul>
  *   <li>Uma session por sender, usada por uma thread de cada vez (a session JMS não é thread-safe).
  *       Paralelismo de envio = mais senders sobre a mesma {@link Connection}.</li>
- *   <li>Envio persistente. Para ser síncrono no Classic, a connection factory não pode ter
- *       {@code useAsyncSend=true}.</li>
- *   <li>{@code orderingKey} vira {@code JMSXGroupID}; {@code deduplicationId} é ignorado.</li>
- *   <li>Tópico: o nome do Virtual Topic ({@code VirtualTopic.<t>}). As subscriptions são filas
- *       {@code Consumer.<s>.VirtualTopic.<t>}, lidas por {@link JmsMessageReceiver}.</li>
+ *   <li>Envio persistente e síncrono: no Classic, a connection factory não pode ter
+ *       {@code useAsyncSend=true}; no Artemis, {@code blockOnDurableSend} fica no padrão ({@code true}).</li>
+ *   <li>{@code orderingKey} vira {@code JMSXGroupID}; {@code deduplicationId} vira {@code _AMQ_DUPL_ID}
+ *       no Artemis e é ignorado no Classic.</li>
+ *   <li>Tópico: no Classic, um Virtual Topic ({@code VirtualTopic.<t>}), com subscriptions nas filas
+ *       {@code Consumer.<s>.VirtualTopic.<t>}; no Artemis, um endereço multicast, com subscriptions
+ *       nas filas dele ({@code <endereço>::<fila>}). Ver {@link JmsDialect#subscriptionQueue}.</li>
  * </ul>
  */
 public final class JmsMessageSender implements MessageSender {
@@ -34,6 +36,7 @@ public final class JmsMessageSender implements MessageSender {
     public static final long DEFAULT_MAX_MESSAGE_BYTES = 100L * 1024 * 1024 - 64 * 1024;
 
     private final Connection connection;
+    private final JmsDialect dialect;
     private final String name;
     private final boolean topic;
     private final long maxMessageBytes;
@@ -42,20 +45,24 @@ public final class JmsMessageSender implements MessageSender {
     private MessageProducer producer;
     private volatile boolean closed;
 
-    private JmsMessageSender(Connection connection, String name, boolean topic, long maxMessageBytes) {
+    private JmsMessageSender(Connection connection, JmsDialect dialect, String name, boolean topic,
+                             long maxMessageBytes) {
         this.connection = connection;
+        this.dialect = dialect;
         this.name = name;
         this.topic = topic;
         this.maxMessageBytes = maxMessageBytes;
     }
 
     /** A conexão continua de quem a criou: {@link #close()} não a fecha. */
-    public static JmsMessageSender forQueue(Connection connection, String queue, long maxMessageBytes) {
-        return new JmsMessageSender(connection, queue, false, maxMessageBytes);
+    public static JmsMessageSender forQueue(Connection connection, JmsDialect dialect, String queue,
+                                            long maxMessageBytes) {
+        return new JmsMessageSender(connection, dialect, queue, false, maxMessageBytes);
     }
 
-    public static JmsMessageSender forTopic(Connection connection, String topic, long maxMessageBytes) {
-        return new JmsMessageSender(connection, topic, true, maxMessageBytes);
+    public static JmsMessageSender forTopic(Connection connection, JmsDialect dialect, String topic,
+                                            long maxMessageBytes) {
+        return new JmsMessageSender(connection, dialect, topic, true, maxMessageBytes);
     }
 
     @Override
@@ -65,7 +72,7 @@ public final class JmsMessageSender implements MessageSender {
         try {
             ensureOpen();
             open();
-            BytesMessage wire = JmsCodec.encode(session, message, maxMessageBytes);
+            BytesMessage wire = JmsCodec.encode(session, dialect, message, maxMessageBytes);
             producer.send(wire);
             return new SendResult(wire.getJMSMessageID());
         } catch (JMSException e) {
@@ -76,16 +83,16 @@ public final class JmsMessageSender implements MessageSender {
         }
     }
 
-    /** Lista o destino no {@code DestinationSource} do Classic, sem criá-lo (ADR-0009). */
+    /** Confere que o destino existe sem criá-lo (ver {@link JmsDialect}). */
     @Override
     public void checkAccess() {
         ensureOpen();
-        ActiveMqDestinations.check(connection, name, topic);
+        dialect.checkAccess(connection, name, topic);
     }
 
     @Override
     public Capabilities capabilities() {
-        return new Capabilities(maxMessageBytes, 1, false, Duration.ZERO, false, true, false, false);
+        return new Capabilities(maxMessageBytes, 1, false, Duration.ZERO, false, true, dialect.deduplicates(), false);
     }
 
     @Override

@@ -3,8 +3,10 @@ package com.example.messaging.jms;
 import com.example.messaging.DestinationNotFoundException;
 import com.example.messaging.MessagingException;
 import jakarta.jms.Connection;
+import jakarta.jms.ConnectionFactory;
 import jakarta.jms.JMSException;
 import org.apache.activemq.ActiveMQConnection;
+import org.apache.activemq.ActiveMQConnectionFactory;
 import org.apache.activemq.advisory.DestinationSource;
 import org.apache.activemq.command.ActiveMQDestination;
 
@@ -12,27 +14,34 @@ import java.time.Duration;
 import java.util.Set;
 
 /**
- * {@code checkAccess} do ActiveMQ Classic. Abrir producer, consumer ou browser cria o destino
- * (auto-create, F7), então a existência é lida das advisories, pelo {@link DestinationSource} da
- * conexão. As advisories chegam de forma assíncrona: um destino inexistente custa
- * {@link #WAIT} de espera.
+ * O que usa classes do ActiveMQ Classic ({@code activemq-client}), carregado só pelo
+ * {@link JmsDialect#ACTIVEMQ_CLASSIC}.
+ *
+ * <p>{@code checkAccess}: abrir producer, consumer ou browser cria o destino (auto-create, F7),
+ * então a existência é lida das advisories, pelo {@link DestinationSource} da conexão. As
+ * advisories chegam de forma assíncrona: um destino inexistente custa {@link #WAIT} de espera.</p>
  */
-final class ActiveMqDestinations {
+final class ClassicSupport {
 
     static final Duration WAIT = Duration.ofSeconds(2);
 
-    private ActiveMqDestinations() {
+    private ClassicSupport() {
+    }
+
+    static ConnectionFactory connectionFactory(String brokerUrl) {
+        return new ActiveMQConnectionFactory(brokerUrl);
     }
 
     static void check(Connection connection, String name, boolean topic) {
         if (!(connection instanceof ActiveMQConnection activeMq)) {
-            throw new UnsupportedOperationException("checkAccess só com ActiveMQ Classic: " + connection.getClass());
+            throw new UnsupportedOperationException("checkAccess só com ActiveMQConnection (sem pool): "
+                    + connection.getClass());
         }
         try {
             // sem start, as advisories não chegam ao DestinationSource
             activeMq.start();
             DestinationSource source = activeMq.getDestinationSource();
-            // Opções de consumer (?consumer.prefetchSize=0) não fazem parte do nome físico
+            // opções de destino (?consumer.prefetchSize=0) não fazem parte do nome físico
             String physical = name.contains("?") ? name.substring(0, name.indexOf('?')) : name;
             long deadline = System.nanoTime() + WAIT.toNanos();
             do {

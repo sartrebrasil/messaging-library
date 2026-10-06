@@ -22,8 +22,10 @@ final class JmsErrors {
 
     static MessagingException map(String operation, JMSException e) {
         String message = operation + ": " + e.getMessage();
+        if (isMissingDestination(e)) {
+            return new DestinationNotFoundException(PROVIDER, message, e);
+        }
         return switch (e) {
-            case InvalidDestinationException ignored -> new DestinationNotFoundException(PROVIDER, message, e);
             case JMSSecurityException ignored -> new AccessDeniedException(PROVIDER, message, e);
             case ResourceAllocationException ignored -> new ThrottledException(PROVIDER, message, e);
             default -> new MessagingException(PROVIDER, message, e, isConnectionFailure(e));
@@ -39,6 +41,24 @@ final class JmsErrors {
             return new LeaseExpiredException(PROVIDER, operation + ": " + e.getMessage(), e);
         }
         return map(operation, e);
+    }
+
+    /**
+     * {@link InvalidDestinationException}, ou o {@code JMSException} genérico que o Artemis lança sem
+     * auto-create ("There is no queue with name", {@code ActiveMQ*DoesNotExistException} na causa).
+     */
+    private static boolean isMissingDestination(JMSException e) {
+        if (e instanceof InvalidDestinationException
+                || (e.getMessage() != null && e.getMessage().startsWith("There is no queue with name"))) {
+            return true;
+        }
+        for (Throwable cause = e.getCause() != null ? e.getCause() : e.getLinkedException(); cause != null;
+             cause = cause.getCause()) {
+            if (cause.getClass().getSimpleName().endsWith("DoesNotExistException")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Queda de conexão chega como {@link IOException} na causa; tentar de novo faz sentido. */

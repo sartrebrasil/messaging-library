@@ -28,6 +28,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 @Testcontainers(disabledWithoutDocker = true)
 class ActiveMqClassicContractTest extends MessagingContract {
 
+    private static final JmsDialect CLASSIC = JmsDialect.ACTIVEMQ_CLASSIC;
+
     private static final Duration LEASE = Duration.ofSeconds(2);
 
     private static String queue;
@@ -45,14 +47,14 @@ class ActiveMqClassicContractTest extends MessagingContract {
     /** Limite de 1 MiB para o contrato exercitar {@code MessageTooLargeException} sem alocar 100 MiB. */
     @Override
     protected MessageSender newSender() {
-        return JmsMessageSender.forQueue(ActiveMqClassic.connection(), queue, 1024 * 1024);
+        return JmsMessageSender.forQueue(ActiveMqClassic.connection(), CLASSIC, queue, 1024 * 1024);
     }
 
     @Override
     protected MessageReceiver newReceiver() {
-        return new JmsMessageReceiver(ActiveMqClassic.connection(), queue, LEASE, 10,
+        return new JmsMessageReceiver(ActiveMqClassic.connection(), CLASSIC, queue, LEASE, 10,
                 JmsMessageReceiver.Redelivery.SCHEDULED, JmsMessageSender.forQueue(ActiveMqClassic.connection(),
-                deadLetterQueue, JmsMessageSender.DEFAULT_MAX_MESSAGE_BYTES));
+                CLASSIC, deadLetterQueue, JmsMessageSender.DEFAULT_MAX_MESSAGE_BYTES));
     }
 
     @Override
@@ -62,13 +64,13 @@ class ActiveMqClassicContractTest extends MessagingContract {
 
     @Override
     protected MessageSender newOrderedSender() {
-        return JmsMessageSender.forQueue(ActiveMqClassic.connection(), orderedQueue,
+        return JmsMessageSender.forQueue(ActiveMqClassic.connection(), CLASSIC, orderedQueue,
                 JmsMessageSender.DEFAULT_MAX_MESSAGE_BYTES);
     }
 
     @Override
     protected MessageReceiver newOrderedReceiver() {
-        return new JmsMessageReceiver(ActiveMqClassic.connection(), orderedQueue, LEASE, 10,
+        return new JmsMessageReceiver(ActiveMqClassic.connection(), CLASSIC, orderedQueue, LEASE, 10,
                 JmsMessageReceiver.Redelivery.IMMEDIATE, null);
     }
 
@@ -80,14 +82,14 @@ class ActiveMqClassicContractTest extends MessagingContract {
 
     @Override
     protected MessageReceiver newDeadLetterReceiver() {
-        return new JmsMessageReceiver(ActiveMqClassic.connection(), deadLetterQueue);
+        return new JmsMessageReceiver(ActiveMqClassic.connection(), CLASSIC, deadLetterQueue);
     }
 
     @Test
     void checkAccessReportsMissingDestination() {
         String missing = "nao-existe-" + UUID.randomUUID();
-        try (MessageSender sender = JmsMessageSender.forQueue(ActiveMqClassic.connection(), missing, 1024);
-             MessageReceiver receiver = new JmsMessageReceiver(ActiveMqClassic.connection(), missing)) {
+        try (MessageSender sender = JmsMessageSender.forQueue(ActiveMqClassic.connection(), CLASSIC, missing, 1024);
+             MessageReceiver receiver = new JmsMessageReceiver(ActiveMqClassic.connection(), CLASSIC, missing)) {
             assertThrows(DestinationNotFoundException.class, sender::checkAccess);
             assertThrows(DestinationNotFoundException.class, receiver::checkAccess);
         }
@@ -98,8 +100,8 @@ class ActiveMqClassicContractTest extends MessagingContract {
     void virtualTopicDeliversToConsumerQueue() {
         String topic = "VirtualTopic.contract-" + UUID.randomUUID();
         String subscription = ActiveMqClassic.queue("Consumer.faturamento." + topic);
-        try (MessageSender sender = JmsMessageSender.forTopic(ActiveMqClassic.connection(), topic, 1024);
-             MessageReceiver receiver = new JmsMessageReceiver(ActiveMqClassic.connection(), subscription)) {
+        try (MessageSender sender = JmsMessageSender.forTopic(ActiveMqClassic.connection(), CLASSIC, topic, 1024);
+             MessageReceiver receiver = new JmsMessageReceiver(ActiveMqClassic.connection(), CLASSIC, subscription)) {
             sender.send(OutgoingMessage.ofText("evento").withAttribute("tipo", "pedido"));
 
             List<ReceivedMessage> received = receiver.receive(1, Duration.ofSeconds(5));
