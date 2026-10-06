@@ -61,6 +61,18 @@
       <version>${project.version}</version>
       <optional>true</optional>
     </dependency>
+    <dependency>
+      <groupId>com.example</groupId>
+      <artifactId>messaging-jms</artifactId>
+      <version>${project.version}</version>
+      <optional>true</optional>
+    </dependency>
+    <!-- broker-url do activemq-classic; o messaging-jms também exige no checkAccess -->
+    <dependency>
+      <groupId>org.apache.activemq</groupId>
+      <artifactId>activemq-client</artifactId>
+      <optional>true</optional>
+    </dependency>
     <!-- Health indicator: só com o módulo de health do Boot 4 na aplicação -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
@@ -72,6 +84,13 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-test</artifactId>
       <version>${spring-boot.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <!-- Broker embutido (vm://) para testar o activemq-classic sem Docker -->
+    <dependency>
+      <groupId>org.apache.activemq</groupId>
+      <artifactId>activemq-broker</artifactId>
+      <version>6.2.4</version>
       <scope>test</scope>
     </dependency>
     <dependency>

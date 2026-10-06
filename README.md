@@ -1,7 +1,8 @@
 # messaging-lib
 
 Abstração de filas e tópicos para Java 21: uma API única sobre os SDKs oficiais da AWS
-(SQS, SNS), da Azure (Service Bus) e do Google Cloud (Pub/Sub). Trocar de provedor muda a
+(SQS, SNS), da Azure (Service Bus) e do Google Cloud (Pub/Sub), e sobre o cliente Jakarta Messaging
+do ActiveMQ Classic. Trocar de provedor muda a
 dependência e a configuração, não o código. O que não dá para igualar entre provedores fica
 explícito em `Capabilities`.
 
@@ -21,6 +22,7 @@ quem usa (a inbox-library, por exemplo).
 | `messaging-aws` | SQS (fila standard e FIFO) e SNS. SDK v2 síncrono com `apache-client`, sem Netty. |
 | `messaging-azure` | Service Bus: fila, tópico, subscription, sessions e DLQ nativa. |
 | `messaging-gcp` | Pub/Sub: publisher com ordem e pull síncrono. |
+| `messaging-jms` | ActiveMQ Classic por Jakarta Messaging: fila e Virtual Topic, com lease controlado pela lib (ADR-0009). Exige `org.apache.activemq:activemq-client` na aplicação. |
 | `messaging-spring-boot-starter` | Destinos nomeados por properties (`messaging.*`), métricas, `traceparent` e health. Spring Boot 4. |
 | `messaging-bom` | Alinha as versões dos módulos acima. |
 
@@ -79,6 +81,12 @@ MessageReceiver ordered = ServiceBusSessionMessageReceiver.forQueue(builder, "pe
 MessageSender sender = PubSubMessageSender.create(Publisher.newBuilder(topicName), topicAdminClient);
 MessageReceiver receiver = PubSubMessageReceiver.create(subscriberStubSettings, subscriptionName,
         PubSubMessageReceiver.Options.ackDeadline(Duration.ofSeconds(60)).withDeadLetterSender(dlqSender));
+
+// ActiveMQ Classic: a Connection é de quem a criou (ActiveMQConnection, sem pool, para o checkAccess)
+MessageSender sender = JmsMessageSender.forQueue(connection, "pedidos", JmsMessageSender.DEFAULT_MAX_MESSAGE_BYTES);
+MessageSender topic = JmsMessageSender.forTopic(connection, "VirtualTopic.eventos", 1024 * 1024);
+MessageReceiver receiver = new JmsMessageReceiver(connection, "Consumer.faturamento.VirtualTopic.eventos",
+        Duration.ofSeconds(60), 10, JmsMessageReceiver.Redelivery.IMMEDIATE, dlqSender);
 ```
 
 O mesmo código vale para qualquer provedor:
@@ -114,19 +122,25 @@ Regras comuns:
 `sender.capabilities()` e `receiver.capabilities()` devolvem isso em tempo de execução, e o
 starter pode exigir no startup (`require`).
 
-| | SQS | SNS | Service Bus | Pub/Sub |
-|---|---|---|---|---|
-| Tamanho máximo | 1 MiB (corpo + atributos) | `MaximumMessageSize` do tópico (256 KiB padrão, até 1 MiB) | 256 KB Standard; Premium configurável | 10 MB |
-| `nack` com atraso | Sim, até 12 h desde o primeiro receive | Não se aplica | Só em `RESCHEDULE` (cópia agendada), sem sessions | Sim, até 600 s |
-| Dead letter explícito | Cópia para o sender de DLQ + ack | Não se aplica | Nativo | Cópia para o sender de DLQ + ack |
-| Ordem por `orderingKey` | Só FIFO | Só FIFO | Só com sessions | Sim (subscription com ordering) |
-| Deduplicação por `deduplicationId` | Só FIFO (5 min) | Só FIFO | Sim (duplicate detection na entidade) | Não |
-| `ack` com lease vencido lança erro | Não | Não se aplica | Sim | Só com exactly-once |
-| Lease | Visibility timeout da fila | Não se aplica | Lock duration (máx. 5 min); com sessions, o lock da session | Ack deadline da subscription (10–600 s) |
+| | SQS | SNS | Service Bus | Pub/Sub | ActiveMQ Classic |
+|---|---|---|---|---|---|
+| Tamanho máximo | 1 MiB (corpo + atributos) | `MaximumMessageSize` do tópico (256 KiB padrão, até 1 MiB) | 256 KB Standard; Premium configurável | 10 MB | Configurado no sender (`maxFrameSize` do broker, 100 MiB padrão) |
+| `nack` com atraso | Sim, até 12 h desde o primeiro receive | Não se aplica | Só em `RESCHEDULE` (cópia agendada), sem sessions | Sim, até 600 s | Só em `SCHEDULED` (cópia com `AMQ_SCHEDULED_DELAY`, exige `schedulerSupport` no broker), até 12 h |
+| Dead letter explícito | Cópia para o sender de DLQ + ack | Não se aplica | Nativo | Cópia para o sender de DLQ + ack | Cópia para o sender de DLQ + ack |
+| Ordem por `orderingKey` | Só FIFO | Só FIFO | Só com sessions | Sim (subscription com ordering) | `JMSXGroupID`, só em `IMMEDIATE` |
+| Deduplicação por `deduplicationId` | Só FIFO (5 min) | Só FIFO | Sim (duplicate detection na entidade) | Não | Não |
+| `ack` com lease vencido lança erro | Não | Não se aplica | Sim | Só com exactly-once | Sim (lease local) |
+| Lease | Visibility timeout da fila | Não se aplica | Lock duration (máx. 5 min); com sessions, o lock da session | Ack deadline da subscription (10–600 s) | Prazo local do receiver (padrão 60 s): vencido, a session fecha e o broker reentrega |
 
 O Service Bus com sessions segura uma session por instância de receiver: paralelismo entre
 sessions é ter mais instâncias. Como ele não tem atraso no `nack` com ordem, quem consome espera
 antes de chamar `nack`, segurando o lock com `keepAlive`.
+
+No ActiveMQ Classic, o broker não tem lease: o receiver conta o prazo e usa uma session por
+mensagem pendente (`maxInFlight`, padrão 10). O consumer usa prefetch 0, que o adapter acrescenta
+ao nome da fila. O Classic cria destinos no primeiro uso, então só o `checkAccess` informa destino
+inexistente. No Java 21, o `receive` do cliente prende a carrier thread de uma virtual thread
+durante o `maxWait`; no Java 24+ não prende.
 
 ## Mensagem
 
@@ -166,7 +180,7 @@ Adicione o starter e os adapters dos provedores usados:
 messaging:
   providers:
     aws:
-      type: aws                # aws | azure | gcp
+      type: aws                # aws | azure | gcp | activemq-classic
       region: sa-east-1
     azure:
       type: azure
@@ -174,6 +188,11 @@ messaging:
     gcp:
       type: gcp
       project: meu-projeto
+    amq:
+      type: activemq-classic   # sem broker-url, usa o bean jakarta.jms.ConnectionFactory
+      broker-url: failover:(tcp://amq-1:61616,tcp://amq-2:61616)
+      user: ${AMQ_USER}
+      password: ${AMQ_PASSWORD}
   destinations:
     pedidos:
       provider: aws
@@ -198,6 +217,16 @@ messaging:
       topic: notas
       subscription: notas-sub
       ack-deadline: 60s
+    notas-amq:
+      provider: amq
+      topic: VirtualTopic.notas  # envia ao Virtual Topic
+      subscription: faturamento  # recebe da fila Consumer.faturamento.VirtualTopic.notas
+      lease: 60s
+      redelivery: reschedule     # nack com atraso; exige schedulerSupport no broker
+      dead-letter: notas-amq-dlq
+    notas-amq-dlq:
+      provider: amq
+      queue: notas-dlq
 ```
 
 ```java
@@ -214,9 +243,15 @@ try (MessageReceiver receiver = destinations.receiver("pedidos")) {   // instân
 | `aws` | `topic-arn`, senão `queue-url` | `queue-url` |
 | `azure` | `topic`, senão `queue` | `topic` + `subscription`, senão `queue` |
 | `gcp` | `topic` | `subscription` (exige `ack-deadline`) |
+| `activemq-classic` | `topic` (`VirtualTopic.*`), senão `queue` | `topic` + `subscription` (fila `Consumer.<subscription>.<topic>`), senão `queue` |
 
-Outras propriedades do destino: `max-message-bytes` (SNS e Service Bus), `sessions` e
-`redelivery: abandon | reschedule` (Service Bus), `ordered` e `exactly-once` (Pub/Sub).
+Outras propriedades do destino: `max-message-bytes` (SNS, Service Bus e ActiveMQ), `sessions`
+(Service Bus), `redelivery: abandon | reschedule` (Service Bus e ActiveMQ), `ordered` e
+`exactly-once` (Pub/Sub), `lease` (ActiveMQ, padrão 60 s).
+
+No ActiveMQ, o starter abre uma conexão por provider no startup e a fecha no shutdown. Se o bean
+`ConnectionFactory` tiver pool por cima (`pooled-jms`, `CachingConnectionFactory`), o health check
+falha, porque o `checkAccess` precisa da `ActiveMQConnection`. Nesse caso, use `broker-url`.
 
 - O startup falha listando todos os erros de configuração, e em seguida confere o `require`
   (`ordered-delivery`, `delayed-redelivery`, `native-dead-letter`, `publisher-deduplication`,
@@ -241,6 +276,7 @@ Outras propriedades do destino: `max-message-bytes` (SNS e Service Bus), `sessio
 | SNS | `sns:Publish` | (fila SQS) | `sns:GetTopicAttributes` |
 | Service Bus | Send | Listen | Send (sender) / Listen (receiver) |
 | Pub/Sub | `roles/pubsub.publisher` | `roles/pubsub.subscriber` | Nenhuma extra (`TestIamPermissions`) |
+| ActiveMQ Classic | `write` | `read` (e `write` na fila, para o `nack` em `SCHEDULED`) | Leitura das advisories (`ActiveMQ.Advisory.>`) |
 
 O receiver SQS lê o visibility timeout da fila com `GetQueueAttributes`. A DLQ automática por
 contagem de entregas (redrive policy, `MaxDeliveryCount`, dead letter topic), FIFO, sessions,
@@ -255,6 +291,7 @@ duplicate detection e ordering são configuração do destino (Terraform), não 
 | AWS SDK v2 | 2.44.7 | Verde no LocalStack 4.14.0 (última imagem sem `LOCALSTACK_AUTH_TOKEN`) |
 | `azure-messaging-servicebus` | 7.18.0 | Pendente: Service Bus emulator 2.0.0 (`MaxDeliveryCount` até 10) |
 | Google `libraries-bom` | 26.90.0 (`google-cloud-pubsub` 1.157.0) | Pendente: `google-cloud-cli:587.0.0-emulators` |
+| `activemq-client` | 6.2.5 | Verde no `apache/activemq-classic:6.2.0` com `schedulerSupport` |
 | Testcontainers | 2.0.5 | |
 
 Na aplicação, importe o BOM do Spring Boot antes dos BOMs dos SDKs (ADR-0008).
