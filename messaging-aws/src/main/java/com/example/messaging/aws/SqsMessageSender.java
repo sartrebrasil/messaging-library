@@ -50,11 +50,14 @@ public final class SqsMessageSender implements MessageSender {
         ensureOpen();
         AwsCodec.Encoded encoded = encode(message);
         try {
-            String id = sqs.sendMessage(b -> b.queueUrl(queueUrl)
-                    .messageBody(encoded.body())
-                    .messageAttributes(attributes(encoded.attributes()))
-                    .messageGroupId(message.orderingKey())
-                    .messageDeduplicationId(fifo ? message.deduplicationId() : null)).messageId();
+            String id = sqs.sendMessage(b -> b
+                        .queueUrl(queueUrl)
+                        .messageBody(encoded.body())
+                        //.delaySeconds()
+                        .messageAttributes(attributes(encoded.attributes()))
+                        .messageGroupId(message.orderingKey())
+                        .messageDeduplicationId(fifo ? message.deduplicationId() : null))
+                    .messageId();
             return new SendResult(id);
         } catch (SdkException e) {
             throw AwsErrors.map("SendMessage " + queueUrl, e);

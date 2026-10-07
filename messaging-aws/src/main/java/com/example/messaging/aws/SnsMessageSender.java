@@ -56,11 +56,13 @@ public final class SnsMessageSender implements MessageSender {
         ensureOpen();
         AwsCodec.Encoded encoded = encode(message);
         try {
-            String id = sns.publish(b -> b.topicArn(topicArn)
+            String id = sns.publish(b -> b
+                    .topicArn(topicArn)
                     .message(encoded.body())
-                    .messageAttributes(attributes(encoded.attributes()))
                     .messageGroupId(message.orderingKey())
-                    .messageDeduplicationId(fifo ? message.deduplicationId() : null)).messageId();
+                    .messageDeduplicationId(fifo ? message.deduplicationId() : null)
+                    .messageAttributes(attributes(encoded.attributes()))
+            ).messageId();
             return new SendResult(id);
         } catch (SdkException e) {
             throw AwsErrors.map("Publish " + topicArn, e);
