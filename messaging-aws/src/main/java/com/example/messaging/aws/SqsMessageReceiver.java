@@ -87,14 +87,16 @@ public final class SqsMessageReceiver implements MessageReceiver {
         int waitSeconds = (int) Math.min(MAX_WAIT_SECONDS, ceilSeconds(maxWait));
         try {
             Instant receivedAt = Instant.now();
-            List<Message> messages = sqs.receiveMessage(b -> b.queueUrl(queueUrl)
+            List<Message> messages = sqs.receiveMessage(b -> b
+                    .queueUrl(queueUrl)
                     .maxNumberOfMessages(Math.min(maxMessages, SqsMessageSender.MAX_BATCH))
                     .waitTimeSeconds(waitSeconds)
                     .messageAttributeNames("All")
                     .messageSystemAttributeNames(MessageSystemAttributeName.APPROXIMATE_RECEIVE_COUNT,
                             MessageSystemAttributeName.APPROXIMATE_FIRST_RECEIVE_TIMESTAMP,
                             MessageSystemAttributeName.SENT_TIMESTAMP,
-                            MessageSystemAttributeName.MESSAGE_GROUP_ID)).messages();
+                            MessageSystemAttributeName.MESSAGE_GROUP_ID))
+                    .messages();
             return messages.stream().map(message -> toReceived(message, receivedAt, lease)).toList();
         } catch (SdkException e) {
             throw AwsErrors.map("ReceiveMessage " + queueUrl, e);
