@@ -23,15 +23,23 @@ import org.apache.activemq.artemis.jms.client.ActiveMQSession;
 final class ArtemisSupport {
 
     static final String WINDOW = "consumerWindowSize";
+    static final String RECONNECT = "reconnectAttempts";
 
     private ArtemisSupport() {
     }
 
-    /** Acrescenta {@code consumerWindowSize=0} à URL quando ela não define a janela. */
+    /**
+     * Acrescenta à URL o que ela não define: {@code consumerWindowSize=0} (o receiver exige) e
+     * {@code reconnectAttempts=-1}. O padrão do Artemis é 0, e a conexão morreria de vez quando o
+     * broker reiniciasse. O startup continua falhando com o broker fora ({@code initialConnectAttempts=1}).
+     */
     static ConnectionFactory connectionFactory(String brokerUrl) {
-        String url = brokerUrl.contains(WINDOW) ? brokerUrl
-                : brokerUrl + (brokerUrl.contains("?") ? "&" : "?") + WINDOW + "=0";
+        String url = withDefault(withDefault(brokerUrl, WINDOW, "0"), RECONNECT, "-1");
         return new ActiveMQConnectionFactory(url);
+    }
+
+    private static String withDefault(String url, String parameter, String value) {
+        return url.contains(parameter) ? url : url + (url.contains("?") ? "&" : "?") + parameter + "=" + value;
     }
 
     /**

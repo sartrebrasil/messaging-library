@@ -112,8 +112,10 @@ public enum JmsDialect {
     };
 
     /**
-     * Connection factory do cliente do broker. No Artemis, acrescenta {@code consumerWindowSize=0}
-     * quando a URL não define a janela.
+     * Connection factory do cliente do broker, com reconexão: a lib não recria a conexão, então sem
+     * isso ela morreria de vez quando o broker reiniciasse. Classic: embrulha a URL em
+     * {@code failover:(...)}, salvo {@code failover:} e {@code vm:}. Artemis: acrescenta
+     * {@code reconnectAttempts=-1} e {@code consumerWindowSize=0} quando a URL não os define.
      */
     public abstract ConnectionFactory connectionFactory(String brokerUrl);
 

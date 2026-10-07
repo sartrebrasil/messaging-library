@@ -24,12 +24,27 @@ import java.util.Set;
 final class ClassicSupport {
 
     static final Duration WAIT = Duration.ofSeconds(2);
+    /** Envio bloqueado pela reconexão do failover desiste depois disso. */
+    static final Duration SEND_TIMEOUT = Duration.ofSeconds(30);
 
     private ClassicSupport() {
     }
 
+    /**
+     * Sem {@code failover:}, a conexão morre de vez quando o broker reinicia: a URL é embrulhada em
+     * {@code failover:(...)}, que reconecta para sempre. {@code startupMaxReconnectAttempts=0} mantém
+     * o startup falhando com o broker fora, e {@code timeout} limita o tempo de envio durante a
+     * reconexão. {@code failover:} e {@code vm:} passam como vieram.
+     */
     static ConnectionFactory connectionFactory(String brokerUrl) {
-        return new ActiveMQConnectionFactory(brokerUrl);
+        return new ActiveMQConnectionFactory(withFailover(brokerUrl));
+    }
+
+    static String withFailover(String brokerUrl) {
+        if (brokerUrl.startsWith("failover:") || brokerUrl.startsWith("vm:")) {
+            return brokerUrl;
+        }
+        return "failover:(" + brokerUrl + ")?startupMaxReconnectAttempts=0&timeout=" + SEND_TIMEOUT.toMillis();
     }
 
     static void check(Connection connection, String name, boolean topic) {
