@@ -90,6 +90,7 @@ opcionais. Os achados que mudaram esta seção estão nos spikes
 | `checkAccess` | Abrir producer, consumer ou browser cria o destino. Por isso o adapter consulta o broker sem criar nada. Classic: procura o destino no `DestinationSource` da conexão (advisories); um destino inexistente custa 2 s de espera. Artemis: `queueQuery` e `addressQuery` da session Core, que respondem na hora. Os dois exigem a conexão do cliente do broker: atrás de pool (`pooled-jms`), lançam `UnsupportedOperationException`. |
 | Java 21 | O `receive(timeout)` dos dois clientes espera dentro de `synchronized` e prende a carrier thread de uma virtual thread durante o `maxWait`. No Java 24+ (JEP 491) isso não acontece. |
 | Ciclo de vida | `close()` fecha as sessions do adapter. As mensagens pendentes voltam ao broker. |
+| Reconexão | A lib não recria a `Connection` (ADR-0002: ela é de quem a passou). Por isso, `JmsDialect.connectionFactory` já monta a URL com reconexão. Classic: `failover:(...)?startupMaxReconnectAttempts=0&timeout=30000`. Artemis: `reconnectAttempts=-1`. Verificado com restart do broker nos dois, e o startup continua falhando com o broker fora. |
 
 Topologia, completando o ADR-0003:
 

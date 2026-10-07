@@ -42,6 +42,8 @@ final class JmsProviderFactory implements ProviderFactory {
             connection = provider.user() != null
                     ? factory.createConnection(provider.user(), provider.password())
                     : factory.createConnection();
+            // com failover:, o Classic só conecta no primeiro uso; o start faz o startup falhar com o broker fora
+            connection.start();
         } catch (JMSException e) {
             throw new IllegalStateException("messaging.providers." + providerName + ": não conectou ao broker: "
                     + e.getMessage(), e);

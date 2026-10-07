@@ -278,7 +278,13 @@ Outras propriedades do destino: `max-message-bytes` (SNS, Service Bus, ActiveMQ 
 `sessions` (Service Bus), `redelivery: abandon | reschedule` (Service Bus e ActiveMQ), `ordered` e
 `exactly-once` (Pub/Sub), `lease` (ActiveMQ e RabbitMQ, padrão 60 s), `routing-key` (RabbitMQ).
 
-No ActiveMQ, o starter abre uma conexão por provider no startup e a fecha no shutdown. Se o bean
+No ActiveMQ, o starter abre uma conexão por provider no startup e a fecha no shutdown. A lib não
+recria a conexão: a reconexão vem da URL. Com `broker-url`, o `JmsDialect` cuida disso:
+- no Classic, embrulha a URL em `failover:(...)`, salvo `failover:` e `vm:`;
+- no Artemis, acrescenta `reconnectAttempts=-1`;
+- nos dois, o startup ainda falha com o broker fora.
+
+Num bean `ConnectionFactory` próprio, a reconexão é responsabilidade de quem o configura. Se o bean
 `ConnectionFactory` tiver pool por cima (`pooled-jms`, `CachingConnectionFactory`), o health check
 falha, porque o `checkAccess` precisa da `ActiveMQConnection`. Nesse caso, use `broker-url`.
 
