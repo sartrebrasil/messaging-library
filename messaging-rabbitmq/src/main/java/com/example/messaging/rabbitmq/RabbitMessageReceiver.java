@@ -121,6 +121,10 @@ public final class RabbitMessageReceiver implements MessageReceiver {
         while (true) {
             lock.lock();
             try {
+                // close() durante o sleep: sem isso, channel() abriria outro channel, que ninguém fecha
+                if (closed) {
+                    return result;
+                }
                 Channel open = channel();
                 while (result.size() < maxMessages) {
                     GetResponse response = open.basicGet(queue, false);

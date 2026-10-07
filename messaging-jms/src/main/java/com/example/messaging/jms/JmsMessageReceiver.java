@@ -120,10 +120,13 @@ public final class JmsMessageReceiver implements MessageReceiver {
         this.deadLetterSender = deadLetterSender;
     }
 
-    /** Uma session do pool. Campos protegidos por {@link #lock}. */
+    /**
+     * Uma session do pool. Campos protegidos por {@link #lock}; {@code session} é volatile porque
+     * {@link #close()} a lê sem o lock (ver {@link #take}).
+     */
     private static final class Slot {
         final ReentrantLock lock = new ReentrantLock();
-        Session session;
+        volatile Session session;
         MessageConsumer consumer;
         Message pending;
         Instant expiresAt;
@@ -198,8 +201,17 @@ public final class JmsMessageReceiver implements MessageReceiver {
         slot.lock.lock();
         try {
             if (slot.consumer == null) {
+                if (closed) {
+                    return null;
+                }
                 connection.start();
                 slot.session = connection.createSession(false, Session.CLIENT_ACKNOWLEDGE);
+                // close() grava closed e depois lê slot.session; aqui é o inverso. Com os dois
+                // volatile, um dos lados vê o outro: ou o close() fecha esta session, ou ela fecha aqui.
+                if (closed) {
+                    recycle(slot);
+                    return null;
+                }
                 slot.consumer = slot.session.createConsumer(slot.session.createQueue(dialect.consumerQueue(queue)));
             }
             long millis = deadline == 0 ? 0 : TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
