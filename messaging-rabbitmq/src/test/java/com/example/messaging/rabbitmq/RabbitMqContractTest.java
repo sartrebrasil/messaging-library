@@ -93,6 +93,30 @@ class RabbitMqContractTest extends MessagingContract {
         }
     }
 
+    /**
+     * {@code close()} durante o polling de um {@code receive}: o receive volta vazio e não abre outro
+     * channel, que pegaria a próxima mensagem sem nunca confirmá-la.
+     */
+    @Test
+    void closeDuringReceiveDoesNotGrabLaterMessages() throws Exception {
+        String polled = RabbitMq.queue("contract-close-" + UUID.randomUUID(), "quorum");
+        RabbitMessageReceiver closing = new RabbitMessageReceiver(RabbitMq.connection(), polled);
+        var worker = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()
+                .submit(() -> closing.receive(1, Duration.ofSeconds(5)));
+        Thread.sleep(300);
+        closing.close();
+
+        try (MessageSender sender = RabbitMessageSender.forQueue(RabbitMq.connection(), polled, 1024);
+             MessageReceiver other = new RabbitMessageReceiver(RabbitMq.connection(), polled)) {
+            sender.send(OutgoingMessage.ofText("depois do close"));
+            assertTrue(worker.get(2, java.util.concurrent.TimeUnit.SECONDS).isEmpty());
+
+            ReceivedMessage received = other.receive(1, Duration.ofSeconds(3)).getFirst();
+            assertEquals("depois do close", received.bodyAsString());
+            other.ack(received);
+        }
+    }
+
     /** Classic queue não conta entregas: na reentrega, {@code deliveryCount} fica vazio. */
     @Test
     void classicQueueRedeliveryHasNoCount() {
