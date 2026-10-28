@@ -137,7 +137,7 @@ Os achados que mudaram esta seção estão no [spike F9](../spikes/f9-rabbitmq.m
 | Atributos | Headers AMQP. Na leitura, os headers `x-*` são do broker e ficam fora dos atributos. `orderingKey` só vira routing key em `forExchangeByOrderingKey`; `deduplicationId` só vira `message-id`. |
 | Ordem e deduplicação | `orderedDelivery = false`, `publisherDeduplication = false`. |
 | Reconexão e channel fechado | Cada channel tem uma geração. Quando ele fecha (queda, reconexão automática, erro do broker), as confirmações das mensagens dele lançam `LeaseExpiredException`, e o próximo `receive` abre outro channel. O channel antigo, se a reconexão automática o reabrir, é abortado. |
-| Alarme de memória ou disco | `connection.blocked` trava o publish. Um confirm que não chega em 30 s lança `MessagingException` com `retryable = true`. |
+| Alarme de memória ou disco | `connection.blocked` trava o publish. Um confirm que não chega no prazo (30 s por padrão; `withConfirmTimeout` ou `confirm-timeout` no starter) lança `MessagingException` com `retryable = true`. O channel sai do sender e é abortado em outra thread, porque o close espera um close-ok que o broker bloqueado não manda; o próximo envio abre outro. |
 | `consumer_timeout` | Não verificado se o broker aplica o timeout a entregas de `basic.get`. Por segurança, mantenha o maior `maxTotal` de `keepAlive` abaixo dele (padrão 30 min). |
 | `checkAccess` | `queueDeclarePassive` ou `exchangeDeclarePassive` num channel descartável, porque um 404 fecha o channel. |
 | Tamanho | `max_message_size` do broker, 16 MiB por padrão no 4.x: `maxMessageBytes` é configurado no sender. Acima do limite do broker, o 406 vira `MessageTooLargeException`. |
@@ -198,6 +198,7 @@ o ADR-0008:
   - `topic` é o exchange e `routing-key` a routing key do envio;
   - `routing-by-ordering-key: true` usa o `orderingKey` de cada mensagem como
     routing key, e não combina com `routing-key`;
+  - `confirm-timeout` é a espera máxima do publisher confirm (padrão 30 s);
   - `subscription` é a fila ligada ao exchange;
   - `redelivery: reschedule` é recusado no startup.
 - `redelivery: reschedule` vira `SCHEDULED`.

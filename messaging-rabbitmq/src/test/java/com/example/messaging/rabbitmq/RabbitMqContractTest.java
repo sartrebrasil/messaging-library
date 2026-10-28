@@ -2,6 +2,7 @@ package com.example.messaging.rabbitmq;
 
 import com.example.messaging.MessageReceiver;
 import com.example.messaging.MessageSender;
+import com.example.messaging.MessagingException;
 import com.example.messaging.OutgoingMessage;
 import com.example.messaging.ReceivedMessage;
 import com.example.messaging.testkit.MessagingContract;
@@ -125,6 +126,30 @@ class RabbitMqContractTest extends MessagingContract {
                 "por-chave-" + UUID.randomUUID(), 1024)) {
             assertThrows(IllegalArgumentException.class, () -> sender.send(OutgoingMessage.ofText("x")));
         }
+    }
+
+    /** Com o broker em alarme de memória, o confirm não chega e o envio falha no prazo configurado. */
+    @Test
+    void confirmTimeoutIsConfigurable() {
+        String blocked = RabbitMq.queue("bloqueada-" + UUID.randomUUID(), "quorum");
+        try (MessageSender sender = RabbitMessageSender.forQueue(RabbitMq.connection(), blocked, 1024)
+                .withConfirmTimeout(Duration.ofMillis(500))) {
+            RabbitMq.memoryAlarm(true);
+            long start = System.nanoTime();
+            MessagingException e = assertThrows(MessagingException.class,
+                    () -> sender.send(OutgoingMessage.ofText("x")));
+            Duration elapsed = Duration.ofNanos(System.nanoTime() - start);
+            assertTrue(e.retryable());
+            assertTrue(elapsed.compareTo(Duration.ofSeconds(5)) < 0, "esperou " + elapsed);
+        } finally {
+            RabbitMq.memoryAlarm(false);
+        }
+    }
+
+    @Test
+    void confirmTimeoutMustBePositive() {
+        RabbitMessageSender sender = RabbitMessageSender.forQueue(RabbitMq.connection(), "qualquer", 1024);
+        assertThrows(IllegalArgumentException.class, () -> sender.withConfirmTimeout(Duration.ZERO));
     }
 
     /**
