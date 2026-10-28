@@ -278,7 +278,7 @@ try (MessageReceiver receiver = destinations.receiver("pedidos")) {   // instân
 
 Outras propriedades do destino: `max-message-bytes` (SNS, Service Bus, ActiveMQ e RabbitMQ),
 `sessions` (Service Bus), `redelivery: abandon | reschedule` (Service Bus e ActiveMQ), `ordered` e
-`exactly-once` (Pub/Sub), `lease` (ActiveMQ e RabbitMQ, padrão 60 s), `routing-key` e `routing-by-ordering-key` (RabbitMQ).
+`exactly-once` (Pub/Sub), `lease` (ActiveMQ e RabbitMQ, padrão 60 s), `routing-key`, `routing-by-ordering-key` e `confirm-timeout` (RabbitMQ, padrão 30 s).
 
 No ActiveMQ, o starter abre uma conexão por provider no startup e a fecha no shutdown. A lib não
 recria a conexão: a reconexão vem da URL. Com `broker-url`, o `JmsDialect` cuida disso:

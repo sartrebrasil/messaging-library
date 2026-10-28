@@ -52,14 +52,18 @@ final class RabbitProviderFactory implements ProviderFactory {
     public MessageSender sender(String name, MessagingProperties.Destination destination) {
         long max = destination.maxMessageBytes() != null
                 ? destination.maxMessageBytes() : RabbitMessageSender.DEFAULT_MAX_MESSAGE_BYTES;
+        RabbitMessageSender sender;
         if (destination.topic() != null && destination.routingByOrderingKey()) {
-            return RabbitMessageSender.forExchangeByOrderingKey(connection, destination.topic(), max);
-        }
-        if (destination.topic() != null) {
-            return RabbitMessageSender.forExchange(connection, destination.topic(),
+            sender = RabbitMessageSender.forExchangeByOrderingKey(connection, destination.topic(), max);
+        } else if (destination.topic() != null) {
+            sender = RabbitMessageSender.forExchange(connection, destination.topic(),
                     destination.routingKey() != null ? destination.routingKey() : "", max);
+        } else if (destination.queue() != null) {
+            sender = RabbitMessageSender.forQueue(connection, destination.queue(), max);
+        } else {
+            return null;
         }
-        return destination.queue() == null ? null : RabbitMessageSender.forQueue(connection, destination.queue(), max);
+        return destination.confirmTimeout() != null ? sender.withConfirmTimeout(destination.confirmTimeout()) : sender;
     }
 
     /** A subscription de um exchange é a fila ligada a ele: o receiver lê dela. */

@@ -250,6 +250,12 @@ public final class MessagingDestinations implements AutoCloseable {
         if (d.routingByOrderingKey() && (type != Type.RABBITMQ || d.topic() == null)) {
             problems.add(prefix + ".routing-by-ordering-key só vale para o RabbitMQ com topic (exchange)");
         }
+        if (d.confirmTimeout() != null && type != Type.RABBITMQ) {
+            problems.add(prefix + ".confirm-timeout só vale para o RabbitMQ");
+        }
+        if (d.confirmTimeout() != null && (d.confirmTimeout().isNegative() || d.confirmTimeout().isZero())) {
+            problems.add(prefix + ".confirm-timeout precisa ser positivo");
+        }
         if (d.routingByOrderingKey() && d.routingKey() != null) {
             problems.add(prefix + ".routing-by-ordering-key não combina com routing-key");
         }

@@ -100,12 +100,13 @@ public record MessagingProperties(Map<String, Provider> providers, Map<String, D
      * @param routingKey      RabbitMQ: routing key do envio ao exchange ({@code topic}); padrão {@code ""}
      * @param routingByOrderingKey RabbitMQ: routing key de cada envio ao exchange é o {@code orderingKey};
      *                        não combina com {@code routingKey}
+     * @param confirmTimeout  RabbitMQ: espera máxima do publisher confirm (padrão 30 s)
      */
     public record Destination(String provider, String queueUrl, String topicArn, String queue, String topic,
                               String subscription, String deadLetter, Set<Requirement> require, boolean sessions,
                               Redelivery redelivery, Long maxMessageBytes, Duration ackDeadline, boolean ordered,
                               boolean exactlyOnce, boolean deadLetterQueue, Duration lease, String routingKey,
-                              boolean routingByOrderingKey) {
+                              boolean routingByOrderingKey, Duration confirmTimeout) {
 
         public Destination {
             require = require == null ? Set.of() : Set.copyOf(require);
