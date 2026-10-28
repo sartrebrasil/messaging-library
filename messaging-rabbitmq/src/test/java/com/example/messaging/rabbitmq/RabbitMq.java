@@ -6,6 +6,7 @@ import com.rabbitmq.client.ConnectionFactory;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 
+import java.io.IOException;
 import java.util.Map;
 
 /** Um RabbitMQ 4.1 por JVM, compartilhado pelos contratos. Filas e exchanges criados pelo teste. */
@@ -50,6 +51,31 @@ final class RabbitMq {
         try (Channel channel = connection.createChannel()) {
             channel.exchangeDeclare(exchange, "fanout", true);
             channel.queueBind(queue, exchange, "");
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** Liga ({@code true}) ou desliga o alarme de memória do broker, que trava os publishers. */
+    static void memoryAlarm(boolean on) {
+        try {
+            var result = container.execInContainer("rabbitmqctl", "set_vm_memory_high_watermark", on ? "0" : "0.4");
+            if (result.getExitCode() != 0) {
+                throw new IllegalStateException(result.getStderr());
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** Exchange direct com a fila {@code queue} ligada pela routing key {@code key}. */
+    static void direct(String exchange, String queue, String key) {
+        try (Channel channel = connection.createChannel()) {
+            channel.exchangeDeclare(exchange, "direct", true);
+            channel.queueBind(queue, exchange, key);
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }

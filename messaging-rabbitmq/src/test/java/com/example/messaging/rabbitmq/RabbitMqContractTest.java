@@ -2,6 +2,7 @@ package com.example.messaging.rabbitmq;
 
 import com.example.messaging.MessageReceiver;
 import com.example.messaging.MessageSender;
+import com.example.messaging.MessagingException;
 import com.example.messaging.OutgoingMessage;
 import com.example.messaging.ReceivedMessage;
 import com.example.messaging.testkit.MessagingContract;
@@ -16,6 +17,7 @@ import java.util.OptionalInt;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -91,6 +93,63 @@ class RabbitMqContractTest extends MessagingContract {
                 receiver.ack(received);
             }
         }
+    }
+
+    /** Cada mensagem vai para a fila ligada à sua {@code orderingKey}; {@code deduplicationId} vira o messageId. */
+    @Test
+    void exchangeByOrderingKeyRoutesEachMessageByItsKey() {
+        String exchange = "por-chave-" + UUID.randomUUID();
+        String first = RabbitMq.queue("a-" + exchange, "quorum");
+        String second = RabbitMq.queue("b-" + exchange, "quorum");
+        RabbitMq.direct(exchange, first, "pedido-a");
+        RabbitMq.direct(exchange, second, "pedido-b");
+        try (MessageSender sender = RabbitMessageSender.forExchangeByOrderingKey(RabbitMq.connection(), exchange, 1024);
+             MessageReceiver receiverA = new RabbitMessageReceiver(RabbitMq.connection(), first);
+             MessageReceiver receiverB = new RabbitMessageReceiver(RabbitMq.connection(), second)) {
+            sender.send(OutgoingMessage.ofText("a").withOrderingKey("pedido-a").withDeduplicationId("id-a"));
+            sender.send(OutgoingMessage.ofText("b").withOrderingKey("pedido-b"));
+
+            ReceivedMessage a = receiverA.receive(2, Duration.ofSeconds(5)).getFirst();
+            assertEquals("a", a.bodyAsString());
+            assertEquals("id-a", a.messageId());
+            receiverA.ack(a);
+            ReceivedMessage b = receiverB.receive(2, Duration.ofSeconds(5)).getFirst();
+            assertEquals("b", b.bodyAsString());
+            receiverB.ack(b);
+            assertTrue(receiverA.receive(1, Duration.ofMillis(300)).isEmpty());
+        }
+    }
+
+    @Test
+    void exchangeByOrderingKeyRejectsMessageWithoutKey() {
+        try (MessageSender sender = RabbitMessageSender.forExchangeByOrderingKey(RabbitMq.connection(),
+                "por-chave-" + UUID.randomUUID(), 1024)) {
+            assertThrows(IllegalArgumentException.class, () -> sender.send(OutgoingMessage.ofText("x")));
+        }
+    }
+
+    /** Com o broker em alarme de memória, o confirm não chega e o envio falha no prazo configurado. */
+    @Test
+    void confirmTimeoutIsConfigurable() {
+        String blocked = RabbitMq.queue("bloqueada-" + UUID.randomUUID(), "quorum");
+        try (MessageSender sender = RabbitMessageSender.forQueue(RabbitMq.connection(), blocked, 1024)
+                .withConfirmTimeout(Duration.ofMillis(500))) {
+            RabbitMq.memoryAlarm(true);
+            long start = System.nanoTime();
+            MessagingException e = assertThrows(MessagingException.class,
+                    () -> sender.send(OutgoingMessage.ofText("x")));
+            Duration elapsed = Duration.ofNanos(System.nanoTime() - start);
+            assertTrue(e.retryable());
+            assertTrue(elapsed.compareTo(Duration.ofSeconds(5)) < 0, "esperou " + elapsed);
+        } finally {
+            RabbitMq.memoryAlarm(false);
+        }
+    }
+
+    @Test
+    void confirmTimeoutMustBePositive() {
+        RabbitMessageSender sender = RabbitMessageSender.forQueue(RabbitMq.connection(), "qualquer", 1024);
+        assertThrows(IllegalArgumentException.class, () -> sender.withConfirmTimeout(Duration.ZERO));
     }
 
     /**

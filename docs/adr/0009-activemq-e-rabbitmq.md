@@ -132,12 +132,12 @@ Os achados que mudaram esta seção estão no [spike F9](../spikes/f9-rabbitmq.m
 | `nack` com atraso | Não há atraso nativo: o plugin de delayed exchange é da comunidade, e a fila de retry com TTL e DLX é topologia. Fica `delayedRedelivery = false`, como o `ABANDON` do Service Bus. O atraso é ignorado. |
 | `deadLetter` | Cópia para o sender de DLQ e depois `ack`. O `basicReject(requeue=false)` para a DLX perderia o `reason`. Mensagem lida de uma DLQ da DLX traz `x-first-death-reason` em `deadLetter().reason()`. |
 | `deliveryCount` | Quorum queue: `x-delivery-count + 1`, porque o header conta as entregas anteriores e falta na primeira. Classic queue: 1 na primeira entrega, vazio depois. No 4.x, a quorum queue tem `delivery-limit` 20 por padrão. |
-| `messageId` | O broker não gera: o sender grava um UUID em `message-id`. Ele se mantém no requeue. Mensagem de outro produtor sem `message-id` recebe um UUID a cada entrega. |
-| Sender | Publisher confirms. Fila: exchange padrão, routing key igual ao nome da fila e `mandatory` com `ReturnListener`. O `NO_ROUTE` chega antes do confirm e vira `DestinationNotFoundException`. Tópico: exchange com routing key fixa na construção e sem `mandatory`: exchange sem fila ligada descarta, como tópico sem subscriptions. Um channel por sender, protegido por lock e recriado depois de erro. |
-| Atributos | Headers AMQP. Na leitura, os headers `x-*` são do broker e ficam fora dos atributos. `orderingKey` e `deduplicationId` são ignorados. |
+| `messageId` | O broker não gera: o sender grava o `deduplicationId` em `message-id` ou, sem ele, um UUID. O broker não deduplica; o id serve à idempotência de quem consome. Ele se mantém no requeue. Mensagem de outro produtor sem `message-id` recebe um UUID a cada entrega. |
+| Sender | Publisher confirms. Fila: exchange padrão, routing key igual ao nome da fila e `mandatory` com `ReturnListener`. O `NO_ROUTE` chega antes do confirm e vira `DestinationNotFoundException`. Tópico: exchange com routing key fixa na construção (`forExchange`) ou igual ao `orderingKey` de cada mensagem (`forExchangeByOrderingKey`, para direct ou consistent-hash exchange; sem `orderingKey` lança `IllegalArgumentException`), e sem `mandatory`: exchange sem fila ligada descarta, como tópico sem subscriptions. Um channel por sender, protegido por lock e recriado depois de erro. |
+| Atributos | Headers AMQP. Na leitura, os headers `x-*` são do broker e ficam fora dos atributos. `orderingKey` só vira routing key em `forExchangeByOrderingKey`; `deduplicationId` só vira `message-id`. |
 | Ordem e deduplicação | `orderedDelivery = false`, `publisherDeduplication = false`. |
 | Reconexão e channel fechado | Cada channel tem uma geração. Quando ele fecha (queda, reconexão automática, erro do broker), as confirmações das mensagens dele lançam `LeaseExpiredException`, e o próximo `receive` abre outro channel. O channel antigo, se a reconexão automática o reabrir, é abortado. |
-| Alarme de memória ou disco | `connection.blocked` trava o publish. Um confirm que não chega em 30 s lança `MessagingException` com `retryable = true`. |
+| Alarme de memória ou disco | `connection.blocked` trava o publish. Um confirm que não chega no prazo (30 s por padrão; `withConfirmTimeout` ou `confirm-timeout` no starter) lança `MessagingException` com `retryable = true`. O channel sai do sender e é abortado em outra thread, porque o close espera um close-ok que o broker bloqueado não manda; o próximo envio abre outro. |
 | `consumer_timeout` | Não verificado se o broker aplica o timeout a entregas de `basic.get`. Por segurança, mantenha o maior `maxTotal` de `keepAlive` abaixo dele (padrão 30 min). |
 | `checkAccess` | `queueDeclarePassive` ou `exchangeDeclarePassive` num channel descartável, porque um 404 fecha o channel. |
 | Tamanho | `max_message_size` do broker, 16 MiB por padrão no 4.x: `maxMessageBytes` é configurado no sender. Acima do limite do broker, o 406 vira `MessageTooLargeException`. |
@@ -196,6 +196,9 @@ o ADR-0008:
   - a `broker-url` é a URI AMQP; sem ela, o starter usa o bean
     `com.rabbitmq.client.ConnectionFactory`;
   - `topic` é o exchange e `routing-key` a routing key do envio;
+  - `routing-by-ordering-key: true` usa o `orderingKey` de cada mensagem como
+    routing key, e não combina com `routing-key`;
+  - `confirm-timeout` é a espera máxima do publisher confirm (padrão 30 s);
   - `subscription` é a fila ligada ao exchange;
   - `redelivery: reschedule` é recusado no startup.
 - `redelivery: reschedule` vira `SCHEDULED`.
