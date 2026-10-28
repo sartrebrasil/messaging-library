@@ -52,6 +52,9 @@ final class RabbitProviderFactory implements ProviderFactory {
     public MessageSender sender(String name, MessagingProperties.Destination destination) {
         long max = destination.maxMessageBytes() != null
                 ? destination.maxMessageBytes() : RabbitMessageSender.DEFAULT_MAX_MESSAGE_BYTES;
+        if (destination.topic() != null && destination.routingByOrderingKey()) {
+            return RabbitMessageSender.forExchangeByOrderingKey(connection, destination.topic(), max);
+        }
         if (destination.topic() != null) {
             return RabbitMessageSender.forExchange(connection, destination.topic(),
                     destination.routingKey() != null ? destination.routingKey() : "", max);

@@ -110,9 +110,18 @@ class RabbitAutoConfigurationTest {
                         "messaging.destinations.atraso.redelivery=reschedule",
                         "messaging.destinations.chave-em-fila.provider=rmq",
                         "messaging.destinations.chave-em-fila.queue=pedidos",
-                        "messaging.destinations.chave-em-fila.routing-key=x")
+                        "messaging.destinations.chave-em-fila.routing-key=x",
+                        "messaging.destinations.duas-chaves.provider=rmq",
+                        "messaging.destinations.duas-chaves.topic=eventos",
+                        "messaging.destinations.duas-chaves.routing-key=x",
+                        "messaging.destinations.duas-chaves.routing-by-ordering-key=true",
+                        "messaging.destinations.por-chave-em-fila.provider=rmq",
+                        "messaging.destinations.por-chave-em-fila.queue=pedidos",
+                        "messaging.destinations.por-chave-em-fila.routing-by-ordering-key=true")
                 .run(context -> assertThat(context).getFailure().rootCause()
                         .hasMessageContaining("atraso.redelivery=RESCHEDULE: o RabbitMQ não tem atraso")
-                        .hasMessageContaining("chave-em-fila.routing-key só vale para o RabbitMQ com topic"));
+                        .hasMessageContaining("chave-em-fila.routing-key só vale para o RabbitMQ com topic")
+                        .hasMessageContaining("duas-chaves.routing-by-ordering-key não combina com routing-key")
+                        .hasMessageContaining("por-chave-em-fila.routing-by-ordering-key só vale para o RabbitMQ com topic"));
     }
 }

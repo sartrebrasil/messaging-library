@@ -54,4 +54,14 @@ final class RabbitMq {
             throw new IllegalStateException(e);
         }
     }
+
+    /** Exchange direct com a fila {@code queue} ligada pela routing key {@code key}. */
+    static void direct(String exchange, String queue, String key) {
+        try (Channel channel = connection.createChannel()) {
+            channel.exchangeDeclare(exchange, "direct", true);
+            channel.queueBind(queue, exchange, key);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
 }
