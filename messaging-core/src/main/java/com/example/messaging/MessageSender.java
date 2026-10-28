@@ -15,6 +15,10 @@ public interface MessageSender extends AutoCloseable {
     /**
      * Envia e espera a confirmação do provedor.
      *
+     * <p>Depois de uma falha com {@link MessagingException#retryable()}, a mensagem pode ter chegado
+     * (timeout, por exemplo). Para repetir, reenvie o mesmo {@link OutgoingMessage}, que mantém o
+     * {@code deduplicationId}, em vez de montar outro.</p>
+     *
      * @throws MessageTooLargeException a mensagem passa de {@link Capabilities#maxMessageBytes()}
      * @throws IllegalArgumentException o destino exige {@code orderingKey} (SQS/SNS FIFO, Service Bus com sessions)
      */
