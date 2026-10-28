@@ -64,6 +64,7 @@ class RabbitAutoConfigurationTest {
         runner().withPropertyValues(
                         "messaging.destinations.pedidos.provider=rmq", "messaging.destinations.pedidos.queue=pedidos",
                         "messaging.destinations.pedidos.lease=5s",
+                        "messaging.destinations.pedidos.confirm-timeout=10s",
                         "messaging.destinations.pedidos.require=lease-expired-on-ack",
                         "messaging.destinations.eventos.provider=rmq", "messaging.destinations.eventos.topic=eventos",
                         "messaging.destinations.eventos.routing-key=pedido.criado",
@@ -110,9 +111,22 @@ class RabbitAutoConfigurationTest {
                         "messaging.destinations.atraso.redelivery=reschedule",
                         "messaging.destinations.chave-em-fila.provider=rmq",
                         "messaging.destinations.chave-em-fila.queue=pedidos",
-                        "messaging.destinations.chave-em-fila.routing-key=x")
+                        "messaging.destinations.chave-em-fila.routing-key=x",
+                        "messaging.destinations.duas-chaves.provider=rmq",
+                        "messaging.destinations.duas-chaves.topic=eventos",
+                        "messaging.destinations.duas-chaves.routing-key=x",
+                        "messaging.destinations.duas-chaves.routing-by-ordering-key=true",
+                        "messaging.destinations.por-chave-em-fila.provider=rmq",
+                        "messaging.destinations.por-chave-em-fila.queue=pedidos",
+                        "messaging.destinations.por-chave-em-fila.routing-by-ordering-key=true",
+                        "messaging.destinations.confirm-zero.provider=rmq",
+                        "messaging.destinations.confirm-zero.queue=pedidos",
+                        "messaging.destinations.confirm-zero.confirm-timeout=0s")
                 .run(context -> assertThat(context).getFailure().rootCause()
                         .hasMessageContaining("atraso.redelivery=RESCHEDULE: o RabbitMQ não tem atraso")
-                        .hasMessageContaining("chave-em-fila.routing-key só vale para o RabbitMQ com topic"));
+                        .hasMessageContaining("chave-em-fila.routing-key só vale para o RabbitMQ com topic")
+                        .hasMessageContaining("duas-chaves.routing-by-ordering-key não combina com routing-key")
+                        .hasMessageContaining("por-chave-em-fila.routing-by-ordering-key só vale para o RabbitMQ com topic")
+                        .hasMessageContaining("confirm-zero.confirm-timeout precisa ser positivo"));
     }
 }

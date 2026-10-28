@@ -249,7 +249,9 @@ messaging:
 ```
 
 No RabbitMQ (`type: rabbitmq`), `broker-url` é a URI AMQP (`amqp://host:5672/vhost`), `topic` é o
-exchange, `routing-key` a routing key do envio e `subscription` a fila ligada ao exchange.
+exchange, `routing-key` a routing key do envio e `subscription` a fila ligada ao exchange. Com
+`routing-by-ordering-key: true`, a routing key de cada envio é o `orderingKey` da mensagem (direct ou
+consistent-hash exchange), e o `deduplicationId`, quando existe, vira o `message-id`.
 `redelivery: reschedule` é recusado no startup, porque o RabbitMQ não tem atraso no `nack`.
 
 No Artemis (`type: artemis`), `topic` é o endereço multicast e `topic` + `subscription` recebe do
@@ -276,7 +278,7 @@ try (MessageReceiver receiver = destinations.receiver("pedidos")) {   // instân
 
 Outras propriedades do destino: `max-message-bytes` (SNS, Service Bus, ActiveMQ e RabbitMQ),
 `sessions` (Service Bus), `redelivery: abandon | reschedule` (Service Bus e ActiveMQ), `ordered` e
-`exactly-once` (Pub/Sub), `lease` (ActiveMQ e RabbitMQ, padrão 60 s), `routing-key` (RabbitMQ).
+`exactly-once` (Pub/Sub), `lease` (ActiveMQ e RabbitMQ, padrão 60 s), `routing-key`, `routing-by-ordering-key` e `confirm-timeout` (RabbitMQ, padrão 30 s).
 
 No ActiveMQ, o starter abre uma conexão por provider no startup e a fecha no shutdown. A lib não
 recria a conexão: a reconexão vem da URL. Com `broker-url`, o `JmsDialect` cuida disso:

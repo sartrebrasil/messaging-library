@@ -19,8 +19,9 @@ import java.util.UUID;
 /**
  * Mensagem no formato AMQP 0-9-1 (ADR-0009): corpo binário nativo, {@code contentType} e
  * {@code messageId} nas properties, atributos como headers (sem empacotar). O broker não gera
- * {@code message-id}: o sender grava um UUID. {@code orderingKey} e {@code deduplicationId} são
- * ignorados: o RabbitMQ não tem ordem por chave nem deduplicação no envio.
+ * {@code message-id}: o sender grava o {@code deduplicationId} ou, sem ele, um UUID. O RabbitMQ não
+ * deduplica no envio; o id serve à idempotência de quem consome. {@code orderingKey} só é usado
+ * pelo sender como routing key ({@link RabbitMessageSender#forExchangeByOrderingKey}).
  */
 final class RabbitCodec {
 
@@ -50,7 +51,7 @@ final class RabbitCodec {
             headers.put(ReservedAttributes.DEAD_LETTER, message.deadLetter().toAttributeValue());
         }
         AMQP.BasicProperties properties = new AMQP.BasicProperties.Builder()
-                .messageId(UUID.randomUUID().toString())
+                .messageId(message.deduplicationId() != null ? message.deduplicationId() : UUID.randomUUID().toString())
                 .contentType(message.contentType())
                 .deliveryMode(2)
                 .timestamp(new Date())
