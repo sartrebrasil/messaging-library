@@ -23,8 +23,10 @@ import java.util.concurrent.locks.ReentrantLock;
  *   <li>Fila: exchange padrão com routing key igual ao nome da fila e {@code mandatory}. Uma fila
  *       inexistente volta como {@code NO_ROUTE} e vira {@link DestinationNotFoundException}; sem
  *       {@code mandatory}, o broker descartaria a mensagem em silêncio.</li>
- *   <li>Exchange (tópico): routing key fixa na construção, sem {@code mandatory}. Exchange sem
- *       fila ligada descarta a mensagem, como um tópico sem subscriptions.</li>
+ *   <li>Exchange (tópico): routing key fixa na construção ou, em
+ *       {@link #forExchangeByOrderingKey}, o {@code orderingKey} de cada mensagem; sem
+ *       {@code mandatory}. Exchange sem fila ligada descarta a mensagem, como um tópico sem
+ *       subscriptions.</li>
  *   <li>Um channel por sender, usado por uma thread de cada vez. Paralelismo de envio = mais
  *       senders sobre a mesma {@link Connection}.</li>
  *   <li>Confirm que não chega em {@link #CONFIRM_TIMEOUT} (alarme de memória ou disco no broker,
@@ -39,6 +41,7 @@ public final class RabbitMessageSender implements MessageSender {
 
     private final Connection connection;
     private final String exchange;
+    /** {@code null}: routing key de cada envio é o {@code orderingKey} da mensagem. */
     private final String routingKey;
     private final boolean mandatory;
     private final long maxMessageBytes;
@@ -67,16 +70,31 @@ public final class RabbitMessageSender implements MessageSender {
         return new RabbitMessageSender(connection, exchange, routingKey, false, maxMessageBytes);
     }
 
+    /**
+     * Routing key de cada envio = {@code orderingKey}, para direct ou consistent-hash exchange.
+     * Envio sem {@code orderingKey} lança {@link IllegalArgumentException}, como no SQS FIFO.
+     * {@code orderedDelivery} continua {@code false}: a ordem depende de um consumidor por fila,
+     * que é topologia.
+     */
+    public static RabbitMessageSender forExchangeByOrderingKey(Connection connection, String exchange,
+                                                               long maxMessageBytes) {
+        return new RabbitMessageSender(connection, exchange, null, false, maxMessageBytes);
+    }
+
     @Override
     public SendResult send(OutgoingMessage message) {
         ensureOpen();
+        String key = routingKey != null ? routingKey : message.orderingKey();
+        if (key == null) {
+            throw new IllegalArgumentException("Exchange roteado por orderingKey exige orderingKey: " + exchange);
+        }
         RabbitCodec.Encoded encoded = RabbitCodec.encode(message, maxMessageBytes);
         String id = encoded.properties().getMessageId();
         lock.lock();
         try {
             ensureOpen();
             Channel open = channel();
-            open.basicPublish(exchange, routingKey, mandatory, encoded.properties(), encoded.body());
+            open.basicPublish(exchange, key, mandatory, encoded.properties(), encoded.body());
             // o basic.return chega antes do confirm (F9)
             open.waitForConfirmsOrDie(CONFIRM_TIMEOUT.toMillis());
         } catch (IOException | TimeoutException | ShutdownSignalException e) {
@@ -149,7 +167,7 @@ public final class RabbitMessageSender implements MessageSender {
     }
 
     private String destination() {
-        return exchange.isEmpty() ? routingKey : exchange + "/" + routingKey;
+        return exchange.isEmpty() ? routingKey : exchange + "/" + (routingKey != null ? routingKey : "<orderingKey>");
     }
 
     private void ensureOpen() {

@@ -16,6 +16,7 @@ import java.util.OptionalInt;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -90,6 +91,39 @@ class RabbitMqContractTest extends MessagingContract {
                 assertEquals(OptionalInt.of(1), received.deliveryCount());
                 receiver.ack(received);
             }
+        }
+    }
+
+    /** Cada mensagem vai para a fila ligada à sua {@code orderingKey}; {@code deduplicationId} vira o messageId. */
+    @Test
+    void exchangeByOrderingKeyRoutesEachMessageByItsKey() {
+        String exchange = "por-chave-" + UUID.randomUUID();
+        String first = RabbitMq.queue("a-" + exchange, "quorum");
+        String second = RabbitMq.queue("b-" + exchange, "quorum");
+        RabbitMq.direct(exchange, first, "pedido-a");
+        RabbitMq.direct(exchange, second, "pedido-b");
+        try (MessageSender sender = RabbitMessageSender.forExchangeByOrderingKey(RabbitMq.connection(), exchange, 1024);
+             MessageReceiver receiverA = new RabbitMessageReceiver(RabbitMq.connection(), first);
+             MessageReceiver receiverB = new RabbitMessageReceiver(RabbitMq.connection(), second)) {
+            sender.send(OutgoingMessage.ofText("a").withOrderingKey("pedido-a").withDeduplicationId("id-a"));
+            sender.send(OutgoingMessage.ofText("b").withOrderingKey("pedido-b"));
+
+            ReceivedMessage a = receiverA.receive(2, Duration.ofSeconds(5)).getFirst();
+            assertEquals("a", a.bodyAsString());
+            assertEquals("id-a", a.messageId());
+            receiverA.ack(a);
+            ReceivedMessage b = receiverB.receive(2, Duration.ofSeconds(5)).getFirst();
+            assertEquals("b", b.bodyAsString());
+            receiverB.ack(b);
+            assertTrue(receiverA.receive(1, Duration.ofMillis(300)).isEmpty());
+        }
+    }
+
+    @Test
+    void exchangeByOrderingKeyRejectsMessageWithoutKey() {
+        try (MessageSender sender = RabbitMessageSender.forExchangeByOrderingKey(RabbitMq.connection(),
+                "por-chave-" + UUID.randomUUID(), 1024)) {
+            assertThrows(IllegalArgumentException.class, () -> sender.send(OutgoingMessage.ofText("x")));
         }
     }
 
