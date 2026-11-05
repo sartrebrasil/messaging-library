@@ -403,6 +403,58 @@ class InboxConsumerTest {
     }
 
     @Test
+    void keyLanesHandleABatchInParallel() {
+        for (int i = 0; i < 10; i++) {
+            send("m" + i);
+        }
+        long start = System.nanoTime();
+        start(lanes(10), policy(2, 0), m -> {
+            Thread.sleep(200);
+            handled.add(m);
+            return null;
+        }, dlqAndFailed(List.of()));
+
+        await(() -> handled.size() == 10 && messaging.size(MAIN) == 0);
+        assertTrue(Duration.ofNanos(System.nanoTime() - start).compareTo(Duration.ofMillis(1500)) < 0,
+                "ten 200 ms messages in parallel, not in sequence");
+    }
+
+    @Test
+    void keyLanesKeepTheOrderOfOneKey() {
+        var inKey = new AtomicInteger();
+        var overlap = new AtomicBoolean();
+        var order = new CopyOnWriteArrayList<String>();
+        for (int i = 0; i < 5; i++) {
+            messaging.queueSender(MAIN).send(OutgoingMessage.ofText("doc-" + i).withOrderingKey("doc"));
+        }
+        for (int i = 0; i < 5; i++) {
+            send("other-" + i);
+        }
+        start(lanes(10), policy(2, 0), m -> {
+            boolean keyed = m.payload().startsWith("doc-");
+            if (keyed && inKey.incrementAndGet() > 1) {
+                overlap.set(true);
+            }
+            Thread.sleep(50);
+            if (keyed) {
+                order.add(m.payload());
+                inKey.decrementAndGet();
+            }
+            handled.add(m);
+            return null;
+        }, dlqAndFailed(List.of()));
+
+        await(() -> handled.size() == 10 && messaging.size(MAIN) == 0);
+        assertFalse(overlap.get(), "one key runs in sequence");
+        assertEquals(List.of("doc-0", "doc-1", "doc-2", "doc-3", "doc-4"), order);
+    }
+
+    private static ConsumerSettings lanes(int keyLanes) {
+        return new ConsumerSettings("billing", MAIN, 1, 10, Duration.ofMillis(100), Duration.ofSeconds(5),
+                Duration.ofSeconds(5), Ordering.RELAXED, DelayedStrategy.AUTO, true, keyLanes);
+    }
+
+    @Test
     void startupRejectsWhatCannotWork() {
         var strict = new ConsumerSettings("billing", MAIN, 1, 1, Duration.ofMillis(100), Duration.ofSeconds(5),
                 Duration.ofSeconds(2), Ordering.STRICT, DelayedStrategy.AUTO, true);

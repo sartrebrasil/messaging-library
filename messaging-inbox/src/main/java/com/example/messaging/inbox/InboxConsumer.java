@@ -93,6 +93,10 @@ public final class InboxConsumer {
         }
         this.applier = new OutcomeApplier(settings, strategy, destinations, clock);
         this.lastReceive = new AtomicReference<>(clock.instant());
+        if (settings.keyLanes() > 1 && settings.maxMessagesPerPoll() == 1) {
+            LOG.log(System.Logger.Level.WARNING, "Consumer {0}: key-lanes {1} with max-messages-per-poll 1 has "
+                    + "nothing to parallelize (ADR-0016)", settings.consumer(), settings.keyLanes());
+        }
     }
 
     public synchronized void start() {

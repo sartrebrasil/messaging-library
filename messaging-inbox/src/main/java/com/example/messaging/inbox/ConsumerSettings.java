@@ -14,6 +14,8 @@ import java.util.Objects;
  * @param maxProcessing           longest processing of one delivery; base of the lease budget
  * @param shutdownTimeout         how long {@code stop} waits for running handlers
  * @param includeExceptionMessage put the exception message in the {@code dead_letter} attribute of copies
+ * @param keyLanes                lanes that process the messages of one {@code receive} in parallel (ADR-0016):
+ *                                same {@code orderingKey}, same lane, in order; {@code 1} processes them in sequence
  */
 public record ConsumerSettings(String consumer,
                                String destination,
@@ -24,7 +26,8 @@ public record ConsumerSettings(String consumer,
                                Duration shutdownTimeout,
                                Ordering ordering,
                                DelayedStrategy strategy,
-                               boolean includeExceptionMessage) {
+                               boolean includeExceptionMessage,
+                               int keyLanes) {
 
     public ConsumerSettings {
         Objects.requireNonNull(consumer, "consumer");
@@ -34,8 +37,8 @@ public record ConsumerSettings(String consumer,
         Objects.requireNonNull(shutdownTimeout, "shutdownTimeout");
         Objects.requireNonNull(ordering, "ordering");
         Objects.requireNonNull(strategy, "strategy");
-        if (concurrency < 1 || maxMessagesPerPoll < 1) {
-            throw new IllegalArgumentException("concurrency and maxMessagesPerPoll must be at least 1");
+        if (concurrency < 1 || maxMessagesPerPoll < 1 || keyLanes < 1) {
+            throw new IllegalArgumentException("concurrency, maxMessagesPerPoll and keyLanes must be at least 1");
         }
         if (maxProcessing.isNegative() || maxProcessing.isZero()) {
             throw new IllegalArgumentException("maxProcessing must be positive: " + maxProcessing);
@@ -48,9 +51,17 @@ public record ConsumerSettings(String consumer,
         }
     }
 
+    /** Without key lanes: the messages of one {@code receive} run in sequence. */
+    public ConsumerSettings(String consumer, String destination, int concurrency, int maxMessagesPerPoll,
+                            Duration pollWait, Duration maxProcessing, Duration shutdownTimeout, Ordering ordering,
+                            DelayedStrategy strategy, boolean includeExceptionMessage) {
+        this(consumer, destination, concurrency, maxMessagesPerPoll, pollWait, maxProcessing, shutdownTimeout,
+                ordering, strategy, includeExceptionMessage, 1);
+    }
+
     /** Defaults of ADR-0008 for the {@code messaging} broker. */
     public static ConsumerSettings defaults(String consumer, String destination) {
         return new ConsumerSettings(consumer, destination, 1, 1, Duration.ofSeconds(20), Duration.ofMinutes(15),
-                Duration.ofSeconds(30), Ordering.RELAXED, DelayedStrategy.AUTO, true);
+                Duration.ofSeconds(30), Ordering.RELAXED, DelayedStrategy.AUTO, true, 1);
     }
 }

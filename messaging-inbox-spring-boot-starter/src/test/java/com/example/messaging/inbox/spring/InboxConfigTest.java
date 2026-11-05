@@ -42,6 +42,7 @@ class InboxConfigTest {
         assertThat(consumer.pollWait()).isEqualTo(Duration.ofSeconds(20));
         assertThat(consumer.idempotency()).isFalse();
         assertThat(consumer.completedTtl()).isEqualTo(Duration.ofDays(7));
+        assertThat(consumer.keyLanes()).isEqualTo(1);
     }
 
     @Test
@@ -62,11 +63,13 @@ class InboxConfigTest {
                 "inbox.brokers.queues.configuration.max-messages-per-poll", "4",
                 C + "destination", "orders", C + "failed", "orders-failed",
                 C + "configuration.poll-wait", "10s",
+                "inbox.defaults.key-lanes", "8",
                 C + "retry.delayed.max", "5m"));
 
         assertThat(consumer.pollWait()).isEqualTo(Duration.ofSeconds(10));
         assertThat(consumer.maxMessagesPerPoll()).isEqualTo(4);
         assertThat(consumer.delayedMaxSet()).isTrue();
+        assertThat(consumer.keyLanes()).isEqualTo(8);
     }
 
     @Test

@@ -76,7 +76,7 @@ final class ConsumerBuilder {
                 c.skipImmediate(), c.retryable());
         ConsumerSettings settings = new ConsumerSettings(c.name(), c.destination(), c.concurrency(),
                 c.maxMessagesPerPoll(), c.pollWait(), c.maxProcessing(), c.shutdownTimeout(), c.ordering(),
-                c.strategy(), c.includeExceptionMessage());
+                c.strategy(), c.includeExceptionMessage(), c.keyLanes());
         InboxIdempotency idempotency = null;
         if (c.idempotency()) {
             Duration reservation = c.reservationTtl() != null ? c.reservationTtl()

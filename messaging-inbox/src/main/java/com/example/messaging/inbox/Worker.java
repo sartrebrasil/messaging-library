@@ -11,6 +11,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.DoubleSupplier;
 
@@ -39,11 +43,17 @@ final class Worker implements Runnable {
     private final Clock clock;
     private final DoubleSupplier random;
     private final ConsumerObserver observer;
+    private final ExecutorService lanePool;
 
     Worker(ConsumerSettings settings, MessageReceiver receiver, Pipeline<?> pipeline, OutcomeApplier applier,
            DelayedStrategy strategy, Duration leaseBudget, StopSignal stop, AtomicReference<Instant> lastReceive,
            Clock clock, DoubleSupplier random, ConsumerObserver observer) {
         this.observer = observer;
+        // ADR-0016: concurrency x key-lanes platform threads per consumer, created once per worker
+        this.lanePool = settings.keyLanes() > 1
+                ? Executors.newFixedThreadPool(settings.keyLanes(),
+                Thread.ofPlatform().name("inbox-" + settings.consumer() + "-lane-", 0).factory())
+                : null;
         this.settings = settings;
         this.receiver = receiver;
         this.pipeline = pipeline;
@@ -84,32 +94,117 @@ final class Worker implements Runnable {
         } catch (InterruptedException e) {
             // stop signal during a receive backoff
         } finally {
+            if (lanePool != null) {
+                lanePool.shutdown();
+            }
             receiver.close();
         }
     }
 
+    /**
+     * The messages of one {@code receive}, split in key lanes (ADR-0016): lanes run in parallel, a lane in order,
+     * and the next {@code receive} waits for all of them. With one lane, everything runs on this thread.
+     */
     private void handleAll(List<ReceivedMessage> messages) {
-        List<KeepAlive> leases = new ArrayList<>(messages.size());
+        List<List<Integer>> lanes = lanes(messages);
+        KeepAlive[] leases = new KeepAlive[messages.size()];
         try {
-            for (int i = 0; i < messages.size(); i++) {
-                leases.add(keepAlive(messages.get(i), leaseBudget.multipliedBy(i + 1)));
+            for (List<Integer> lane : lanes) {
+                for (int position = 0; position < lane.size(); position++) {
+                    int index = lane.get(position);
+                    // a message waits for the ones before it in its lane (ADR-0009, ADR-0016)
+                    leases[index] = keepAlive(messages.get(index), leaseBudget.multipliedBy(position + 1));
+                }
             }
             messages.forEach(observer::received);
+            if (lanes.size() == 1) {
+                runLane(messages, lanes.getFirst(), leases);
+                return;
+            }
+            List<Future<?>> running = new ArrayList<>(lanes.size());
+            for (List<Integer> lane : lanes) {
+                running.add(lanePool.submit(() -> runLane(messages, lane, leases)));
+            }
+            for (Future<?> lane : running) {
+                await(lane);
+            }
+        } finally {
+            for (KeepAlive lease : leases) {
+                if (lease != null) {
+                    lease.close();
+                }
+            }
+        }
+    }
+
+    private void runLane(List<ReceivedMessage> messages, List<Integer> lane, KeepAlive[] leases) {
+        for (int index : lane) {
+            ReceivedMessage message = messages.get(index);
+            try {
+                if (stop.stopping()) {
+                    report(message, null, Outcome.RELEASE,
+                            applier.release(receiver, message, Effect.RELEASED), System.nanoTime());
+                } else {
+                    handle(message);
+                }
+            } finally {
+                leases[index].close();
+            }
+        }
+    }
+
+    /** Same {@code orderingKey}, same lane; no key, the lane with fewest messages. Empty lanes are left out. */
+    private List<List<Integer>> lanes(List<ReceivedMessage> messages) {
+        int count = Math.min(settings.keyLanes(), messages.size());
+        if (count <= 1) {
+            List<Integer> all = new ArrayList<>(messages.size());
             for (int i = 0; i < messages.size(); i++) {
-                ReceivedMessage message = messages.get(i);
+                all.add(i);
+            }
+            return List.of(all);
+        }
+        List<List<Integer>> lanes = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            lanes.add(new ArrayList<>());
+        }
+        List<Integer> unkeyed = new ArrayList<>();
+        for (int i = 0; i < messages.size(); i++) {
+            String key = messages.get(i).orderingKey();
+            if (key == null) {
+                unkeyed.add(i);
+            } else {
+                lanes.get(Math.floorMod(key.hashCode(), count)).add(i);
+            }
+        }
+        for (int i : unkeyed) {
+            lanes.stream().min(java.util.Comparator.comparingInt(List::size)).orElseThrow().add(i);
+        }
+        lanes.removeIf(List::isEmpty);
+        return lanes;
+    }
+
+    /** Lanes never throw (handle catches everything but OutOfMemoryError); shutdown waits for them to finish. */
+    private static void await(Future<?> lane) {
+        boolean interrupted = false;
+        try {
+            while (true) {
                 try {
-                    if (stop.stopping()) {
-                        report(message, null, Outcome.RELEASE,
-                                applier.release(receiver, message, Effect.RELEASED), System.nanoTime());
-                    } else {
-                        handle(message);
+                    lane.get();
+                    return;
+                } catch (InterruptedException e) {
+                    interrupted = true;
+                } catch (ExecutionException e) {
+                    if (e.getCause() instanceof OutOfMemoryError oom) {
+                        throw oom;
                     }
-                } finally {
-                    leases.get(i).close();
+                    LOG.log(System.Logger.Level.ERROR, "inbox lane failed", e.getCause());
+                    return;
                 }
             }
         } finally {
-            leases.forEach(KeepAlive::close);
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
