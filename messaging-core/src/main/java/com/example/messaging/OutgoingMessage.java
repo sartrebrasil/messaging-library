@@ -78,6 +78,16 @@ public record OutgoingMessage(byte[] body,
                 null, null, null, null);
     }
 
+    /**
+     * Cópia de uma mensagem recebida para reenviá-la (DLQ, fila de retry, {@code failed}): corpo, atributos do
+     * usuário, {@code contentType}, {@code orderingKey} e {@code traceparent}. {@code deduplicationId} e
+     * {@code deadLetter} ficam vazios; cada chamador decide os seus com {@code with*}.
+     */
+    public static OutgoingMessage copyOf(ReceivedMessage message) {
+        return new OutgoingMessage(message.body(), message.attributes(), message.contentType(), message.orderingKey(),
+                null, message.traceparent(), null);
+    }
+
     public OutgoingMessage withAttribute(String key, String value) {
         Map<String, String> copy = new HashMap<>(attributes);
         copy.put(key, value);

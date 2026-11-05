@@ -1,0 +1,301 @@
+package com.example.messaging.inbox.spring;
+
+import com.example.idempotency.spi.IdempotencyStore;
+import com.example.idempotency.store.InMemoryIdempotencyStore;
+import com.example.messaging.Capabilities;
+import com.example.messaging.MessageReceiver;
+import com.example.messaging.MessageSender;
+import com.example.messaging.OutgoingMessage;
+import com.example.messaging.inbox.HandlerResult;
+import com.example.messaging.inbox.InboxHandler;
+import com.example.messaging.inbox.InboxMessage;
+import com.example.messaging.inbox.TypedMessage;
+import com.example.messaging.memory.InMemoryMessaging;
+import com.example.messaging.memory.InMemoryMessaging.QueueOptions;
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import tools.jackson.databind.JsonNode;
+
+import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.BooleanSupplier;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.fail;
+
+class InboxAutoConfigurationTest {
+
+    record Order(String id, int total) {
+    }
+
+    static final String ORDER = "{\"messageId\":\"m-1\",\"eventType\":\"OrderCreated\",\"aggregateId\":\"o-1\","
+            + "\"payload\":{\"id\":\"o-1\",\"total\":10}}";
+    static final String C = "inbox.consumers.billing-orders.";
+
+    static final List<Object> HANDLED = new CopyOnWriteArrayList<>();
+
+    final ApplicationContextRunner runner = new ApplicationContextRunner()
+            .withConfiguration(AutoConfigurations.of(InboxAutoConfiguration.class))
+            .withUserConfiguration(Broker.class)
+            .withPropertyValues(C + "destination=orders", C + "failed=orders-failed", C + "dead-letter=orders-dlq",
+                    C + "configuration.poll-wait=100ms", C + "configuration.shutdown-timeout=2s");
+
+    InboxAutoConfigurationTest() {
+        HANDLED.clear();
+    }
+
+    @Test
+    void functionalHandlerBoundByCamelCaseName() {
+        runner.withUserConfiguration(Functional.class).run(context -> {
+            assertThat(context).hasNotFailed();
+            InMemoryMessaging messaging = context.getBean(InMemoryMessaging.class);
+            messaging.queueSender("orders").send(OutgoingMessage.ofText(ORDER));
+
+            await(() -> HANDLED.size() == 1);
+            assertThat(HANDLED.getFirst()).isEqualTo(new Order("o-1", 10));
+        });
+    }
+
+    @Test
+    void listenerWithPayloadAndMessageAndAnExplicitResult() {
+        runner.withUserConfiguration(Listener.class).run(context -> {
+            assertThat(context).hasNotFailed();
+            InMemoryMessaging messaging = context.getBean(InMemoryMessaging.class);
+            messaging.queueSender("orders").send(OutgoingMessage.ofText(ORDER));
+
+            await(() -> messaging.size("orders-failed") == 1);
+            assertThat(HANDLED).containsExactly("o-1/OrderCreated");
+        });
+    }
+
+    @Test
+    void typedMessageListener() {
+        runner.withUserConfiguration(TypedListener.class).run(context -> {
+            context.getBean(InMemoryMessaging.class).queueSender("orders").send(OutgoingMessage.ofText(ORDER));
+
+            await(() -> HANDLED.size() == 1);
+            assertThat(HANDLED.getFirst()).isEqualTo("o-1");
+        });
+    }
+
+    @Test
+    void startupFailsListingEveryHandlerProblem() {
+        runner.withUserConfiguration(Functional.class, Listener.class, Stray.class)
+                .withPropertyValues("inbox.consumers.lonely.destination=orders", "inbox.consumers.lonely.failed=orders-failed")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasMessageContaining("billing-orders has more than one handler")
+                        .hasMessageContaining("lonely has no handler")
+                        .hasMessageContaining("consumer 'nobody' does not exist"));
+    }
+
+    @Test
+    void unknownPropertiesFailTheStartup() {
+        runner.withUserConfiguration(Functional.class).withPropertyValues(C + "concurrencyy=2")
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    @Test
+    void stopThenStartRebuildsTheConsumers() {
+        runner.withUserConfiguration(Functional.class).run(context -> {
+            InMemoryMessaging messaging = context.getBean(InMemoryMessaging.class);
+            InboxLifecycle lifecycle = context.getBean(InboxLifecycle.class);
+            var first = lifecycle.consumer("billing-orders");
+
+            context.stop();
+            assertThat(first.running()).isFalse();
+            context.start();
+
+            assertThat(lifecycle.consumer("billing-orders")).isNotSameAs(first);
+            messaging.queueSender("orders").send(OutgoingMessage.ofText(ORDER));
+            await(() -> HANDLED.size() == 1);
+        });
+    }
+
+    @Test
+    void idempotencyUsesTheStoreBean() {
+        runner.withUserConfiguration(Functional.class, Store.class)
+                .withPropertyValues(C + "idempotency.enabled=true")
+                .run(context -> {
+                    InMemoryMessaging messaging = context.getBean(InMemoryMessaging.class);
+                    messaging.queueSender("orders").send(OutgoingMessage.ofText(ORDER));
+                    messaging.queueSender("orders").send(OutgoingMessage.ofText(ORDER));
+
+                    await(() -> messaging.size("orders") == 0);
+                    assertThat(HANDLED).hasSize(1);
+                });
+    }
+
+    @Test
+    void idempotencyWithoutAStoreFailsTheStartup() {
+        runner.withUserConfiguration(Functional.class).withPropertyValues(C + "idempotency.enabled=true")
+                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("needs one IdempotencyStore bean"));
+    }
+
+    @Test
+    void delayedMaxIsCappedToTheReceiverOnlyWhenNotSet() {
+        ApplicationContextRunner tenMinutes = new ApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(InboxAutoConfiguration.class))
+                .withUserConfiguration(Functional.class)
+                .withBean(InboxDestinations.class, () -> limited(Duration.ofMinutes(10)))
+                .withPropertyValues(C + "destination=orders", C + "failed=orders-failed", C + "dead-letter=orders-dlq",
+                        C + "configuration.poll-wait=100ms", C + "configuration.shutdown-timeout=2s");
+
+        tenMinutes.run(context -> assertThat(context).hasNotFailed());
+        tenMinutes.withPropertyValues(C + "retry.delayed.max=15m")
+                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("above the receiver maxRedeliveryDelay"));
+    }
+
+    @Test
+    void capabilitiesAreValidatedAtStartup() {
+        runner.withUserConfiguration(Functional.class).withPropertyValues(C + "ordering=strict")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasStackTraceContaining("ordering: strict needs a receiver with orderedDelivery"));
+        runner.withUserConfiguration(Functional.class).withPropertyValues(C + "retry.delayed.strategy=retry-queues")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasStackTraceContaining("retry-queues without delayed.queues"));
+    }
+
+    static void await(BooleanSupplier condition) {
+        long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+        while (!condition.getAsBoolean()) {
+            if (System.nanoTime() > deadline) {
+                fail("condition not met in 10 s");
+            }
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+    }
+
+    /** Destinations over a fresh in-memory broker whose receivers report a {@code maxRedeliveryDelay}. */
+    private static InboxDestinations limited(Duration maxRedeliveryDelay) {
+        InMemoryMessaging messaging = Broker.messaging();
+        return new InboxDestinations() {
+            @Override
+            public MessageReceiver receiver(String name) {
+                MessageReceiver delegate = messaging.receiver(name);
+                return (MessageReceiver) java.lang.reflect.Proxy.newProxyInstance(getClass().getClassLoader(),
+                        new Class<?>[] {MessageReceiver.class}, (proxy, method, args) -> {
+                            if (method.getName().equals("capabilities")) {
+                                Capabilities c = delegate.capabilities();
+                                return new Capabilities(c.maxMessageBytes(), c.maxBatchSize(), true, maxRedeliveryDelay,
+                                        c.nativeDeadLetter(), c.orderedDelivery(), c.publisherDeduplication(),
+                                        c.reportsLeaseExpiredOnAck());
+                            }
+                            try {
+                                return method.invoke(delegate, args);
+                            } catch (java.lang.reflect.InvocationTargetException e) {
+                                throw e.getCause();
+                            }
+                        });
+            }
+
+            @Override
+            public MessageSender sender(String name) {
+                return messaging.queueSender(name);
+            }
+        };
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    static class Broker {
+
+        static InMemoryMessaging messaging() {
+            InMemoryMessaging messaging = new InMemoryMessaging();
+            for (String q : List.of("orders", "orders-failed", "orders-dlq")) {
+                messaging.createQueue(q, QueueOptions.defaults());
+            }
+            return messaging;
+        }
+
+        @Bean
+        InMemoryMessaging inMemoryMessaging() {
+            return messaging();
+        }
+
+        @Bean
+        InboxDestinations inboxDestinations(InMemoryMessaging messaging) {
+            return new InboxDestinations() {
+                @Override
+                public MessageReceiver receiver(String name) {
+                    return messaging.receiver(name);
+                }
+
+                @Override
+                public MessageSender sender(String name) {
+                    return messaging.queueSender(name);
+                }
+            };
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    static class Functional {
+        @Bean
+        InboxHandler<Order> billingOrders() {
+            return message -> HANDLED.add(message.payload());
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    static class Listener {
+        @Bean
+        Handlers handlers() {
+            return new Handlers();
+        }
+    }
+
+    static class Handlers {
+        @InboxListener(consumer = "billing-orders")
+        HandlerResult on(JsonNode order, InboxMessage message) {
+            HANDLED.add(order.path("id").asString() + "/" + message.type());
+            return HandlerResult.reject("not today");
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    static class TypedListener {
+        @Bean
+        TypedHandlers typedHandlers() {
+            return new TypedHandlers();
+        }
+    }
+
+    static class TypedHandlers {
+        @InboxListener(consumer = "billing-orders")
+        void on(TypedMessage<Order> message) {
+            HANDLED.add(message.payload().id());
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    static class Stray {
+        @Bean
+        StrayHandlers strayHandlers() {
+            return new StrayHandlers();
+        }
+    }
+
+    static class StrayHandlers {
+        @InboxListener(consumer = "nobody")
+        void on(String payload) {
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    static class Store {
+        @Bean
+        IdempotencyStore idempotencyStore() {
+            return new InMemoryIdempotencyStore();
+        }
+    }
+
+}

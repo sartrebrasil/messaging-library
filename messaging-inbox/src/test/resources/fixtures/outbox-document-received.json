@@ -1,0 +1,1 @@
+{"messageId":"6f1c2a4e-9b7d-4c1e-8a2f-3d5e7b9c1a20","aggregateType":"Document","aggregateId":"d-1","aggregateVersion":3,"eventType":"DocumentReceived","occurredAt":"2026-10-27T00:00:00Z","headers":{"traceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01","tracestate":"vendor=1"},"payload":{"accessKey":"x","items":[{"n":1},{"n":2}],"note":"a \"quoted\" }"}}
