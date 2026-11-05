@@ -5,6 +5,7 @@
 - Revisão: 2026-10-07 (nível 3, `failed`, circuit breaker, batch, redrive, stale check)
 - Revisão: 2026-10-07 (`discarded`, `expired` e `rejected`, ADRs 0014 e 0015)
 - Revisão: 2026-10-07 (`circuit_open`; `released` sem circuit breaker; `retry_delayed` sem exigir nível 1)
+- Revisão: 2026-11-05 (body da outbox primeiro na procura do `traceparent`; gauge `inbox_last_receive_age_seconds`)
 
 ## Contexto
 
@@ -36,6 +37,7 @@ métricas abaixo e o span de trace. Micrometer é opcional: sem
 | `inbox_circuit_transitions_total` | counter | `circuit`, `to` | Cada mudança de estado do circuit breaker |
 | `inbox_batch_size` | distribution summary | `consumer` | Mensagens entregues ao handler por batch (ADR-0011) |
 | `inbox_redrive_total` | counter | `consumer`, `source`, `target`, `result` | Cada mensagem movida pelo redrive; `result` = `moved`, `skipped`, `error` (ADR-0012) |
+| `inbox_last_receive_age_seconds` | gauge | `consumer` | Segundos desde o último `receive` concluído, com mensagem ou vazio. Sobe quando o consumer para de ler, mesmo com a fila vazia (incidente T-88/B20 do engine-tax) |
 | `inbox_effect_failed_total` | counter | `consumer`, `effect` | Falha ao chamar o broker; `effect` = `receive`, `ack`, `nack`, `copy` |
 | `inbox_retry_skipped_total` | counter | `consumer`, `reason` | Nível 2 pulado; `reason` = `delivery_count_unavailable`, `redelivery_limit` |
 | `inbox_stale_race_total` | counter | `consumer` | `advance` do stale check não gravou porque outra mensagem gravou versão maior durante o handler (ADR-0013) |
@@ -122,11 +124,15 @@ Com a outbox-library, enqueue, publish e consume aparecem num trace só, e
 tudo o que o handler fizer também.
 
 1. **Formatos lidos:** W3C `traceparent`, `tracestate` e `baggage`. Ordem de
-   procura:
-   1. header nativo do broker (Kafka header; `ReceivedMessage.traceparent`
-      na messaging-lib);
+   procura (revisão de 2026-11-05):
+   1. mapa `headers` do body da outbox (ADR-0003);
    2. extensão CloudEvents;
-   3. mapa `headers` do body da outbox (ADR-0003).
+   3. header nativo do broker (`ReceivedMessage.traceparent`).
+
+   O body vem primeiro porque guarda o contexto de quem gravou o evento, que
+   é o trace que o consumo continua. O do transporte é o do publisher da
+   outbox, que pode ter aberto um trace próprio. É a ordem que o
+   `QueueConsumer` do engine-tax já usava.
 
    A messaging-lib só propaga `traceparent` (ADR-0004 dela). Nos provedores
    dela, `tracestate` e `baggage` só chegam pelo body da outbox.
