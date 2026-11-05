@@ -38,10 +38,12 @@ final class Worker implements Runnable {
     private final AtomicReference<Instant> lastReceive;
     private final Clock clock;
     private final DoubleSupplier random;
+    private final ConsumerObserver observer;
 
     Worker(ConsumerSettings settings, MessageReceiver receiver, Pipeline<?> pipeline, OutcomeApplier applier,
            DelayedStrategy strategy, Duration leaseBudget, StopSignal stop, AtomicReference<Instant> lastReceive,
-           Clock clock, DoubleSupplier random) {
+           Clock clock, DoubleSupplier random, ConsumerObserver observer) {
+        this.observer = observer;
         this.settings = settings;
         this.receiver = receiver;
         this.pipeline = pipeline;
@@ -67,6 +69,7 @@ final class Worker implements Runnable {
                         return;
                     }
                     receiveFailures++;
+                    observer.receiveFailed(e);
                     boolean retryable = !(e instanceof MessagingException me) || me.retryable();
                     Duration wait = (retryable ? RECEIVE_RETRYABLE : RECEIVE_NOT_RETRYABLE).delayFor(receiveFailures, random);
                     LOG.log(retryable ? System.Logger.Level.WARNING : System.Logger.Level.ERROR,
@@ -95,7 +98,8 @@ final class Worker implements Runnable {
                 ReceivedMessage message = messages.get(i);
                 try {
                     if (stop.stopping()) {
-                        applier.release(receiver, message, OutcomeApplier.Effect.RELEASED);
+                        report(message, null, Outcome.RELEASE,
+                                applier.release(receiver, message, Effect.RELEASED), System.nanoTime());
                     } else {
                         handle(message);
                     }
@@ -119,24 +123,32 @@ final class Worker implements Runnable {
     }
 
     private void handle(ReceivedMessage message) {
+        long start = System.nanoTime();
+        InboxMessage inbox = null;
+        Outcome outcome;
+        OutcomeApplier.Applied applied;
         try {
             int hold = 0;
             while (true) {
-                Outcome outcome = pipeline.handle(message, settings.destination(), hold);
+                Pipeline.Execution execution = pipeline.process(message, settings.destination(), hold, observer);
+                inbox = execution.message();
+                outcome = execution.outcome();
                 if (outcome instanceof Outcome.Retry retry && strategy == DelayedStrategy.HOLD) {
+                    observer.held(inbox, retry);
                     try {
                         stop.sleep(retry.delay());
                     } catch (InterruptedException e) {
-                        applier.release(receiver, message, OutcomeApplier.Effect.RELEASED);
-                        return;
+                        outcome = Outcome.RELEASE;
+                        applied = applier.release(receiver, message, Effect.RELEASED);
+                        break;
                     }
                     if (retry.reason() == Outcome.RetryReason.FAILURE) {
                         hold++; // in_progress waits do not spend an attempt (ADR-0004)
                     }
                     continue;
                 }
-                applier.apply(receiver, message, outcome);
-                return;
+                applied = applier.apply(receiver, message, outcome);
+                break;
             }
         } catch (OutOfMemoryError e) {
             throw e;
@@ -144,8 +156,16 @@ final class Worker implements Runnable {
             // Errors too (StackOverflowError, AssertionError, NoClassDefFoundError): the worker must not die (T-88/B20)
             LOG.log(System.Logger.Level.ERROR, "Consumer " + settings.consumer() + ": unexpected failure on message "
                     + message.messageId() + "; released", t);
-            applier.release(receiver, message, OutcomeApplier.Effect.RELEASED);
+            outcome = Outcome.RELEASE;
+            applied = applier.release(receiver, message, Effect.RELEASED);
         }
+        report(message, inbox, outcome, applied, start);
+    }
+
+    private void report(ReceivedMessage message, InboxMessage inbox, Outcome outcome, OutcomeApplier.Applied applied,
+                        long startNanos) {
+        observer.delivered(new ConsumerObserver.Report(message, inbox, outcome, applied.effect(), strategy,
+                applied.retrySkipped(), applied.budgetExceeded(), Duration.ofNanos(System.nanoTime() - startNanos)));
     }
 
     private static final KeepAlive NO_LEASE = new KeepAlive() {

@@ -7,7 +7,6 @@ import com.example.messaging.MessageSender;
 import com.example.messaging.OutgoingMessage;
 import com.example.messaging.ReceivedMessage;
 import com.example.messaging.SendResult;
-import com.example.messaging.inbox.OutcomeApplier.Effect;
 import com.example.messaging.inbox.retry.AttemptState;
 import org.junit.jupiter.api.Test;
 

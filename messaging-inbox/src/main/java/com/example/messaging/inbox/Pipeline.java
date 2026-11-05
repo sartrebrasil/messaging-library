@@ -10,6 +10,8 @@ import com.example.messaging.inbox.retry.RetryDecision;
 import com.example.messaging.inbox.retry.RetryPolicy;
 
 import java.lang.reflect.Type;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.function.DoubleSupplier;
 
@@ -79,6 +81,16 @@ public final class Pipeline<T> {
      * @param holdAttempts delayed attempts already spent in memory by the {@code hold} strategy for this delivery
      */
     public Outcome handle(ReceivedMessage message, String destination, int holdAttempts) {
+        return process(message, destination, holdAttempts, ConsumerObserver.NONE).outcome();
+    }
+
+    /** The outcome and the read message ({@code null} when the envelope could not be read). */
+    public record Execution(Outcome outcome, InboxMessage message) {
+    }
+
+    /** {@link #handle} with an observer around the execution (ADR-0007). */
+    public Execution process(ReceivedMessage message, String destination, int holdAttempts,
+                             ConsumerObserver observer) {
         AttemptState read = AttemptState.from(message.attributes().get(AttemptState.ATTRIBUTE),
                 message.deliveryCount().orElse(0));
         AttemptState state = new AttemptState(read.delayed() + holdAttempts, read.deadLetter(), read.redrive());
@@ -89,12 +101,13 @@ public final class Pipeline<T> {
         } catch (PayloadDeserializationException e) {
             LOG.log(System.Logger.Level.WARNING, "Consumer {0}: message {1} cannot be read, sent to failed: {2}",
                     consumer, message.messageId(), e.getMessage());
-            return new Outcome.Failed(Outcome.FailureReason.DESERIALIZATION, state, e, null);
+            return new Execution(new Outcome.Failed(Outcome.FailureReason.DESERIALIZATION, state, e, null), null);
         }
-        if (guard == null) {
-            return run(typed, state);
-        }
-        return guard.apply(typed.message(), state, () -> run(typed, state), e -> storeFailure(e, state));
+        InboxMessage inbox = typed.message();
+        Outcome outcome = observer.execution(inbox, () -> guard == null
+                ? run(typed, state, observer)
+                : guard.apply(inbox, state, () -> run(typed, state, observer), e -> storeFailure(e, state)));
+        return new Execution(outcome, inbox);
     }
 
     /** A store failure is a retryable failure that skips the immediate level: delayed level, then DLQ. */
@@ -103,12 +116,23 @@ public final class Pipeline<T> {
                 state), null, state, null);
     }
 
-    private Outcome run(TypedMessage<T> typed, AttemptState state) {
+    private Outcome run(TypedMessage<T> typed, AttemptState state, ConsumerObserver observer) {
+        List<Throwable> failures = new ArrayList<>();
         ImmediateRetrier.Result result;
         try {
-            result = retrier.execute(() -> handler.handle(typed));
+            result = retrier.execute(() -> {
+                try {
+                    return handler.handle(typed);
+                } catch (Exception e) {
+                    failures.add(e);
+                    throw e;
+                }
+            });
         } catch (InterruptedException e) {
             return Outcome.RELEASE;
+        }
+        for (int i = 0; i < result.executions() - 1; i++) {
+            observer.immediateRetry(typed.message(), failures.get(i));
         }
         return toOutcome(resolver.resolve(result, state), result.result(), state, typed.message().id());
     }
