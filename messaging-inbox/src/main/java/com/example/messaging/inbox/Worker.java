@@ -94,6 +94,7 @@ final class Worker implements Runnable {
             for (int i = 0; i < messages.size(); i++) {
                 leases.add(keepAlive(messages.get(i), leaseBudget.multipliedBy(i + 1)));
             }
+            messages.forEach(observer::received);
             for (int i = 0; i < messages.size(); i++) {
                 ReceivedMessage message = messages.get(i);
                 try {

@@ -14,6 +14,10 @@ public interface ConsumerObserver {
     ConsumerObserver NONE = new ConsumerObserver() {
     };
 
+    /** A message was handed over by the broker, before any processing (redeliveries included). */
+    default void received(ReceivedMessage message) {
+    }
+
     /**
      * Around one execution of the pipeline after the envelope was read: handler, immediate retries and idempotency.
      * A delivery under {@code hold} has one execution per attempt. Must call {@code execution} exactly once.
