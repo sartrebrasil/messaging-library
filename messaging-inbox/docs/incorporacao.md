@@ -221,7 +221,6 @@ Repo: `/Users/sartre.brasil/Sources/pessoal/engine-tax`.
 | 4–7 | 2026-11-05 | Código das fatias 5 a 7 num commit só (as classes dependem umas das outras para compilar). Sem métricas: o `OutcomeApplier` devolve `Applied` (efeito, nível 2 pulado, orçamento excedido) para a fatia 9. O `SmartLifecycle` fica para o starter |
 | 8a, 8 | 2026-11-05 | idempotency-multi-store na branch `feat/owner-token` (4 commits, com a T8a.6; integrada na `main` dela por fast-forward em 2026-11-05, sem push): owner token, expiração do concluído e modo `join` no JDBC; contrato verde em memória, JDBC, Redis e Mongo (Testcontainers). Além do plano: `complete` com nova expiração, para os dois TTLs do ADR-0004. Na inbox: store direto em vez do engine, `release` antes do efeito (ADR-0004, revisão de 2026-11-05). O primeiro commit da idempotency-multi-store não compila o starter sozinho; o segundo corrige |
 | 9 | 2026-11-05 | Starter: properties mescladas e validadas, autoconfig, `InboxLifecycle` (paradas em paralelo, reconstrução no restart), handlers funcional e `@InboxListener`, Jackson 3, Micrometer e tracing (`ConsumerObserver` novo no core), limite de `delayed.max`, idempotência pelo bean `IdempotencyStore`. 21 testes no starter, 109 no core. Tracing testado com o bridge OTel |
-
 | 9+ | 2026-11-05 | `key-lanes` (ADR-0016) antecipado da F6 a pedido do usuário, para o engine-tax manter o paralelismo da T-128: lanes por `orderingKey`, em paralelo, e o próximo `receive` espera todas |
 
 ## Pendências conhecidas
