@@ -20,6 +20,8 @@
     <module>messaging-jms</module>
     <module>messaging-rabbitmq</module>
     <module>messaging-spring-boot-starter</module>
+    <module>messaging-inbox</module>
+    <module>messaging-inbox-spring-boot-starter</module>
   </modules>
 
   <properties>
@@ -46,6 +48,11 @@
       <dependency>
         <groupId>com.example</groupId>
         <artifactId>messaging-testkit</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.example</groupId>
+        <artifactId>messaging-inbox</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
