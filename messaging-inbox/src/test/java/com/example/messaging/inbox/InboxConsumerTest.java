@@ -294,6 +294,74 @@ class InboxConsumerTest {
     }
 
     @Test
+    void withIdempotencyADuplicateCopyIsAckedWithoutTheHandler() {
+        var idempotency = new com.example.messaging.inbox.InboxIdempotency(
+                new com.example.idempotency.store.InMemoryIdempotencyStore(), Duration.ofMinutes(1), Duration.ofDays(7),
+                Clock.systemUTC());
+        var stop = new StopSignal();
+        var pipeline = new Pipeline<String>("billing", new EnvelopeReader(EnvelopeMode.AUTO), (m, t) -> m.payloadAsString(),
+                String.class, ok(), policy(2, 0), stop, () -> 0.0, idempotency);
+        var consumer = new InboxConsumer(settings(DelayedStrategy.AUTO, 1), pipeline, dlqAndFailed(List.of()), stop,
+                Clock.systemUTC(), () -> 0.0);
+        consumers.add(consumer);
+        consumer.start();
+        String outbox = "{\"messageId\":\"m-1\",\"eventType\":\"E\",\"payload\":\"hi\"}";
+        send(outbox);
+        send(outbox);
+
+        await(() -> messaging.size(MAIN) == 0);
+        assertEquals(1, handled.size());
+    }
+
+    @Test
+    void holdWaitingForAnotherInstanceDoesNotSpendAttempts() {
+        var store = new com.example.idempotency.store.InMemoryIdempotencyStore();
+        var key = new com.example.idempotency.model.IdempotencyKeyId("m-1", "billing");
+        var other = com.example.idempotency.model.IdempotencyRecord.inProgress(key, "other", null, Instant.now(),
+                Instant.now().plusSeconds(60));
+        store.reserve(other);
+        var levels = new CopyOnWriteArrayList<Delivery>();
+        var stop = new StopSignal();
+        var pipeline = new Pipeline<String>("billing", new EnvelopeReader(EnvelopeMode.AUTO), (m, t) -> m.payloadAsString(),
+                String.class, m -> {
+                    levels.add(m.message().delivery());
+                    handled.add(m);
+                    return null;
+                }, policy(1, Duration.ofMillis(20)), stop, () -> 0.0,
+                new com.example.messaging.inbox.InboxIdempotency(store, Duration.ofMinutes(1), Duration.ofDays(7),
+                        Clock.systemUTC()));
+        var consumer = new InboxConsumer(settings(DelayedStrategy.HOLD, 1), pipeline, dlqAndFailed(List.of()), stop,
+                Clock.systemUTC(), () -> 0.0);
+        consumers.add(consumer);
+        consumer.start();
+        send("{\"messageId\":\"m-1\",\"eventType\":\"E\",\"payload\":\"hi\"}");
+
+        try {
+            Thread.sleep(200); // several in_progress waits, more than delayed.max-attempts
+        } catch (InterruptedException e) {
+            throw new IllegalStateException(e);
+        }
+        store.release(key, "other");
+
+        await(() -> handled.size() == 1 && messaging.size(MAIN) == 0);
+        assertEquals(List.of(Delivery.first()), levels);
+        assertEquals(0, messaging.size(DLQ));
+    }
+
+    @Test
+    void startupRejectsAReservationTtlBelowMaxProcessing() {
+        var idempotency = new com.example.messaging.inbox.InboxIdempotency(
+                new com.example.idempotency.store.InMemoryIdempotencyStore(), Duration.ofSeconds(5), Duration.ofDays(7),
+                Clock.systemUTC());
+        var stop = new StopSignal();
+        var pipeline = new Pipeline<String>("billing", new EnvelopeReader(EnvelopeMode.AUTO), (m, t) -> "x",
+                String.class, ok(), policy(2, 0), stop, () -> 0.0, idempotency);
+
+        assertThrows(IllegalStateException.class, () -> new InboxConsumer(settings(DelayedStrategy.AUTO, 1), pipeline,
+                dlqAndFailed(List.of()), stop, Clock.systemUTC(), () -> 0.0));
+    }
+
+    @Test
     void startupRejectsWhatCannotWork() {
         var strict = new ConsumerSettings("billing", MAIN, 1, 1, Duration.ofMillis(100), Duration.ofSeconds(5),
                 Duration.ofSeconds(2), Ordering.STRICT, DelayedStrategy.AUTO, true);

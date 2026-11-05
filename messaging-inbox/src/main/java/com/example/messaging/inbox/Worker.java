@@ -130,7 +130,9 @@ final class Worker implements Runnable {
                         applier.release(receiver, message, OutcomeApplier.Effect.RELEASED);
                         return;
                     }
-                    hold++;
+                    if (retry.reason() == Outcome.RetryReason.FAILURE) {
+                        hold++; // in_progress waits do not spend an attempt (ADR-0004)
+                    }
                     continue;
                 }
                 applier.apply(receiver, message, outcome);

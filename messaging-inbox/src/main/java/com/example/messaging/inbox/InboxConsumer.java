@@ -76,6 +76,13 @@ public final class InboxConsumer {
         Duration hold = strategy == DelayedStrategy.HOLD
                 ? policy.delayed().totalBaseDelay(policy.delayed().maxAttempts()) : Duration.ZERO;
         this.leaseBudget = settings.maxProcessing().plus(hold);
+        InboxIdempotency idempotency = pipeline.idempotency();
+        if (idempotency != null && idempotency.reservationTtl().compareTo(leaseBudget) <= 0) {
+            firstReceiver.close();
+            throw new IllegalStateException("Consumer " + settings.consumer() + ": idempotency reservation TTL "
+                    + idempotency.reservationTtl() + " must be above max-processing plus the hold delays ("
+                    + leaseBudget + "), or a slow delivery loses its key to a redelivery (ADR-0004)");
+        }
         this.applier = new OutcomeApplier(settings, strategy, destinations, clock);
         this.lastReceive = new AtomicReference<>(clock.instant());
     }
