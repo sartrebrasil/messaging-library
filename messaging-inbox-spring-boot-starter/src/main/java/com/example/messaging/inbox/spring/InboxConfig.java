@@ -51,7 +51,8 @@ final class InboxConfig {
                     List<QueueBand> queues, List<Class<? extends Throwable>> nonRetryable,
                     List<Class<? extends Throwable>> skipImmediate, List<Class<? extends Throwable>> retryable,
                     boolean idempotency, Duration completedTtl, Duration reservationTtl,
-                    int maxMessagesPerPoll, Duration pollWait, Duration maxProcessing, Duration shutdownTimeout) {
+                    int maxMessagesPerPoll, Duration pollWait, Duration maxProcessing, Duration shutdownTimeout,
+                    int keyLanes) {
     }
 
     private InboxConfig() {
@@ -156,6 +157,10 @@ final class InboxConfig {
         if (concurrency < 1) {
             problems.add(prefix + ".concurrency must be at least 1");
         }
+        int keyLanes = first(c.getKeyLanes(), d.getKeyLanes(), 1);
+        if (keyLanes < 1) {
+            problems.add(prefix + ".key-lanes must be at least 1");
+        }
         int maxMessages = parse(prefix, configuration, "max-messages-per-poll", Integer::parseInt, 1, problems);
         Duration pollWait = parse(prefix, configuration, "poll-wait", DurationStyle::detectAndParse,
                 Duration.ofSeconds(20), problems);
@@ -170,7 +175,7 @@ final class InboxConfig {
                 first(c.getOrdering(), d.getOrdering(), Ordering.RELAXED),
                 first(c.getEnvelope(), d.getEnvelope(), EnvelopeMode.AUTO), includeMessage, immediate, delayed,
                 delayedMaxSet, strategy, List.copyOf(queues), nonRetryable, skipImmediate, retryable, idempotency,
-                completedTtl, reservationTtl, maxMessages, pollWait, maxProcessing, shutdownTimeout);
+                completedTtl, reservationTtl, maxMessages, pollWait, maxProcessing, shutdownTimeout, keyLanes);
     }
 
     private static void forbiddenInDefaults(ConsumerOptions d, List<String> problems) {
@@ -208,9 +213,6 @@ final class InboxConfig {
         }
         if (o.getBatch() != null) {
             problems.add(prefix + ".batch" + later + " (F6)");
-        }
-        if (o.getKeyLanes() != null) {
-            problems.add(prefix + ".key-lanes" + later + " (F6)");
         }
     }
 
