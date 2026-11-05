@@ -66,16 +66,22 @@ final class Copies {
     /** What the DLQ and {@code failed} copies record about the failure. */
     record Failure(String consumer, String destination, Throwable cause, String reason, Instant now) {
 
-        static Failure of(String consumer, String destination, Throwable cause, String fallbackReason,
+        /**
+         * @param detail the handler's own reason (a {@code Reject}), which leads the text; {@code null} otherwise
+         */
+        static Failure of(String consumer, String destination, Throwable cause, String fallbackReason, String detail,
                           boolean includeExceptionMessage, Instant now) {
             String reason;
             if (cause == null) {
-                reason = fallbackReason;
+                reason = detail != null ? fallbackReason + ": " + detail : fallbackReason;
             } else {
                 Throwable root = ExceptionClassifier.rootCause(cause);
                 reason = includeExceptionMessage && root.getMessage() != null
                         ? root.getClass().getName() + ": " + root.getMessage()
                         : root.getClass().getName();
+                if (detail != null) {
+                    reason = fallbackReason + ": " + detail + " (" + reason + ")";
+                }
             }
             return new Failure(consumer, destination, cause, reason, now);
         }

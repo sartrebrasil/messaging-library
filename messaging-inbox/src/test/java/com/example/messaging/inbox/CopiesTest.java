@@ -70,14 +70,17 @@ class CopiesTest {
 
     @Test
     void exceptionMessageCanBeLeftOut() {
-        var f = Copies.Failure.of("billing", "orders", new IllegalStateException("cpf 123"), "x", false, NOW);
+        var f = Copies.Failure.of("billing", "orders", new IllegalStateException("cpf 123"), "x", null, false, NOW);
 
         assertEquals("java.lang.IllegalStateException", f.reason());
-        assertEquals("rejected", Copies.Failure.of("billing", "orders", null, "rejected", true, NOW).reason());
+        assertEquals("rejected", Copies.Failure.of("billing", "orders", null, "rejected", null, true, NOW).reason());
+        assertEquals("rejected: no cnpj", Copies.Failure.of("billing", "orders", null, "rejected", "no cnpj", true, NOW).reason());
+        assertEquals("rejected: no cnpj (java.lang.IllegalStateException: down)", Copies.Failure.of("billing", "orders",
+                new IllegalStateException("down"), "rejected", "no cnpj", true, NOW).reason());
     }
 
     private static Copies.Failure failure(Throwable cause) {
-        return Copies.Failure.of("billing", "orders", cause, "rejected", true, NOW);
+        return Copies.Failure.of("billing", "orders", cause, "rejected", null, true, NOW);
     }
 
     private static Map<String, String> userAttributes(int n) {

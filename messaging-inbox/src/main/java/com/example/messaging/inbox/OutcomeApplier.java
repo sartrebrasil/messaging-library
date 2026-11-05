@@ -66,7 +66,7 @@ final class OutcomeApplier {
             case Outcome.Retry r -> retry(receiver, message, r);
             case Outcome.DeadLetter d -> deadLetterOrFailed(receiver, message, d.next(), d.cause(), false);
             case Outcome.Failed f -> copy(receiver, message, destinations.failed(), f.state(), f.cause(),
-                    f.reason().name().toLowerCase(), Effect.FAILED, false);
+                    f.reason().name().toLowerCase(), f.detail(), Effect.FAILED, false);
         };
     }
 
@@ -118,17 +118,19 @@ final class OutcomeApplier {
                                        Throwable cause, boolean retrySkipped) {
         MessageSender deadLetter = destinations.deadLetter();
         return deadLetter != null
-                ? copy(receiver, message, deadLetter, next, cause, "retries_exhausted", Effect.DEAD_LETTERED, retrySkipped)
-                : copy(receiver, message, destinations.failed(), next, cause, "retries_exhausted", Effect.FAILED,
+                ? copy(receiver, message, deadLetter, next, cause, "retries_exhausted", null, Effect.DEAD_LETTERED,
+                retrySkipped)
+                : copy(receiver, message, destinations.failed(), next, cause, "retries_exhausted", null, Effect.FAILED,
                 retrySkipped);
     }
 
     private Applied copy(MessageReceiver receiver, ReceivedMessage message, MessageSender target, AttemptState attempts,
-                         Throwable cause, String fallbackReason, Effect effect, boolean retrySkipped) {
+                         Throwable cause, String fallbackReason, String detail, Effect effect,
+                         boolean retrySkipped) {
         Copies.Copy copy;
         try {
             copy = Copies.build(message, attempts, Copies.Failure.of(settings.consumer(), settings.destination(), cause,
-                    fallbackReason, settings.includeExceptionMessage(), clock.instant()));
+                    fallbackReason, detail, settings.includeExceptionMessage(), clock.instant()));
         } catch (IllegalArgumentException e) {
             return impossible(receiver, message, e);
         }

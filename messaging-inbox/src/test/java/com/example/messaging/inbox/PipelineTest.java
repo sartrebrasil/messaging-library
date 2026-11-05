@@ -59,6 +59,7 @@ class PipelineTest {
                 pipeline(m -> HandlerResult.discard("not for us")).handle(received(OUTBOX, Map.of(), 1), "q", 0));
         Outcome rejected = pipeline(m -> HandlerResult.reject("bad order")).handle(received(OUTBOX, Map.of(), 1), "q", 0);
         assertEquals(Outcome.FailureReason.REJECTED, assertInstanceOf(Outcome.Failed.class, rejected).reason());
+        assertEquals("bad order", ((Outcome.Failed) rejected).detail());
     }
 
     @Test

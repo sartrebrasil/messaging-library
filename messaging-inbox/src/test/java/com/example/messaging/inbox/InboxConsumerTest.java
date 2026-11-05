@@ -261,6 +261,17 @@ class InboxConsumerTest {
     }
 
     @Test
+    void rejectCarriesTheHandlerReasonToFailed() {
+        start(settings(DelayedStrategy.AUTO, 1), policy(2, 0), m -> HandlerResult.reject("order without cnpj"),
+                dlqAndFailed(List.of()));
+        send("plain");
+
+        await(() -> messaging.size(FAILED) == 1 && messaging.size(MAIN) == 0);
+        ReceivedMessage copy = messaging.receiver(FAILED).receive(1, Duration.ZERO).getFirst();
+        assertEquals("rejected: order without cnpj", copy.deadLetter().reason());
+    }
+
+    @Test
     void aFailedAckAfterTheCopyDuplicatesInsteadOfLosing() {
         var ackFailures = new AtomicInteger(1);
         Supplier<MessageReceiver> flakyAck = () -> new Delegating(messaging.receiver(MAIN)) {

@@ -65,7 +65,7 @@ public final class Pipeline<T> {
         } catch (PayloadDeserializationException e) {
             LOG.log(System.Logger.Level.WARNING, "Consumer {0}: message {1} cannot be read, sent to failed: {2}",
                     consumer, message.messageId(), e.getMessage());
-            return new Outcome.Failed(Outcome.FailureReason.DESERIALIZATION, state, e);
+            return new Outcome.Failed(Outcome.FailureReason.DESERIALIZATION, state, e, null);
         }
         ImmediateRetrier.Result result;
         try {
@@ -82,11 +82,19 @@ public final class Pipeline<T> {
             }
             case RetryDecision.Delay d -> new Outcome.Retry(d.delay(), d.next(), d.cause());
             case RetryDecision.DeadLetter d -> new Outcome.DeadLetter(d.next(), d.cause());
-            case RetryDecision.Failed f -> new Outcome.Failed(switch (f.reason()) {
-                case NON_RETRYABLE -> Outcome.FailureReason.NON_RETRYABLE;
-                case RETRIES_EXHAUSTED -> Outcome.FailureReason.RETRIES_EXHAUSTED;
-                case REJECTED -> Outcome.FailureReason.REJECTED;
-            }, state, f.cause());
+            case RetryDecision.Failed f -> {
+                String detail = null;
+                if (result.result() instanceof HandlerResult.Reject reject) {
+                    detail = reject.reason();
+                    LOG.log(System.Logger.Level.INFO, "Consumer {0}: message {1} rejected: {2}", consumer,
+                            typed.message().id(), detail);
+                }
+                yield new Outcome.Failed(switch (f.reason()) {
+                    case NON_RETRYABLE -> Outcome.FailureReason.NON_RETRYABLE;
+                    case RETRIES_EXHAUSTED -> Outcome.FailureReason.RETRIES_EXHAUSTED;
+                    case REJECTED -> Outcome.FailureReason.REJECTED;
+                }, state, f.cause(), detail);
+            }
         };
     }
 

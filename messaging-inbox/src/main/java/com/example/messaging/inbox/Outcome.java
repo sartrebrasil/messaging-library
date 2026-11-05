@@ -37,8 +37,13 @@ public sealed interface Outcome {
         }
     }
 
-    /** Copy to {@code failed}, then ack. */
-    record Failed(FailureReason reason, AttemptState state, Throwable cause) implements Outcome {
+    /**
+     * Copy to {@code failed}, then ack.
+     *
+     * @param detail the handler's reason on {@code REJECTED} ({@code HandlerResult.reject(reason)}); {@code null}
+     *               otherwise
+     */
+    record Failed(FailureReason reason, AttemptState state, Throwable cause, String detail) implements Outcome {
         public Failed {
             Objects.requireNonNull(reason, "reason");
             Objects.requireNonNull(state, "state");
