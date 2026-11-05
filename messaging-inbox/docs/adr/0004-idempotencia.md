@@ -5,6 +5,7 @@
 - Revisão: 2026-10-07 (chave pelo envelope, escopo compartilhado com o nível 3 e o redrive,
   `IN_PROGRESS` conta tentativa onde a contagem é do broker)
 - Revisão: 2026-10-07 (`IN_PROGRESS` no nível 3; transação por chamada do handler em batch)
+- Revisão: 2026-11-05 (store direto em vez do engine; owner token e dois TTLs feitos na idempotency-multi-store)
 
 ## Contexto
 
@@ -92,6 +93,30 @@ DLQ:     reserve -> handler (falha) -> envio da cópia -> release -> ack
 3. `spring-web` opcional no starter, para a inbox reaproveitar os beans de
    store sem puxar dependências web.
 4. Migração para Spring Boot 4 e Jackson 3.
+
+## Revisão de 2026-11-05: implementação
+
+- O middleware usa o `IdempotencyStore` direto, e não o `IdempotencyEngine`.
+  O engine conclui a chave sempre que a operação retorna e não deixa a inbox
+  liberá-la em `RetryAfter`, `Reject` e falhas, nem manter uma reserva só
+  durante o nível 1 inteiro.
+- Pré-requisitos feitos na idempotency-multi-store (branch `feat/owner-token`):
+  owner token em `complete`/`release` nos quatro stores (JDBC com
+  `WHERE owner = ?`, Redis com script Lua, Mongo com filtro); `complete` aceita
+  uma nova expiração, o que dá os dois TTLs da tabela acima (reserva curta,
+  concluído com `idempotency.ttl`); modo `join` no JDBC, com o `reserve` num
+  savepoint. Fica para a fatia 9: `spring-web` opcional no starter.
+- `release` acontece antes do efeito no broker, inclusive antes da cópia para
+  DLQ ou `failed` (a versão acima dizia depois da cópia). Um crash entre o
+  `release` e a cópia só reprocessa uma mensagem que já tinha falhado; um crash
+  entre a cópia e o `release` deixaria a chave presa até o TTL da reserva.
+- Falha do store (no `reserve` ou no `complete`) é uma falha retryable que
+  pula o nível 1: vai para o nível 2 e depois para a DLQ. Sem `complete` não há
+  `ack`; a reserva é liberada.
+- `IN_PROGRESS` com o nível 2 já esgotado (só acontece em `broker-delay`, onde
+  cada reentrega conta) vai para a DLQ (ou `failed` sem DLQ).
+- O `idempotency-core` é dependência opcional do `messaging-inbox`; a lógica
+  fica numa classe à parte, carregada só pelos consumers com idempotência.
 
 ## Consequências
 
