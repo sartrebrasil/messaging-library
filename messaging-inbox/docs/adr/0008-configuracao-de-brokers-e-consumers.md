@@ -183,8 +183,9 @@ messaging-lib aceita como bean do usuário.
   declarado, `broker` é opcional no consumer; com mais de um, obrigatório.
 - `inbox.*` faz o binding com `ignoreUnknownFields = false`: chave desconhecida
   falha o startup. Chaves dos ADRs que ainda não existem (`retry.dead-letter`,
-  `stale-check`, `expiration`, `circuit-breaker`, `batch`, `key-lanes`) falham
-  com "not supported yet (F5/F6)", em vez de serem ignoradas.
+  `stale-check`, `expiration`, `circuit-breaker`, `batch`) falham com "not
+  supported yet (F5/F6)", em vez de serem ignoradas. `key-lanes` já existe
+  (ADR-0016, revisão de 2026-11-05).
 - `retry.include-exception-message` fica em `retry`, como no ADR-0002.
 - Destinos por nome vêm do bean `InboxDestinations` (receiver e sender). O
   padrão lê o `MessagingDestinations` do starter da messaging-lib; um bean
