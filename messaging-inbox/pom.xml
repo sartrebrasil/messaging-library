@@ -21,6 +21,12 @@
       <groupId>com.example</groupId>
       <artifactId>messaging-core</artifactId>
     </dependency>
+    <!-- Optional: only consumers with idempotency need it; also JDK-only (ADR-0004) -->
+    <dependency>
+      <groupId>com.example.idempotency</groupId>
+      <artifactId>idempotency-core</artifactId>
+      <optional>true</optional>
+    </dependency>
     <dependency>
       <groupId>com.example</groupId>
       <artifactId>messaging-testkit</artifactId>

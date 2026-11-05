@@ -35,6 +35,10 @@ public final class EnvelopeReader {
         this.mode = Objects.requireNonNull(mode, "mode");
     }
 
+    public EnvelopeMode mode() {
+        return mode;
+    }
+
     /**
      * @param destination consumer destination the message was read from
      * @throws PayloadDeserializationException when the configured format cannot be read
