@@ -237,6 +237,6 @@ Repo: `/Users/sartre.brasil/Sources/pessoal/engine-tax`.
 - `spring.lifecycle.timeout-per-shutdown-phase` (padrão 30 s do Spring) precisa
   ser maior que `shutdown-timeout` mais `poll-wait`; senão o Spring segue o
   shutdown com workers ainda rodando. Registrar no README do starter.
-- Nenhum teste usa o `InboxDestinations` padrão sobre um `MessagingDestinations`
-  real: todos trocam por `InMemoryMessaging`. O caminho roda pela primeira vez
-  na fatia 10 (ou na F3).
+- O `InboxDestinations` padrão sobre um `MessagingDestinations` real só tem
+  teste com SQS (`SqsLocalStackTest`, LocalStack); os outros provedores ficam
+  para a F3.
