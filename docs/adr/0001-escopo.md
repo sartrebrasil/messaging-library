@@ -43,7 +43,7 @@ Fora do escopo:
 - Criar, alterar ou apagar filas, tópicos, subscriptions, DLQs e permissões. Isso
   é Terraform, como bucket na storage-lib.
 - Kafka, Kinesis, Event Hubs, OCI Streaming: são logs com offset, não filas com
-  lease (ADR-0002). A inbox-library mantém o adapter Kafka próprio.
+  lease (ADR-0002). O `messaging-inbox` também não cobre Kafka.
 - RabbitMQ, ActiveMQ e IBM MQ: não são serviços de nuvem gerenciados com SDK
   próprio. Podem entrar depois se a API aguentar, sem compromisso. ActiveMQ e
   RabbitMQ entraram depois da v1 (ADR-0009).

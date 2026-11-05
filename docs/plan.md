@@ -7,8 +7,8 @@ dependências, um módulo fino por provedor e um contrato de testes comum.
 
 Não é um framework de consumo. Não tem listener, pool de threads, retry,
 idempotência nem DLQ por política. Essas responsabilidades ficam com quem usa a
-lib (por exemplo, a inbox-library, que vai usá-la como uma implementação do seu
-`BrokerAdapter`).
+lib: desde 2026-11-05, o módulo `messaging-inbox` deste repo, que consome pelo
+`MessageReceiver` como qualquer aplicação ([plano](../messaging-inbox/docs/incorporacao.md)).
 
 ## Decisões
 
@@ -130,7 +130,7 @@ Exceções: `MessagingException` > `DestinationNotFoundException`,
 | F3 | `messaging-azure` (Service Bus fila, tópico e subscription, com e sem sessions) | Contrato verde com o emulator nos dois modos | Concluída: contrato verde no emulator 2.0.0 (fila em `ABANDON` e `RESCHEDULE`, subscription, sessions, DLQ nativa). `deadLetterMovesMessageToDeadLetterQueue` falha às vezes: o emulator força o detach dos receivers da conexão no `complete` da DLQ ("InnerMessageReceiver was closed", "Entity size became negative" no log dele) |
 | F4 | `messaging-gcp` (Pub/Sub) | Contrato verde com o emulator | Concluída: contrato verde no emulator; envio sem `orderingKey` no tópico ordenado é aceito, como manda o ADR-0006 |
 | F5 | Starter Spring Boot 4.x, métricas, `traceparent` e health check | Teste de auto-configuração por provedor | Código escrito; 9 testes verdes (auto-configuração e validação com AWS sem rede, regras de Azure e GCP, `traceparent` e métricas). DLQ nativa do Service Bus lida por destino com `dead-letter-queue: true` |
-| F6 | `mvn install` da 0.1.0 | inbox-library usa a lib em um adapter de prova | README escrito; contratos da F2 a F4 verdes. O adapter de prova espera a inbox-library ter código (hoje só tem docs) |
+| F6 | `mvn install` da 0.1.0 | O `messaging-inbox` consome pela lib | README escrito; contratos da F2 a F4 verdes. A inbox foi incorporada como módulo deste repo em 2026-11-05 (ADR-0001, revisão); o uso fica provado pelos testes dela |
 | F7 | `messaging-jms` para ActiveMQ Classic ([spike](spikes/f7-activemq-classic.md), ADR-0009) | Contrato verde contra `apache/activemq-classic:6.2.0` | Concluída: 26 testes verdes no contrato (2 pulados: destino inexistente, por causa do auto-create; envio sem `orderingKey` aceito) e 3 em `JmsErrorsTest`. Starter com o tipo `activemq-classic`: 4 testes com broker embutido (`vm://`) |
 | F8 | Artemis no `messaging-jms` ([spike](spikes/f8-activemq-artemis.md), ADR-0009) | Contrato verde contra `apache/activemq-artemis:2.40.0` sem auto-create | Concluída: `JmsDialect` com Classic e Artemis. 28 testes verdes no contrato do Artemis (1 pulado: envio sem `orderingKey` aceito), inclusive destino inexistente, `_AMQ_DUPL_ID`, multicast por FQQN e conexão com janela recusada. Starter com o tipo `artemis`: 2 testes com container |
 | F9 | `messaging-rabbitmq` ([spike](spikes/f9-rabbitmq.md), ADR-0009) | Contrato verde contra `rabbitmq:4.1-management-alpine` | Concluída: receiver por `basicGet` (pull, sem consumer). 24 testes verdes no contrato (4 pulados: `nack` com atraso e ordem), inclusive destino inexistente; fanout e classic queue em testes próprios. Starter com o tipo `rabbitmq`: 3 testes com container |
