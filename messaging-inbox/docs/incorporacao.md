@@ -1,6 +1,6 @@
 # Incorporação do consumo (inbox) na messaging-library
 
-Status: decisões D1 a D7 aceitas em 2026-11-05. Fatias 0 a 3 feitas em 2026-11-05.
+Status: decisões D1 a D7 aceitas em 2026-11-05. Fatias 0 a 7 feitas em 2026-11-05 (sem a 8a).
 
 Objetivo: trazer o `QueueConsumer` do engine-tax
 (`engine-tax/platform-support/.../QueueConsumer.java`) para a messaging-library
@@ -135,7 +135,7 @@ em paralelo com 1 a 7.
 | T4.1 | `Outcome` (`Ack`, `Retry`, `DeadLetter`, `Failed`, `Release`) com `Reason` e `FailureReason` (ADR-0001, ADR-0007) | Compila |
 | T4.2 | `InboxHandler<T>` e `InboxResultHandler<T>` | Compila |
 | T4.3 | `Pipeline.handle(ReceivedMessage)`: envelope → deserialização → nível 1 (`ImmediateRetrier`) → classificação → `HandlerResult`. `Clock` e aleatoriedade injetados | Tabela do ADR-0014 (`Ack`, `RetryAfter` pula o nível 1, `Reject` vai para `Failed`, `Discard`); `NonRetryable` numa execução só; timeout pontual com sucesso na segunda tentativa; exceção embrulhada classificada pela causa |
-| T4.4 | Validação no startup das listas de exceções (classe inexistente ou que não é `Throwable` falha) | Caso de erro de digitação |
+| T4.4 | Validação no startup das listas de exceções (classe inexistente ou que não é `Throwable` falha). Já vem pronto no `ThrowableTypes` portado na fatia 2 | `ErrorFingerprintTest` (`com.acme.Typo`) |
 
 ### Fatia 5: loop sobre `MessageReceiver` (ADR-0009)
 
@@ -164,7 +164,7 @@ em paralelo com 1 a 7.
 |---|---|---|
 | T7.1 | Cópia para DLQ e `failed` pelo `copyOf`, com `inbox_attempts`, `inbox_failure` (fingerprint do ADR-0017, corte em 1024 bytes) e `withDeadLetter`; `include-exception-message` | Atributos esperados; corte do `inbox_failure` |
 | T7.2 | Orçamento de 16 atributos: sai `inbox_failure`, depois `inbox_attempts` (com a consequência do ADR-0002) | Produtor com 14, 15 e 16 atributos |
-| T7.3 | Ordem cópia → `ack`; falha na cópia vira `nack(0)`; `failed` obrigatória; sem `dead-letter`, `DeadLetter` vira `Failed`. Decidir o caso da cópia que não pode ser montada (`copyOf` lança `IllegalArgumentException` com `orderingKey` recebido fora das regras de envio, como um `JMSXGroupID` ou `SessionId` longo): sem decisão, o `nack(0)` repete para sempre | Sender que falha: a mensagem volta e não se perde; o crash entre cópia e `ack` gera duplicata |
+| T7.3 | Ordem cópia → `ack`; falha na cópia vira `nack(0)`; `failed` obrigatória; sem `dead-letter`, `DeadLetter` vira `Failed`. Cópia que não pode ser montada (`orderingKey` recebido fora das regras de envio, corpo vazio): log de erro e `Release`; a política nativa de DLQ encerra (ADR-0002, revisão de 2026-11-05). `deduplicationId` inválido vira SHA-256 | Sender que falha: a mensagem volta e não se perde; o crash entre cópia e `ack` gera duplicata |
 
 ### Fatia 8a: owner token na idempotency-multi-store
 
@@ -212,3 +212,10 @@ Repo: `/Users/sartre.brasil/Sources/pessoal/engine-tax`.
 | T10.3 | `inbox.consumers` do lifecycle e do outcome-api (`max-messages-per-poll: 10`, `poll-wait: 10s`, `failed`); handlers de `Consumer<Event>` para `InboxHandler<T>` | Testes de integração dos dois serviços verdes |
 | T10.4 | Remover `QueueConsumer`, `QueueConsumerTest` e a montagem no `MessagingConfiguration` | Build verde sem eles |
 | T10.5 | Dashboards e alarmes de `docs/metricas.md` para os nomes `inbox_*` | Painéis mostrando dado no ambiente local |
+
+## Registro de execução
+
+| Fatias | Data | Notas |
+|---|---|---|
+| 0–3 | 2026-11-05 | Contratos dos adapters (refactor do `copyOf`) pendentes: Docker desligado |
+| 4–7 | 2026-11-05 | Código das fatias 5 a 7 num commit só (as classes dependem umas das outras para compilar). Sem métricas: o `OutcomeApplier` devolve `Applied` (efeito, nível 2 pulado, orçamento excedido) para a fatia 9. O `SmartLifecycle` fica para o starter |

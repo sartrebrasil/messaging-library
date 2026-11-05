@@ -2,6 +2,7 @@
 
 - Status: aceito (2026-10-08)
 - Data: 2026-10-01
+- Revisão: 2026-11-05 (`deduplicationId` inválido vira hash; cópia impossível volta por `Release`)
 - Revisão: 2026-10-07 (nível 3 na DLQ, fila `failed`, estratégias do nível 2 por capability,
   headers no formato da messaging-lib)
 - Revisão: 2026-10-07 (`max-attempts` não conta a primeira execução, explicitado)
@@ -339,6 +340,18 @@ Os atributos `inbox_*` não aparecem em `InboxMessage.headers()`. O handler vê
 a tentativa em `InboxMessage.delivery()` (`level`, `attempt`).
 
 ### Falha ao executar o efeito
+
+Revisão de 2026-11-05:
+
+- `deduplicationId` = `messageId` de origem quando ele cabe nas regras de
+  envio (até 128 caracteres ASCII imprimíveis, sem espaço); senão, o SHA-256
+  hexadecimal dele (64 caracteres). O RabbitMQ aceita qualquer `message-id`
+  do produtor.
+- Mensagem que não pode ser copiada (corpo vazio, `orderingKey` recebido fora
+  das regras de envio, como um `JMSXGroupID` ou `SessionId` longo): log de
+  erro e `Release`, sem `ack`. A política nativa de DLQ do broker encerra a
+  repetição. O `orderingKey` não é descartado, porque uma `failed` FIFO precisa
+  dele.
 
 - A cópia é enviada **antes** do `ack` da original. Uma falha entre os dois
   gera duplicata, nunca perda (mesma regra da messaging-lib, ADR-0005).

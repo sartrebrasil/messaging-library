@@ -24,6 +24,12 @@ Esta seção vence o resto do ADR onde os dois divergem.
   os testes usam o `InMemoryMessaging` do `messaging-testkit`.
 - Se o Kafka voltar, o `Outcome` e o pipeline já estão separados do loop; o SPI
   nasce junto com o segundo adapter.
+- O `Outcome` carrega o que os efeitos precisam: `Ack(AckReason)` separa
+  `success` de `discarded`; `Retry(delay, next, cause)` e
+  `DeadLetter(next, cause)` levam o `AttemptState` da próxima cópia;
+  `Failed(reason, state, cause)` tem `FailureReason` com `deserialization`.
+  Só existem os valores que a F2 produz; `in_progress`, `circuit_open` e
+  `idempotency_conflict` entram com as fatias que os geram.
 
 ## Contexto
 
