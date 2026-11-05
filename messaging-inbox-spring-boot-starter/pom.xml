@@ -91,6 +91,23 @@
       <version>${idempotency.version}</version>
       <scope>test</scope>
     </dependency>
+    <!-- SQS over LocalStack: the default InboxDestinations over a real MessagingDestinations -->
+    <dependency>
+      <groupId>com.example</groupId>
+      <artifactId>messaging-aws</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>apache-client</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers-junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
     <dependency>
       <groupId>io.micrometer</groupId>
       <artifactId>micrometer-registry-prometheus</artifactId>
