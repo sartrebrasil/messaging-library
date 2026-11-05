@@ -151,6 +151,16 @@ class InboxAutoConfigurationTest {
                         .hasMessageContaining("above the receiver maxRedeliveryDelay"));
     }
 
+    @Test
+    void capabilitiesAreValidatedAtStartup() {
+        runner.withUserConfiguration(Functional.class).withPropertyValues(C + "ordering=strict")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasStackTraceContaining("ordering: strict needs a receiver with orderedDelivery"));
+        runner.withUserConfiguration(Functional.class).withPropertyValues(C + "retry.delayed.strategy=retry-queues")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasStackTraceContaining("retry-queues without delayed.queues"));
+    }
+
     static void await(BooleanSupplier condition) {
         long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
         while (!condition.getAsBoolean()) {
