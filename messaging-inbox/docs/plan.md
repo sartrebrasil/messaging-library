@@ -169,6 +169,13 @@ inbox:
 
 ## Fases
 
+Desde 2026-11-05 a inbox mora na messaging-library (ADR-0001 e ADR-0006,
+revisões de 2026-11-05), e a execução segue as fatias e tarefas de
+[incorporacao.md](incorporacao.md). Mudanças nas fases abaixo: F2 inclui o
+loop do ADR-0009 sobre o `InMemoryMessaging`; F3 é só a matriz dos provedores
+da messaging-lib; F4 (`inbox-kafka`) sai do escopo; os módulos `inbox-*` viram
+`messaging-inbox` e `messaging-inbox-spring-boot-starter`.
+
 | Fase | Entrega | Pronto quando | Status |
 |---|---|---|---|
 | F0 | Fundação do repo | Build verde no CI com módulos vazios; ADRs aceitos | Feita, exceto o CI: build local verde e ADRs aceitos em 2026-10-08; o CI roda no primeiro push (sem remoto ainda) |
@@ -281,3 +288,8 @@ storage-lib: sem mudanças até o claim-check (F8+).
   tentativa onde o provedor conta entregas.
 - 2026-10-08: ADRs 0001 a 0017 aceitos. F0 feita, exceto a primeira execução
   do CI, que depende do remoto.
+- 2026-11-05: inbox incorporada na messaging-library (`messaging-inbox`,
+  `messaging-inbox-spring-boot-starter`), sem Kafka e sem SPI de adapter.
+  ADR-0007: `traceparent` do body da outbox primeiro; gauge
+  `inbox_last_receive_age_seconds`. Plano de execução em
+  [incorporacao.md](incorporacao.md).
