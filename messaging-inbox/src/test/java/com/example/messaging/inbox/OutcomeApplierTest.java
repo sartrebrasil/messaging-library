@@ -68,7 +68,7 @@ class OutcomeApplierTest {
     @Test
     void aMessageThatCannotBeCopiedIsReleasedNotAcked() {
         var applied = applier(DelayedStrategy.BROKER_DELAY).apply(receiver, received(OptionalInt.of(1), "key with spaces"),
-                new Outcome.Failed(Outcome.FailureReason.NON_RETRYABLE, AttemptState.initial(), new IllegalArgumentException()));
+                new Outcome.Failed(Outcome.FailureReason.NON_RETRYABLE, AttemptState.initial(), new IllegalArgumentException(), null));
 
         assertEquals(Effect.COPY_IMPOSSIBLE, applied.effect());
         assertEquals(List.of("nack PT0S"), receiver.calls);
@@ -79,7 +79,7 @@ class OutcomeApplierTest {
     void aFailedCopyReleasesTheMessage() {
         failed.fail = true;
         var applied = applier(DelayedStrategy.BROKER_DELAY).apply(receiver, received(OptionalInt.of(1), null),
-                new Outcome.Failed(Outcome.FailureReason.REJECTED, AttemptState.initial(), null));
+                new Outcome.Failed(Outcome.FailureReason.REJECTED, AttemptState.initial(), null, "bad"));
 
         assertEquals(Effect.EFFECT_FAILED, applied.effect());
         assertEquals(List.of("nack PT0S"), receiver.calls);
