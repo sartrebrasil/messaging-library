@@ -78,4 +78,22 @@ class CoreModelTest {
         String truncated = new DeadLetterInfo("id", "x".repeat(5000)).toAttributeValue();
         assertEquals(DeadLetterInfo.MAX_ATTRIBUTE_LENGTH, truncated.length());
     }
+
+    @Test
+    void copyOfKeepsContentAndLeavesDeduplicationAndDeadLetterToTheCaller() {
+        var now = java.time.Instant.parse("2026-11-05T10:00:00Z");
+        var received = new ReceivedMessage("m-1", "body".getBytes(), Map.of("tenant", "a"), "application/json",
+                "order-7", java.util.OptionalInt.of(3), now, now, now.plusSeconds(30),
+                "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01", new DeadLetterInfo("m-0", "x"), new Object());
+
+        OutgoingMessage copy = OutgoingMessage.copyOf(received);
+
+        assertArrayEquals("body".getBytes(), copy.body());
+        assertEquals(Map.of("tenant", "a"), copy.attributes());
+        assertEquals("application/json", copy.contentType());
+        assertEquals("order-7", copy.orderingKey());
+        assertEquals(received.traceparent(), copy.traceparent());
+        assertNull(copy.deduplicationId());
+        assertNull(copy.deadLetter());
+    }
 }

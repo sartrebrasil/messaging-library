@@ -227,8 +227,9 @@ public final class RabbitMessageReceiver implements MessageReceiver {
         if (deadLetterSender == null) {
             throw new UnsupportedOperationException("Receiver de " + queue + " sem sender de DLQ configurado");
         }
-        OutgoingMessage copy = new OutgoingMessage(message.body(), message.attributes(), message.contentType(),
-                null, null, message.traceparent(), new DeadLetterInfo(message.messageId(), reason));
+        OutgoingMessage copy = OutgoingMessage.copyOf(message)
+                .withOrderingKey(null)
+                .withDeadLetter(new DeadLetterInfo(message.messageId(), reason));
         // Envio antes do ack: falha entre os dois gera duplicata na DLQ, nunca perda (ADR-0005)
         deadLetterSender.send(copy);
         ack(message);
