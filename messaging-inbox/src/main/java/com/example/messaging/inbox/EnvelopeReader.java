@@ -65,7 +65,7 @@ public final class EnvelopeReader {
         Map<String, String> a = message.attributes();
         String id = a.get(CE + "id");
         String type = a.get(CE + "type");
-        if (id == null || type == null) {
+        if (id == null || id.isBlank() || type == null) {
             throw new PayloadDeserializationException("CloudEvents message " + message.messageId()
                     + " without ce_id or ce_type", null);
         }
@@ -99,6 +99,11 @@ public final class EnvelopeReader {
 
     private InboxMessage outbox(ReceivedMessage message, String destination, Delivery delivery, OutboxJson.Body body) {
         Map<String, String> s = body.strings();
+        if (s.get("messageId").isBlank()) {
+            // the id is the idempotency key: a blank one cannot deduplicate anything
+            throw new PayloadDeserializationException("outbox body of message " + message.messageId()
+                    + " with a blank messageId", null);
+        }
         return new InboxMessage(s.get("messageId"), s.get("eventType"), null, instant(s.get("occurredAt"), message),
                 s.get("aggregateId"), s.get("aggregateType"), version(body.aggregateVersion(), message),
                 traceparent(body.headers().get("traceparent"), message), headers(message.attributes(), body.headers()),
