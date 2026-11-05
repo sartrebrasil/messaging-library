@@ -3,6 +3,7 @@
 - Status: aceito (2026-10-08)
 - Data: 2026-10-07
 - Revisão: 2026-10-07 (orçamento do `keepAlive` pela maior lane; Kafka exige `ordering: relaxed`)
+- Revisão: 2026-11-05 (implementado no `messaging-inbox`, antes da F6, para o engine-tax)
 
 ## Contexto
 
@@ -94,6 +95,21 @@ inbox:
       configuration:
         max-messages-per-poll: 10
 ```
+
+## Revisão de 2026-11-05: implementação
+
+- Feito no `messaging-inbox` antes da F6: o engine-tax trata cada lote do SQS
+  em paralelo desde a T-128 (o consumo seguia o atraso do SQS real), e a
+  migração não pode perder isso. `key-lanes` em `inbox.consumers.<nome>` e em
+  `inbox.defaults`.
+- Cada worker tem um pool fixo de `key-lanes` platform threads, criado uma vez.
+  Os efeitos no broker são aplicados na lane, logo depois de cada mensagem,
+  como sem lanes; o worker espera todas as lanes antes do próximo `receive`.
+- O orçamento do `keepAlive` de cada mensagem é `max-processing` vezes a
+  posição dela na lane.
+- Pendente, como sem lanes: a regra de arrasto do ADR-0011 em `strict` com
+  `broker-delay` (as mensagens seguintes da mesma chave não recebem o mesmo
+  `Retry`). As validações com `batch` e Kafka não se aplicam (não existem aqui).
 
 ## Alternativas descartadas
 
