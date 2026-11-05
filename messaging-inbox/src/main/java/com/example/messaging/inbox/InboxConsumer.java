@@ -32,6 +32,7 @@ public final class InboxConsumer {
     private final StopSignal stop;
     private final Clock clock;
     private final DoubleSupplier random;
+    private final ConsumerObserver observer;
     private final DelayedStrategy strategy;
     private final Duration leaseBudget;
     private final OutcomeApplier applier;
@@ -48,6 +49,13 @@ public final class InboxConsumer {
      */
     public InboxConsumer(ConsumerSettings settings, Pipeline<?> pipeline, Destinations destinations, StopSignal stop,
                          Clock clock, DoubleSupplier random) {
+        this(settings, pipeline, destinations, stop, clock, random, ConsumerObserver.NONE);
+    }
+
+    /** @param observer metrics and tracing hook; its failures never affect messages */
+    public InboxConsumer(ConsumerSettings settings, Pipeline<?> pipeline, Destinations destinations, StopSignal stop,
+                         Clock clock, DoubleSupplier random, ConsumerObserver observer) {
+        this.observer = new SafeObserver(Objects.requireNonNull(observer, "observer"));
         this.settings = Objects.requireNonNull(settings, "settings");
         this.pipeline = Objects.requireNonNull(pipeline, "pipeline");
         this.destinations = Objects.requireNonNull(destinations, "destinations");
@@ -104,7 +112,7 @@ public final class InboxConsumer {
                     .uncaughtExceptionHandler((t, e) -> LOG.log(System.Logger.Level.ERROR,
                             "Consumer " + settings.consumer() + ": worker " + t.getName() + " died", e))
                     .unstarted(new Worker(settings, receiver, pipeline, applier, strategy, leaseBudget, stop,
-                            lastReceive, clock, random));
+                            lastReceive, clock, random, observer));
             threads.add(thread);
             thread.start();
         }

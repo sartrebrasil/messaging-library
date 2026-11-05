@@ -362,6 +362,47 @@ class InboxConsumerTest {
     }
 
     @Test
+    void theObserverSeesEachDeliveryOnceAndItsFailuresDoNotTouchMessages() {
+        var reports = new CopyOnWriteArrayList<ConsumerObserver.Report>();
+        var retries = new AtomicInteger();
+        var observer = new ConsumerObserver() {
+            @Override
+            public void immediateRetry(InboxMessage message, Throwable failure) {
+                retries.incrementAndGet();
+            }
+
+            @Override
+            public void delivered(Report report) {
+                reports.add(report);
+                throw new IllegalStateException("metrics down");
+            }
+        };
+        var stop = new StopSignal();
+        var immediateOnce = new RetryPolicy(new BackoffSpec(1, Duration.ofMillis(1), 1, Duration.ofMillis(1), 0),
+                BackoffSpec.none(), true, 3, List.of(), List.of(), List.of());
+        var pipeline = new Pipeline<String>("billing", new EnvelopeReader(EnvelopeMode.AUTO), (m, t) -> m.payloadAsString(),
+                String.class, m -> {
+                    if (calls.incrementAndGet() == 1) {
+                        throw new IllegalStateException("timeout");
+                    }
+                    return null;
+                }, immediateOnce, stop, () -> 0.0);
+        var consumer = new InboxConsumer(settings(DelayedStrategy.AUTO, 1), pipeline, dlqAndFailed(List.of()), stop,
+                Clock.systemUTC(), () -> 0.0, observer);
+        consumers.add(consumer);
+        consumer.start();
+        send("plain");
+
+        await(() -> reports.size() == 1 && messaging.size(MAIN) == 0);
+        ConsumerObserver.Report report = reports.getFirst();
+        assertEquals(Effect.ACKED, report.effect());
+        assertEquals(new Outcome.Ack(Outcome.AckReason.SUCCESS), report.outcome());
+        assertEquals("plain", report.inbox().payloadAsString());
+        assertEquals(1, retries.get());
+        assertEquals(2, calls.get());
+    }
+
+    @Test
     void startupRejectsWhatCannotWork() {
         var strict = new ConsumerSettings("billing", MAIN, 1, 1, Duration.ofMillis(100), Duration.ofSeconds(5),
                 Duration.ofSeconds(2), Ordering.STRICT, DelayedStrategy.AUTO, true);
