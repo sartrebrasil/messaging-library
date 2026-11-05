@@ -5,6 +5,25 @@
 - Revisão: 2026-10-07 (troca os containers Spring de SQS, RabbitMQ e JMS pela messaging-lib)
 - Revisão: 2026-10-07 (SPI do adapter síncrono; circuit breaker sai do core, ADR-0010)
 - Revisão: 2026-10-07 (`Outcome.Release`; `hold` e passada do nível 3 no core)
+- Revisão: 2026-11-05 (incorporada na messaging-library: dois módulos, sem Kafka, sem SPI de adapter)
+
+## Revisão de 2026-11-05: incorporação na messaging-library
+
+Esta seção vence o resto do ADR onde os dois divergem.
+
+- A inbox passa a morar na messaging-library, em dois módulos:
+  `messaging-inbox` (Java puro, sobre `messaging-core`: envelope, pipeline,
+  retry, loop de polling) e `messaging-inbox-spring-boot-starter`.
+- Kafka fica fora, como no ADR-0001 de escopo da messaging-lib
+  (`docs/adr/0001-escopo.md`). `inbox-kafka` não é construído aqui.
+- Com um adapter só, saem o SPI `BrokerAdapter` e o `BrokerAdapterContract`:
+  seriam abstrações com uma implementação. O loop chama o `MessageReceiver`
+  direto. O `Outcome` fica: separa a decisão do pipeline do efeito no broker e
+  é o que os testes verificam.
+- `inbox-core`, `inbox-messaging` e `inbox-testkit` viram o `messaging-inbox`;
+  os testes usam o `InMemoryMessaging` do `messaging-testkit`.
+- Se o Kafka voltar, o `Outcome` e o pipeline já estão separados do loop; o SPI
+  nasce junto com o segundo adapter.
 
 ## Contexto
 

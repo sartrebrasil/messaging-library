@@ -5,6 +5,26 @@
 - Revisão: 2026-10-07 (`inbox-messaging` substitui `inbox-sqs`)
 - Revisão: 2026-10-07 (incorpora a acme-messaging; módulo `inbox-resilience4j`)
 - Revisão: 2026-10-07 (`hold` e nível 3 no core; BOMs por módulo)
+- Revisão: 2026-11-05 (coordenadas e módulos da messaging-library)
+
+## Revisão de 2026-11-05: coordenadas na messaging-library
+
+Esta seção vence o resto do ADR onde os dois divergem.
+
+- Coordenadas: `com.example:messaging-inbox` e
+  `com.example:messaging-inbox-spring-boot-starter`, versão da
+  messaging-library (`0.1.0-SNAPSHOT`), ambos no `messaging-bom`.
+- Pacote base `com.example.messaging.inbox` (starter em
+  `com.example.messaging.inbox.spring`). O código portado da inbox-library
+  muda de `com.example.inbox` para esse pacote.
+- Build, plugins e JUnit seguem o `messaging-parent`. O `messaging-inbox` não
+  importa o BOM do Spring Boot; o starter usa o Boot 4.1.1, como o
+  `messaging-spring-boot-starter`.
+- Sem `inbox-kafka`, `inbox-testkit` e `inbox-resilience4j` por enquanto
+  (ADR-0001). O módulo do Resilience4j volta a ser avaliado com o circuit
+  breaker (F6).
+- O risco "messaging-lib não publicada" deixa de existir: a inbox compila no
+  mesmo reactor.
 
 ## Decisão
 
