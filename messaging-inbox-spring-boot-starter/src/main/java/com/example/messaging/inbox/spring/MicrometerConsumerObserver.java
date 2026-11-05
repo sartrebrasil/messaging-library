@@ -70,7 +70,9 @@ final class MicrometerConsumerObserver implements ConsumerObserver {
                 .lowCardinalityKeyValue("messaging.consumer.group.name", consumer)
                 .highCardinalityKeyValue("messaging.message.id", message.id())
                 .highCardinalityKeyValue("inbox.attempt", Integer.toString(message.delivery().attempt()))
-                .lowCardinalityKeyValue("inbox.level", message.delivery().level().name().toLowerCase());
+                .lowCardinalityKeyValue("inbox.level", message.delivery().level().name().toLowerCase())
+                // same key set even when the execution throws: meter handlers build one timer from these keys
+                .lowCardinalityKeyValue("inbox.outcome", "released");
         return observation.observe(() -> {
             Outcome outcome = execution.get();
             observation.lowCardinalityKeyValue(KeyValue.of("inbox.outcome", outcomeTag(outcome, null)));
