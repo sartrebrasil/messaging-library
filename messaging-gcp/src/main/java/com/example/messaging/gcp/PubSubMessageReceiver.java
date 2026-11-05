@@ -237,8 +237,8 @@ public final class PubSubMessageReceiver implements MessageReceiver {
         if (options.deadLetterSender() == null) {
             throw new UnsupportedOperationException("Receiver de " + subscription + " sem sender de DLQ configurado");
         }
-        OutgoingMessage copy = new OutgoingMessage(message.body(), message.attributes(), message.contentType(),
-                message.orderingKey(), null, message.traceparent(), new DeadLetterInfo(message.messageId(), reason));
+        OutgoingMessage copy = OutgoingMessage.copyOf(message)
+                .withDeadLetter(new DeadLetterInfo(message.messageId(), reason));
         // Envio antes do ack: falha entre os dois gera duplicata na DLQ, nunca perda (ADR-0005)
         options.deadLetterSender().send(copy);
         ack(message);

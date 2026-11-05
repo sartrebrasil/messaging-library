@@ -217,9 +217,9 @@ public final class SqsMessageReceiver implements MessageReceiver {
         if (deadLetterSender == null) {
             throw new UnsupportedOperationException("Receiver de " + queueUrl + " sem sender de DLQ configurado");
         }
-        OutgoingMessage copy = new OutgoingMessage(message.body(), message.attributes(), message.contentType(),
-                message.orderingKey(), fifo ? message.messageId() : null, message.traceparent(),
-                new DeadLetterInfo(message.messageId(), reason));
+        OutgoingMessage copy = OutgoingMessage.copyOf(message)
+                .withDeduplicationId(fifo ? message.messageId() : null)
+                .withDeadLetter(new DeadLetterInfo(message.messageId(), reason));
         // Envio antes do ack: falha entre os dois gera duplicata na DLQ, nunca perda (ADR-0005)
         deadLetterSender.send(copy);
         ack(message);
