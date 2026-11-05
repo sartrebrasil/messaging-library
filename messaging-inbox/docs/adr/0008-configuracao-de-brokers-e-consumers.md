@@ -5,6 +5,7 @@
 - Revisão: 2026-10-07 (broker `messaging` no lugar de `sqs`)
 - Revisão: 2026-10-07 (bloco `inbox.defaults`, vindo da acme-messaging)
 - Revisão: 2026-10-07 (DLQ e `failed` do Kafka por campo explícito; `on-exhausted`)
+- Revisão: 2026-11-05 (implementação no starter da messaging-library)
 
 ## Contexto
 
@@ -174,6 +175,25 @@ Para o que não dá para expressar em properties, existe o bean
 nativo, e roda depois da aplicação de `configuration`. O broker `messaging`
 não tem container; o que for do provedor se ajusta no cliente nativo, que a
 messaging-lib aceita como bean do usuário.
+
+## Revisão de 2026-11-05: implementação
+
+- Só existe o tipo de broker `messaging` (Kafka fora, ADR-0001). Sem
+  `inbox.brokers`, há o broker implícito `messaging`; com um só broker
+  declarado, `broker` é opcional no consumer; com mais de um, obrigatório.
+- `inbox.*` faz o binding com `ignoreUnknownFields = false`: chave desconhecida
+  falha o startup. Chaves dos ADRs que ainda não existem (`retry.dead-letter`,
+  `stale-check`, `expiration`, `circuit-breaker`, `batch`, `key-lanes`) falham
+  com "not supported yet (F5/F6)", em vez de serem ignoradas.
+- `retry.include-exception-message` fica em `retry`, como no ADR-0002.
+- Destinos por nome vêm do bean `InboxDestinations` (receiver e sender). O
+  padrão lê o `MessagingDestinations` do starter da messaging-lib; um bean
+  próprio o substitui (os testes usam o `InMemoryMessaging`).
+- Handler por consumer: bean `InboxHandler`/`InboxResultHandler` com o nome do
+  consumer (exato ou camelCase) ou método `@InboxListener`. Exatamente um; o
+  startup lista todos os problemas.
+- `retry.delayed.max` não definido vira `min(15 min, maxRedeliveryDelay)` quando
+  a estratégia pode ser `broker-delay`; um valor explícito acima do limite falha.
 
 ## Alternativas descartadas
 
