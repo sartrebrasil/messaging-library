@@ -92,7 +92,7 @@ public final class ExceptionClassifier {
         return chain;
     }
 
-    static Throwable rootCause(Throwable error) {
+    public static Throwable rootCause(Throwable error) {
         List<Throwable> chain = causeChain(error);
         return chain.get(chain.size() - 1);
     }
