@@ -6,6 +6,7 @@
 - Revisão: 2026-10-07 (`discarded`, `expired` e `rejected`, ADRs 0014 e 0015)
 - Revisão: 2026-10-07 (`circuit_open`; `released` sem circuit breaker; `retry_delayed` sem exigir nível 1)
 - Revisão: 2026-11-05 (body da outbox primeiro na procura do `traceparent`; gauge `inbox_last_receive_age_seconds`)
+- Revisão: 2026-11-05 (implementação no starter: nomes Micrometer, `ConsumerObserver`)
 
 ## Contexto
 
@@ -168,6 +169,29 @@ Fora do escopo do MVP: `AWSTraceHeader` (X-Ray) no SQS e propagação B3
 
 Teste obrigatório (F2 em diante): handler que grava na outbox, e o consumer
 seguinte recebe a mensagem com o mesmo trace id da mensagem original.
+
+## Revisão de 2026-11-05: implementação
+
+- O core expõe o gancho `ConsumerObserver` (só JDK): `received`,
+  `execution` (em volta de cada execução do pipeline, depois da leitura do
+  envelope), `immediateRetry`, `held`, `delivered` (uma vez por entrega, depois
+  do efeito) e `receiveFailed`. Exceção do observer é registrada no log e
+  descartada: observar nunca muda o destino de uma mensagem.
+- O starter implementa o gancho com Micrometer. Os meters usam nomes com ponto
+  (`inbox.messages.received`, `inbox.processing.duration`,
+  `inbox.last.receive.age` com unidade `seconds`...), que o Prometheus exporta
+  como `inbox_messages_received_total`, `inbox_processing_duration_seconds` e
+  `inbox_last_receive_age_seconds`. A tabela acima usa os nomes exportados; o
+  timer de duração ganha o sufixo `_seconds`.
+- `outcome` vem do efeito quando ele difere da decisão: `broker-delay` sem
+  `deliveryCount` vira `dead_letter`; efeito que falhou ou cópia impossível,
+  `released`.
+- `inbox.consume` é uma observation `CONSUMER` com o `InboxMessage` como
+  carrier: `traceparent` de `InboxMessage.traceparent()`, `tracestate` e
+  `baggage` dos headers. Fica aberta durante os retries do nível 1; cada
+  execução do `hold` abre uma nova.
+- `inbox_effect_failed_total{effect}`: `receive` é exato; para os outros, o
+  efeito é deduzido do `Outcome` (`ack`, `nack`, `copy`).
 
 ## Consequências
 

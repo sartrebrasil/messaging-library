@@ -1,6 +1,6 @@
 # Incorporação do consumo (inbox) na messaging-library
 
-Status: decisões D1 a D7 aceitas em 2026-11-05. Fatias 0 a 8 feitas em 2026-11-05 (T8a.6 adiada).
+Status: decisões D1 a D7 aceitas em 2026-11-05. Fatias 0 a 9 feitas em 2026-11-05 (transação `join` adiada, ver Pendências).
 
 Objetivo: trazer o `QueueConsumer` do engine-tax
 (`engine-tax/platform-support/.../QueueConsumer.java`) para a messaging-library
@@ -177,7 +177,7 @@ Repo: `/Users/sartre.brasil/Sources/pessoal/idempotency-multi-store`.
 | T8a.3 | JDBC com `WHERE owner = ?` e migração da coluna; modo de transação `join`/`requires-new` | Contrato verde com Postgres (Testcontainers) |
 | T8a.4 | Redis com script Lua atômico | Contrato verde com Redis (Testcontainers) |
 | T8a.5 | Mongo com filtro por owner | Contrato verde com Mongo (Testcontainers) |
-| T8a.6 | `spring-web` opcional no starter. **Adiada para antes da fatia 9**: o `JacksonResultSerializer` depende de `ResponseEntity`, e só o starter da inbox precisa disso | Contexto sobe sem `spring-web` no classpath |
+| T8a.6 | `spring-web` opcional no starter. Feita com a fatia 9: `ResponseEntity` numa classe carregada só com `spring-web` presente; beans web numa configuração com `@ConditionalOnClass` | `WithoutSpringWebTest`: contexto sobe sem `spring-web` no classpath |
 
 ### Fatia 8: idempotência na inbox
 
@@ -220,6 +220,7 @@ Repo: `/Users/sartre.brasil/Sources/pessoal/engine-tax`.
 | 0–3 | 2026-11-05 | Contratos do refactor do `copyOf` verdes (SQS/SNS, Pub/Sub, Artemis, Classic, RabbitMQ), rodados junto com a 4–7. `ServiceBusSubscriptionContractTest.deadLetterMovesMessageToDeadLetterQueue` falha também na `main` (emulator; não é desta branch) |
 | 4–7 | 2026-11-05 | Código das fatias 5 a 7 num commit só (as classes dependem umas das outras para compilar). Sem métricas: o `OutcomeApplier` devolve `Applied` (efeito, nível 2 pulado, orçamento excedido) para a fatia 9. O `SmartLifecycle` fica para o starter |
 | 8a, 8 | 2026-11-05 | idempotency-multi-store na branch `feat/owner-token` (3 commits, local): owner token, expiração do concluído e modo `join` no JDBC; contrato verde em memória, JDBC, Redis e Mongo (Testcontainers). Além do plano: `complete` com nova expiração, para os dois TTLs do ADR-0004. Na inbox: store direto em vez do engine, `release` antes do efeito (ADR-0004, revisão de 2026-11-05). O primeiro commit da idempotency-multi-store não compila o starter sozinho; o segundo corrige |
+| 9 | 2026-11-05 | Starter: properties mescladas e validadas, autoconfig, `InboxLifecycle` (paradas em paralelo, reconstrução no restart), handlers funcional e `@InboxListener`, Jackson 3, Micrometer e tracing (`ConsumerObserver` novo no core), limite de `delayed.max`, idempotência pelo bean `IdempotencyStore`. 21 testes no starter, 111 no core. Tracing testado com o bridge OTel |
 
 ## Pendências conhecidas
 
@@ -228,3 +229,10 @@ Repo: `/Users/sartre.brasil/Sources/pessoal/engine-tax`.
   orçamento do `keepAlive`. Se o dono caiu, o worker segura a mensagem sem lease
   até lá. Limite simples: `Release` quando as esperas passarem do orçamento do
   `hold`.
+- Transação do ADR-0004 com o JDBC em `join` não está ligada: o starter não abre
+  transação em volta do handler, e com uma transação só, uma reserva cobre o
+  nível 1 inteiro. Sem transação em volta, o store em `join` se comporta como
+  `requires-new`. Fica para depois da migração do engine-tax.
+- `spring.lifecycle.timeout-per-shutdown-phase` (padrão 30 s do Spring) precisa
+  ser maior que `shutdown-timeout` mais `poll-wait`; senão o Spring segue o
+  shutdown com workers ainda rodando. Registrar no README do starter.
