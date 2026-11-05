@@ -2,6 +2,7 @@
 
 - Status: aceito
 - Data: 2026-10-04
+- Revisão: 2026-11-05 (o consumo entra como módulo próprio, `messaging-inbox`; o core continua só com o data plane)
 
 ## Contexto
 
@@ -46,8 +47,11 @@ Fora do escopo:
 - RabbitMQ, ActiveMQ e IBM MQ: não são serviços de nuvem gerenciados com SDK
   próprio. Podem entrar depois se a API aguentar, sem compromisso. ActiveMQ e
   RabbitMQ entraram depois da v1 (ADR-0009).
-- Listener, polling em loop, concorrência, retry, idempotência, serialização.
-  São responsabilidades de quem consome (a inbox-library, por exemplo).
+- Listener, polling em loop, concorrência, retry, idempotência, serialização,
+  no `messaging-core` e nos adapters. Desde 2026-11-05 são do módulo
+  `messaging-inbox` (e do `messaging-inbox-spring-boot-starter`), que fica
+  sobre o `MessageReceiver` como um consumidor qualquer. Decisões dele em
+  `messaging-inbox/docs` (antes, a inbox-library).
 - Claim-check para payload grande: combinação da storage-lib com esta, feita por
   quem usa.
 - API reativa.
