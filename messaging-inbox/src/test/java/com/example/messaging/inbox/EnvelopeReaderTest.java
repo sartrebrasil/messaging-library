@@ -113,6 +113,14 @@ class EnvelopeReaderTest {
     }
 
     @Test
+    void blankIdsAreRejected() {
+        assertThrows(PayloadDeserializationException.class, () -> auto.read(received(
+                "{\"messageId\":\"\",\"eventType\":\"E\",\"payload\":{}}", Map.of(), null, 1), "q"));
+        assertThrows(PayloadDeserializationException.class,
+                () -> auto.read(received("x", Map.of("ce_id", " ", "ce_type", "T"), null, 1), "q"));
+    }
+
+    @Test
     void explicitModesFailWhenTheirFormatIsMissing() {
         var outbox = new EnvelopeReader(EnvelopeMode.OUTBOX);
         var cloudEvents = new EnvelopeReader(EnvelopeMode.CLOUDEVENTS);
