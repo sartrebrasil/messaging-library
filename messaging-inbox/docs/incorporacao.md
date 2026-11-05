@@ -1,6 +1,6 @@
 # Incorporação do consumo (inbox) na messaging-library
 
-Status: decisões D1 a D7 aceitas em 2026-11-05. Fatias 0 a 9 feitas em 2026-11-05 (transação `join` adiada, ver Pendências).
+Status: decisões D1 a D7 aceitas em 2026-11-05. Fatias 0 a 10 feitas em 2026-11-05 (transação `join` adiada, ver Pendências; a 10 numa branch do engine-tax, sem merge nem implantação).
 
 Objetivo: trazer o `QueueConsumer` do engine-tax
 (`engine-tax/platform-support/.../QueueConsumer.java`) para a messaging-library
@@ -222,6 +222,7 @@ Repo: `/Users/sartre.brasil/Sources/pessoal/engine-tax`.
 | 8a, 8 | 2026-11-05 | idempotency-multi-store na branch `feat/owner-token` (4 commits, com a T8a.6; integrada na `main` dela por fast-forward em 2026-11-05, sem push): owner token, expiração do concluído e modo `join` no JDBC; contrato verde em memória, JDBC, Redis e Mongo (Testcontainers). Além do plano: `complete` com nova expiração, para os dois TTLs do ADR-0004. Na inbox: store direto em vez do engine, `release` antes do efeito (ADR-0004, revisão de 2026-11-05). O primeiro commit da idempotency-multi-store não compila o starter sozinho; o segundo corrige |
 | 9 | 2026-11-05 | Starter: properties mescladas e validadas, autoconfig, `InboxLifecycle` (paradas em paralelo, reconstrução no restart), handlers funcional e `@InboxListener`, Jackson 3, Micrometer e tracing (`ConsumerObserver` novo no core), limite de `delayed.max`, idempotência pelo bean `IdempotencyStore`. 21 testes no starter, 109 no core. Tracing testado com o bridge OTel |
 | 9+ | 2026-11-05 | `key-lanes` (ADR-0016) antecipado da F6 a pedido do usuário, para o engine-tax manter o paralelismo da T-128: lanes por `orderingKey`, em paralelo, e o próximo `receive` espera todas |
+| 10 | 2026-11-05 | engine-tax, branch `feat/inbox-consumer` (1 commit, sem merge): `InboxHandler<JsonNode>` por consumer montando o mesmo `Event` (serviços intactos), `QueueConsumer` removido, `key-lanes: 10` com 10 mensagens por poll (paralelismo da T-128), filas `-failed`, DLQ da inbox = a `-dlq` existente, `maxReceiveCount` 12, `poll-wait` 10 s e `shutdown-timeout` 15 s (dentro dos 30 s do pod), `inbox.enabled` ligado às flags `lifecycle.consumer`/`outcome.consumer`, alertas, painéis, alarmes e docs com `inbox_*`. Sem idempotência (handlers já idempotentes). Não foi rodado contra a stack local (havia pods em uso); o caminho SQS real tem o `SqsLocalStackTest` |
 
 ## Pendências conhecidas
 
@@ -240,3 +241,10 @@ Repo: `/Users/sartre.brasil/Sources/pessoal/engine-tax`.
 - O `InboxDestinations` padrão sobre um `MessagingDestinations` real só tem
   teste com SQS (`SqsLocalStackTest`, LocalStack); os outros provedores ficam
   para a F3.
+- engine-tax: as filas `-failed` e o `maxReceiveCount` 12 só existem em
+  LocalStack novo (o `localstack-init.sh` roda na criação do container). Com o
+  LocalStack atual, criar as filas e trocar a redrive antes de implantar.
+- engine-tax: o `OldestMessageSeconds` (5 min) do CloudWatch dispara junto com
+  o retry de nível 2 a partir da 4ª tentativa; o limite ficou como estava.
+- Mover da DLQ de volta com `start-message-move-task` mantém `inbox_attempts`:
+  a mensagem volta só com o nível 1. O redrive que zera as tentativas é a F5.
