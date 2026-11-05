@@ -23,8 +23,12 @@ Esta seção vence o resto do ADR onde os dois divergem.
 - Sem `inbox-kafka`, `inbox-testkit` e `inbox-resilience4j` por enquanto
   (ADR-0001). O módulo do Resilience4j volta a ser avaliado com o circuit
   breaker (F6).
-- O risco "messaging-lib não publicada" deixa de existir: a inbox compila no
-  mesmo reactor.
+- A inbox compila no mesmo reactor da messaging-lib. Continua não publicada, e
+  ganhou outra dependência local: `com.example.idempotency:idempotency-core`
+  (opcional), hoje só na branch `feat/owner-token` da idempotency-multi-store,
+  instalada no repositório Maven local. Um clone limpo ou o CI não compila o
+  `messaging-inbox` até essa branch ser integrada e publicada (ou instalada no
+  job).
 
 ## Decisão
 
