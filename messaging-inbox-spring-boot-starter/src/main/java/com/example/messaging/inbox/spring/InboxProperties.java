@@ -94,7 +94,8 @@ public class InboxProperties {
         private Map<String, Object> expiration;
         private Map<String, Object> circuitBreaker;
         private Map<String, Object> batch;
-        private Object keyLanes;
+        /** Lanes processing one receive in parallel, by orderingKey (ADR-0016); 1 = in sequence. */
+        private Integer keyLanes;
 
         public String getBroker() {
             return broker;
@@ -208,11 +209,11 @@ public class InboxProperties {
             this.batch = batch;
         }
 
-        public Object getKeyLanes() {
+        public Integer getKeyLanes() {
             return keyLanes;
         }
 
-        public void setKeyLanes(Object keyLanes) {
+        public void setKeyLanes(Integer keyLanes) {
             this.keyLanes = keyLanes;
         }
     }
