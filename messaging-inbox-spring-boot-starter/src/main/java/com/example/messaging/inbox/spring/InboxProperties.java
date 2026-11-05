@@ -17,6 +17,17 @@ import java.util.Map;
 @ConfigurationProperties(prefix = "inbox", ignoreUnknownFields = false)
 public class InboxProperties {
 
+    /** {@code false} starts no consumer at all (API-only instances and tests). */
+    private boolean enabled = true;
+
+    public boolean isEnabled() {
+        return enabled;
+    }
+
+    public void setEnabled(boolean enabled) {
+        this.enabled = enabled;
+    }
+
     /** Brokers; without any, the implicit {@code messaging} broker (messaging.destinations). */
     private Map<String, Broker> brokers = new LinkedHashMap<>();
 
