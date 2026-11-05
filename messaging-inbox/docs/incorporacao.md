@@ -192,8 +192,8 @@ Repo: `/Users/sartre.brasil/Sources/pessoal/idempotency-multi-store`.
 
 | # | Tarefa | Teste |
 |---|---|---|
-| T9.1 | `InboxProperties` (`inbox.defaults`, `inbox.consumers`, `configuration` do broker `messaging`) com precedência e chaves protegidas ou desconhecidas falhando (ADR-0008) | `ApplicationContextRunner` com os casos de erro |
-| T9.2 | Autoconfig: um `InboxConsumer` por consumer, receivers e senders do `MessagingDestinations`, `SmartLifecycle` parando antes da messaging-lib | Contexto com `InMemoryMessaging` consome uma mensagem |
+| T9.1 | `InboxProperties` (`inbox.defaults`, `inbox.consumers`, `configuration` do broker `messaging`) com precedência e chaves protegidas ou desconhecidas falhando (ADR-0008). `delayed.max` não configurado vira `min(15m, maxRedeliveryDelay)` (senão todo consumer do Pub/Sub falha no startup); `deadLetterEnabled` vem de haver `dead-letter` | `ApplicationContextRunner` com os casos de erro; Pub/Sub sem `delayed.max` sobe |
+| T9.2 | Autoconfig: um `InboxConsumer` por consumer, receivers e senders do `MessagingDestinations`, `SmartLifecycle` parando antes da messaging-lib. O mesmo `StopSignal` no `Pipeline` e no `InboxConsumer`; `start` depois de `stop` reconstrói o consumer (o `StopSignal` não reinicia) | Contexto com `InMemoryMessaging` consome uma mensagem; `stop`/`start` do contexto volta a consumir |
 | T9.3 | Modelo funcional (bean `InboxHandler` ligado pelo nome do consumer) | Contexto com bean funcional |
 | T9.4 | `@InboxListener` (método com `T` e `InboxMessage`, retorno `void` ou `HandlerResult`) | Contexto com listener anotado |
 | T9.5 | `PayloadDeserializer` com o `JsonMapper` (Jackson 3) da aplicação | Payload do engine-tax desserializado |
@@ -217,5 +217,5 @@ Repo: `/Users/sartre.brasil/Sources/pessoal/engine-tax`.
 
 | Fatias | Data | Notas |
 |---|---|---|
-| 0–3 | 2026-11-05 | Contratos dos adapters (refactor do `copyOf`) pendentes: Docker desligado |
+| 0–3 | 2026-11-05 | Contratos do refactor do `copyOf` verdes (SQS/SNS, Pub/Sub, Artemis, Classic, RabbitMQ), rodados junto com a 4–7. `ServiceBusSubscriptionContractTest.deadLetterMovesMessageToDeadLetterQueue` falha também na `main` (emulator; não é desta branch) |
 | 4–7 | 2026-11-05 | Código das fatias 5 a 7 num commit só (as classes dependem umas das outras para compilar). Sem métricas: o `OutcomeApplier` devolve `Applied` (efeito, nível 2 pulado, orçamento excedido) para a fatia 9. O `SmartLifecycle` fica para o starter |
