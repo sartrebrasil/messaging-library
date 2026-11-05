@@ -1,6 +1,6 @@
 # Incorporação do consumo (inbox) na messaging-library
 
-Status: decisões D1 a D7 aceitas em 2026-11-05. Fatias 0 a 7 feitas em 2026-11-05 (sem a 8a).
+Status: decisões D1 a D7 aceitas em 2026-11-05. Fatias 0 a 8 feitas em 2026-11-05 (T8a.6 adiada).
 
 Objetivo: trazer o `QueueConsumer` do engine-tax
 (`engine-tax/platform-support/.../QueueConsumer.java`) para a messaging-library
@@ -177,7 +177,7 @@ Repo: `/Users/sartre.brasil/Sources/pessoal/idempotency-multi-store`.
 | T8a.3 | JDBC com `WHERE owner = ?` e migração da coluna; modo de transação `join`/`requires-new` | Contrato verde com Postgres (Testcontainers) |
 | T8a.4 | Redis com script Lua atômico | Contrato verde com Redis (Testcontainers) |
 | T8a.5 | Mongo com filtro por owner | Contrato verde com Mongo (Testcontainers) |
-| T8a.6 | `spring-web` opcional no starter | Contexto sobe sem `spring-web` no classpath |
+| T8a.6 | `spring-web` opcional no starter. **Adiada para antes da fatia 9**: o `JacksonResultSerializer` depende de `ResponseEntity`, e só o starter da inbox precisa disso | Contexto sobe sem `spring-web` no classpath |
 
 ### Fatia 8: idempotência na inbox
 
@@ -219,3 +219,4 @@ Repo: `/Users/sartre.brasil/Sources/pessoal/engine-tax`.
 |---|---|---|
 | 0–3 | 2026-11-05 | Contratos do refactor do `copyOf` verdes (SQS/SNS, Pub/Sub, Artemis, Classic, RabbitMQ), rodados junto com a 4–7. `ServiceBusSubscriptionContractTest.deadLetterMovesMessageToDeadLetterQueue` falha também na `main` (emulator; não é desta branch) |
 | 4–7 | 2026-11-05 | Código das fatias 5 a 7 num commit só (as classes dependem umas das outras para compilar). Sem métricas: o `OutcomeApplier` devolve `Applied` (efeito, nível 2 pulado, orçamento excedido) para a fatia 9. O `SmartLifecycle` fica para o starter |
+| 8a, 8 | 2026-11-05 | idempotency-multi-store na branch `feat/owner-token` (2 commits, local): owner token, expiração do concluído e modo `join` no JDBC; contrato verde em memória, JDBC, Redis e Mongo (Testcontainers). Além do plano: `complete` com nova expiração, para os dois TTLs do ADR-0004. Na inbox: store direto em vez do engine, `release` antes do efeito (ADR-0004, revisão de 2026-11-05). O primeiro commit da idempotency-multi-store não compila o starter sozinho; o segundo corrige |
