@@ -219,7 +219,7 @@ Repo: `/Users/sartre.brasil/Sources/pessoal/engine-tax`.
 |---|---|---|
 | 0–3 | 2026-11-05 | Contratos do refactor do `copyOf` verdes (SQS/SNS, Pub/Sub, Artemis, Classic, RabbitMQ), rodados junto com a 4–7. `ServiceBusSubscriptionContractTest.deadLetterMovesMessageToDeadLetterQueue` falha também na `main` (emulator; não é desta branch) |
 | 4–7 | 2026-11-05 | Código das fatias 5 a 7 num commit só (as classes dependem umas das outras para compilar). Sem métricas: o `OutcomeApplier` devolve `Applied` (efeito, nível 2 pulado, orçamento excedido) para a fatia 9. O `SmartLifecycle` fica para o starter |
-| 8a, 8 | 2026-11-05 | idempotency-multi-store na branch `feat/owner-token` (2 commits, local): owner token, expiração do concluído e modo `join` no JDBC; contrato verde em memória, JDBC, Redis e Mongo (Testcontainers). Além do plano: `complete` com nova expiração, para os dois TTLs do ADR-0004. Na inbox: store direto em vez do engine, `release` antes do efeito (ADR-0004, revisão de 2026-11-05). O primeiro commit da idempotency-multi-store não compila o starter sozinho; o segundo corrige |
+| 8a, 8 | 2026-11-05 | idempotency-multi-store na branch `feat/owner-token` (3 commits, local): owner token, expiração do concluído e modo `join` no JDBC; contrato verde em memória, JDBC, Redis e Mongo (Testcontainers). Além do plano: `complete` com nova expiração, para os dois TTLs do ADR-0004. Na inbox: store direto em vez do engine, `release` antes do efeito (ADR-0004, revisão de 2026-11-05). O primeiro commit da idempotency-multi-store não compila o starter sozinho; o segundo corrige |
 
 ## Pendências conhecidas
 
