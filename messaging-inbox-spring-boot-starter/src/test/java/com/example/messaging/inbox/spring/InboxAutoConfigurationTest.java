@@ -93,6 +93,15 @@ class InboxAutoConfigurationTest {
     }
 
     @Test
+    void disabledStartsNothingEvenWithoutHandlers() {
+        runner.withPropertyValues("inbox.enabled=false")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).doesNotHaveBean(InboxLifecycle.class);
+                });
+    }
+
+    @Test
     void unknownPropertiesFailTheStartup() {
         runner.withUserConfiguration(Functional.class).withPropertyValues(C + "concurrencyy=2")
                 .run(context -> assertThat(context).hasFailed());

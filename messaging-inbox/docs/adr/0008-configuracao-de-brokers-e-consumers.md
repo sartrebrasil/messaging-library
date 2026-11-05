@@ -187,6 +187,8 @@ messaging-lib aceita como bean do usuário.
   supported yet (F5/F6)", em vez de serem ignoradas. `key-lanes` já existe
   (ADR-0016, revisão de 2026-11-05).
 - `retry.include-exception-message` fica em `retry`, como no ADR-0002.
+- `inbox.enabled: false` não sobe nenhum consumer (instâncias só de API e
+  testes); padrão `true`.
 - Destinos por nome vêm do bean `InboxDestinations` (receiver e sender). O
   padrão lê o `MessagingDestinations` do starter da messaging-lib; um bean
   próprio o substitui (os testes usam o `InMemoryMessaging`).
