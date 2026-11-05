@@ -11,6 +11,7 @@ import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.util.ClassUtils;
@@ -29,6 +30,7 @@ import java.util.function.Function;
         "org.springframework.boot.jackson.autoconfigure.JacksonAutoConfiguration",
         "org.springframework.boot.micrometer.metrics.autoconfigure.CompositeMeterRegistryAutoConfiguration",
         "org.springframework.boot.micrometer.observation.autoconfigure.ObservationAutoConfiguration"})
+@ConditionalOnProperty(prefix = "inbox", name = "enabled", matchIfMissing = true)
 @EnableConfigurationProperties(InboxProperties.class)
 public class InboxAutoConfiguration {
 
