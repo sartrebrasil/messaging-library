@@ -25,10 +25,10 @@ Esta seção vence o resto do ADR onde os dois divergem.
   breaker (F6).
 - A inbox compila no mesmo reactor da messaging-lib. Continua não publicada, e
   ganhou outra dependência local: `com.example.idempotency:idempotency-core`
-  (opcional), hoje só na branch `feat/owner-token` da idempotency-multi-store,
-  instalada no repositório Maven local. Um clone limpo ou o CI não compila o
-  `messaging-inbox` até essa branch ser integrada e publicada (ou instalada no
-  job).
+  (opcional), da `main` da idempotency-multi-store (owner token integrado em
+  2026-11-05), também não publicada: só no repositório Maven local. Um clone
+  limpo ou o CI não compila o `messaging-inbox` até ela ser publicada (ou
+  instalada no job).
 
 ## Decisão
 

@@ -100,7 +100,7 @@ DLQ:     reserve -> handler (falha) -> envio da cópia -> release -> ack
   O engine conclui a chave sempre que a operação retorna e não deixa a inbox
   liberá-la em `RetryAfter`, `Reject` e falhas, nem manter uma reserva só
   durante o nível 1 inteiro.
-- Pré-requisitos feitos na idempotency-multi-store (branch `feat/owner-token`):
+- Pré-requisitos feitos na idempotency-multi-store (branch `feat/owner-token`, integrada na `main` em 2026-11-05):
   owner token em `complete`/`release` nos quatro stores (JDBC com
   `WHERE owner = ?`, Redis com script Lua, Mongo com filtro); `complete` aceita
   uma nova expiração, o que dá os dois TTLs da tabela acima (reserva curta,
