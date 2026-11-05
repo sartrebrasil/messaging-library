@@ -164,7 +164,7 @@ em paralelo com 1 a 7.
 |---|---|---|
 | T7.1 | Cópia para DLQ e `failed` pelo `copyOf`, com `inbox_attempts`, `inbox_failure` (fingerprint do ADR-0017, corte em 1024 bytes) e `withDeadLetter`; `include-exception-message` | Atributos esperados; corte do `inbox_failure` |
 | T7.2 | Orçamento de 16 atributos: sai `inbox_failure`, depois `inbox_attempts` (com a consequência do ADR-0002) | Produtor com 14, 15 e 16 atributos |
-| T7.3 | Ordem cópia → `ack`; falha na cópia vira `nack(0)`; `failed` obrigatória; sem `dead-letter`, `DeadLetter` vira `Failed` | Sender que falha: a mensagem volta e não se perde; o crash entre cópia e `ack` gera duplicata |
+| T7.3 | Ordem cópia → `ack`; falha na cópia vira `nack(0)`; `failed` obrigatória; sem `dead-letter`, `DeadLetter` vira `Failed`. Decidir o caso da cópia que não pode ser montada (`copyOf` lança `IllegalArgumentException` com `orderingKey` recebido fora das regras de envio, como um `JMSXGroupID` ou `SessionId` longo): sem decisão, o `nack(0)` repete para sempre | Sender que falha: a mensagem volta e não se perde; o crash entre cópia e `ack` gera duplicata |
 
 ### Fatia 8a: owner token na idempotency-multi-store
 
