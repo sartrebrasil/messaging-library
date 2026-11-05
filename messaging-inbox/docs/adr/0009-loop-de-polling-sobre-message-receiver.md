@@ -2,6 +2,7 @@
 
 - Status: aceito (2026-10-08)
 - Data: 2026-10-07
+- Revisão: 2026-11-05 (esperas no `StopSignal`, sem interrupt; `Error` não mata o worker)
 - Revisão: 2026-10-07 (`Release`; `hold` e nível 3 no core; orçamento do `keepAlive` por `receive`;
   batch acima do `maxBatchSize` com `max-wait`)
 
@@ -122,6 +123,14 @@ A inbox é um `SmartLifecycle` que para antes do `MessagingDestinations`.
 3. Espera as execuções do handler em andamento até `shutdown-timeout` (padrão
    30 s).
 4. Fecha os receivers. O que não terminou volta ao broker quando o lease vence.
+
+Revisão de 2026-11-05: as esperas (backoff do nível 1, `hold`, backoff do
+`receive`) dormem num `StopSignal` do consumer, não com `Thread.interrupt()`.
+O passo 2 acorda só as esperas; um handler no meio de uma chamada JDBC ou
+HTTP nunca é interrompido pelo shutdown. Uma falha inesperada numa mensagem,
+inclusive `Error` (`StackOverflowError`, `AssertionError`), devolve a mensagem
+por `Release` e o worker continua; só `OutOfMemoryError` encerra o worker, com
+log de erro.
 
 Um `receive` bloqueado não é interrompível em todos os clientes, então o
 shutdown pode levar até `poll-wait` a mais. `poll-wait` (padrão 20 s) é
