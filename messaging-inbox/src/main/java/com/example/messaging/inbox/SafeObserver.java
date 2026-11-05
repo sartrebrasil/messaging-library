@@ -37,6 +37,11 @@ final class SafeObserver implements ConsumerObserver {
     }
 
     @Override
+    public void received(com.example.messaging.ReceivedMessage message) {
+        run(() -> delegate.received(message));
+    }
+
+    @Override
     public void immediateRetry(InboxMessage message, Throwable failure) {
         run(() -> delegate.immediateRetry(message, failure));
     }
