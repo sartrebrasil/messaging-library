@@ -1,6 +1,6 @@
 # Incorporação do consumo (inbox) na messaging-library
 
-Status: decisões D1 a D7 aceitas em 2026-11-05. Implementação não iniciada.
+Status: decisões D1 a D7 aceitas em 2026-11-05. Fatias 0 a 3 feitas em 2026-11-05.
 
 Objetivo: trazer o `QueueConsumer` do engine-tax
 (`engine-tax/platform-support/.../QueueConsumer.java`) para a messaging-library
@@ -107,7 +107,7 @@ em paralelo com 1 a 7.
 
 | # | Tarefa | Teste |
 |---|---|---|
-| T1.1 | `OutgoingMessage.copyOf(ReceivedMessage)`: body, atributos do usuário, `contentType`, `orderingKey`, `traceparent`, `deduplicationId = messageId` de origem; reservados (`delivery_count`, `dead_letter`) fora | `CoreModelTest`: campos copiados, reservados excluídos |
+| T1.1 | `OutgoingMessage.copyOf(ReceivedMessage)`: body, atributos do usuário, `contentType`, `orderingKey`, `traceparent`; `deduplicationId` e `deadLetter` vazios, decididos por quem chama (os adapters já diferem entre si; a inbox põe `deduplicationId = messageId` na fatia 7) | `CoreModelTest`: campos copiados, `deduplicationId` e `deadLetter` vazios |
 | T1.2 | Usar o `copyOf` no `deadLetter` dos receivers que montam a cópia à mão (SQS, Pub/Sub, JMS, RabbitMQ, `InMemoryMessaging`); conferir o caso do Service Bus (`ServiceBusCodec`) | Contratos dos adapters inalterados (`mvn verify` com Docker) |
 
 ### Fatia 2: porte do motor de retry
@@ -123,7 +123,7 @@ em paralelo com 1 a 7.
 | # | Tarefa | Teste |
 |---|---|---|
 | T3.1 | `InboxMessage` (id, type, source, time, subject, aggregateType, aggregateVersion, traceparent, headers, payload, destination, `delivery()`) e `Delivery(level, attempt)` | Invariantes do record (nulos, cópia defensiva) |
-| T3.2 | Leitor do atributo `inbox_attempts` (`l2=;l3=;redrive=`) e escrita correspondente, tolerante a valor inválido | Ida e volta; valor corrompido vira zero com log |
+| T3.2 | Leitor do atributo `inbox_attempts` (`l2=;l3=;redrive=`) e escrita correspondente, tolerante a valor inválido. Já vem pronto no `AttemptState` portado na fatia 2 | `AttemptStateTest`: ida e volta; valor corrompido vira zero (sem log) |
 | T3.3 | `EnvelopeReader` com modos `auto`, `cloudevents`, `outbox`, `raw` (ADR-0003); `inbox_*` fora de `headers()` | Fixtures: body real do engine-tax, CloudEvents binário, raw, JSON inválido (vira `PayloadDeserializationException`) |
 | T3.4 | `traceparent` na ordem de D6: `headers.traceparent` do body, `traceparent` do CloudEvents, `ReceivedMessage.traceparent` | Um caso para cada fonte e um com as três presentes |
 | T3.5 | SPI `PayloadDeserializer` e `TypedMessage<T>` | Deserializer de teste com `String` |

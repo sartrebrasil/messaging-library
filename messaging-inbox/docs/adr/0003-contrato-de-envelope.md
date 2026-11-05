@@ -4,6 +4,7 @@
 - Data: 2026-10-01
 - Revisão: 2026-10-07 (atributos da messaging-lib; id do modo raw muda nas cópias)
 - Revisão: 2026-10-07 (`delivery()` e `TypedMessage`)
+- Revisão: 2026-11-05 (leitura da outbox só com o JDK; regras do `auto` e dos `headers`)
 
 ## Contexto
 
@@ -50,6 +51,28 @@ copiadas para os testes da inbox. Sem artifact compartilhado por enquanto.
 
 Desserialização do payload: SPI `PayloadDeserializer` no core; o starter
 fornece a implementação com Jackson 3 usando o mapper da aplicação.
+
+### Revisão de 2026-11-05: implementação no `messaging-inbox`
+
+- O `messaging-inbox` só usa o JDK (ADR-0006). O body da outbox é lido por um
+  scanner mínimo (`OutboxJson`) que entende só o formato do
+  `EnvelopeJsonWriter` da outbox-library: membros string, `aggregateVersion`,
+  `headers` como objeto plano de strings e `payload` guardado como JSON bruto,
+  sem validar (quem lê é o `PayloadDeserializer`). O scanner não usa
+  recursão, para que um body muito aninhado não estoure a pilha do worker. Se
+  a inbox precisar ler estruturas aninhadas, ele dá lugar ao `jackson-core`,
+  com nova revisão deste ADR.
+- Extensões CloudEvents como atributos: `ce_aggregatetype` e
+  `ce_aggregateversion`. O `traceparent` não vira atributo `ce_*`: é reservado
+  na messaging-lib e chega por `ReceivedMessage.traceparent`.
+- `auto`: CloudEvents quando há `ce_id`; outbox quando o body é um objeto JSON
+  com `messageId`, `eventType` e `payload`; raw nos outros casos. Formato
+  reconhecido com campo quebrado (`ce_time`, `occurredAt`, versão não inteira)
+  falha como desserialização em vez de cair em raw, porque raw trocaria o id e
+  a idempotência deixaria de valer.
+- `headers()`: atributos do transporte mais os `headers` do body da outbox; o
+  valor do body vence, como no `traceparent` (ADR-0007). `inbox_*` ficam fora;
+  `ce_*` ficam.
 
 ## Consequências
 
