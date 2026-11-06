@@ -39,7 +39,8 @@ final class Copies {
      */
     static Copy build(ReceivedMessage message, AttemptState attempts, Failure failure) {
         Map<String, String> attributes = new HashMap<>();
-        message.attributes().forEach((k, v) -> {
+        // só os que uma cópia aceita: um produtor de fora da lib pode mandar orderId, e a cópia nunca sairia
+        OutgoingMessage.copiable(message.attributes()).forEach((k, v) -> {
             if (!k.startsWith("inbox_")) {
                 attributes.put(k, v);
             }

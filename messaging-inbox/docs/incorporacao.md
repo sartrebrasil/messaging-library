@@ -226,21 +226,17 @@ Repo: `/Users/sartre.brasil/Sources/pessoal/engine-tax`.
 
 ## Pendências conhecidas
 
-- `hold` esperando `in_progress` não tem limite próprio: só termina quando a
-  reserva do outro dono vence, e a validação do startup põe esse TTL acima do
-  orçamento do `keepAlive`. Se o dono caiu, o worker segura a mensagem sem lease
-  até lá. Limite simples: `Release` quando as esperas passarem do orçamento do
-  `hold`.
+- Resolvido em 2026-11-06: `hold` esperando `in_progress` não tinha limite próprio. Agora o worker faz `Release`
+  quando a próxima espera passaria do orçamento do `keepAlive`; daí em diante as reentregas contam no nível 2, como
+  no `broker-delay` (ADR-0004).
 - Transação do ADR-0004 com o JDBC em `join` não está ligada: o starter não abre
   transação em volta do handler, e com uma transação só, uma reserva cobre o
   nível 1 inteiro. Sem transação em volta, o store em `join` se comporta como
   `requires-new`. Fica para depois da migração do engine-tax.
-- `spring.lifecycle.timeout-per-shutdown-phase` (padrão 30 s do Spring) precisa
-  ser maior que `shutdown-timeout` mais `poll-wait`; senão o Spring segue o
-  shutdown com workers ainda rodando. Registrar no README do starter.
-- O `InboxDestinations` padrão sobre um `MessagingDestinations` real só tem
-  teste com SQS (`SqsLocalStackTest`, LocalStack); os outros provedores ficam
-  para a F3.
+- Resolvido em 2026-11-06: `spring.lifecycle.timeout-per-shutdown-phase` maior que `shutdown-timeout` mais
+  `poll-wait` está registrado no README (seção Spring Boot).
+- Resolvido na F3 (2026-11-06) no nível dos adapters: o `InboxContract` roda nos seis provedores. Pelo starter
+  (`InboxDestinations` sobre um `MessagingDestinations` real), só o SQS tem teste (`SqsLocalStackTest`).
 - engine-tax: as filas `-failed` e o `maxReceiveCount` 12 só existem em
   LocalStack novo (o `localstack-init.sh` roda na criação do container). Com o
   LocalStack atual, criar as filas e trocar a redrive antes de implantar.

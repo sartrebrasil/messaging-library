@@ -232,6 +232,13 @@ final class Worker implements Runnable {
                 inbox = execution.message();
                 outcome = execution.outcome();
                 if (outcome instanceof Outcome.Retry retry && holdsInMemory(message)) {
+                    // in_progress waits spend no attempt, so they are bounded by time: past the keepAlive budget the
+                    // lease would be lost while holding; release it and let the broker bring it back
+                    if (retry.reason() == Outcome.RetryReason.IN_PROGRESS
+                            && Duration.ofNanos(System.nanoTime() - start).plus(retry.delay()).compareTo(leaseBudget) > 0) {
+                        applied = applier.release(receiver, message, Effect.RELEASED);
+                        break;
+                    }
                     observer.held(inbox, retry);
                     try {
                         stop.sleep(retry.delay());

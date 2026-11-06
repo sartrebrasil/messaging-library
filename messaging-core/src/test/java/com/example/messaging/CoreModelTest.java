@@ -96,4 +96,17 @@ class CoreModelTest {
         assertNull(copy.deduplicationId());
         assertNull(copy.deadLetter());
     }
+
+    /** Atributos de um produtor de fora da lib que uma cópia não aceitaria: a cópia os deixa de fora, sem falhar. */
+    @Test
+    void copyOfDropsAttributesACopyCouldNotCarry() {
+        var now = java.time.Instant.parse("2026-11-05T10:00:00Z");
+        var received = new ReceivedMessage("m-1", "body".getBytes(),
+                Map.of("order_id", "o-1", "orderId", "o-1", "goog_x", "1", "note", "café"), null, null,
+                java.util.OptionalInt.of(1), now, now, now.plusSeconds(30), null, null, new Object());
+
+        OutgoingMessage copy = OutgoingMessage.copyOf(received);
+
+        assertEquals(Map.of("order_id", "o-1"), copy.attributes());
+    }
 }
