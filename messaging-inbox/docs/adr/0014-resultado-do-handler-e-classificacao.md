@@ -41,7 +41,7 @@ public sealed interface HandlerResult {
 ```
 
 ```java
-@InboxListener(consumer = "billing-orders")
+@MessageListener(receiver = "billing-orders")
 HandlerResult on(OrderCreated event, InboxMessage message) { ... }
 
 @Bean
@@ -90,8 +90,8 @@ contra ciclo) e aplica, nesta ordem:
   exceções é um bug silencioso.
 
 ```yaml
-inbox:
-  consumers:
+messaging:
+  receivers:
     billing-orders:
       retry:
         non-retryable: [com.acme.InvalidOrderException]

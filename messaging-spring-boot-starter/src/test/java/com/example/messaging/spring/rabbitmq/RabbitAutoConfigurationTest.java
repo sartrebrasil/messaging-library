@@ -5,6 +5,10 @@ import com.example.messaging.OutgoingMessage;
 import com.example.messaging.ReceivedMessage;
 import com.example.messaging.spring.MessagingAutoConfiguration;
 import com.example.messaging.spring.MessagingDestinations;
+import com.example.messaging.spring.MessagingProperties.Endpoint;
+import com.example.messaging.spring.MessagingProperties.Options;
+import com.example.messaging.spring.MessagingProperties.Requirement;
+import java.util.Set;
 import com.example.messaging.spring.MessagingHealthAutoConfiguration;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
@@ -65,18 +69,17 @@ class RabbitAutoConfigurationTest {
     @Test
     void queueAndExchangeSubscriptionRoundTrip() {
         runner().withPropertyValues(
-                        "messaging.destinations.pedidos.provider=rmq", "messaging.destinations.pedidos.queue=pedidos",
-                        "messaging.destinations.pedidos.lease=5s",
-                        "messaging.destinations.pedidos.confirm-timeout=10s",
-                        "messaging.destinations.pedidos.require=lease-expired-on-ack",
-                        "messaging.destinations.eventos.provider=rmq", "messaging.destinations.eventos.topic=eventos",
-                        "messaging.destinations.eventos.routing-key=pedido.criado",
-                        "messaging.destinations.eventos.subscription=faturamento")
+                        "messaging.senders.pedidos.destination=pedidos", "messaging.senders.pedidos.options.confirm-timeout=10s",
+                        "messaging.senders.eventos.destination=eventos", "messaging.senders.eventos.kind=topic",
+                        "messaging.senders.eventos.options.routing-key=pedido.criado")
                 .run(context -> {
                     MessagingDestinations destinations = context.getBean(MessagingDestinations.class);
+                    Endpoint pedidos = new Endpoint("pedidos", null, null, new Options(
+                            Set.of(Requirement.LEASE_EXPIRED_ON_ACK), null, null, null, null, null, null, null,
+                            Duration.ofSeconds(5), null, null, null));
 
                     destinations.sender("pedidos").send(OutgoingMessage.ofText("pedido"));
-                    try (MessageReceiver receiver = destinations.receiver("pedidos")) {
+                    try (MessageReceiver receiver = destinations.receiver("pedidos", null, pedidos, null)) {
                         ReceivedMessage message = receiver.receive(1, Duration.ofSeconds(5)).getFirst();
                         assertThat(message.bodyAsString()).isEqualTo("pedido");
                         assertThat(message.leaseDuration()).isEqualTo(Duration.ofSeconds(5));
@@ -85,7 +88,8 @@ class RabbitAutoConfigurationTest {
 
                     // routing key pedido.criado casa com o binding pedido.*
                     destinations.sender("eventos").send(OutgoingMessage.ofText("evento"));
-                    try (MessageReceiver subscription = destinations.receiver("eventos")) {
+                    try (MessageReceiver subscription = destinations.receiver("eventos", null,
+                            new Endpoint("eventos", "faturamento", null, null), null)) {
                         ReceivedMessage message = subscription.receive(1, Duration.ofSeconds(5)).getFirst();
                         assertThat(message.bodyAsString()).isEqualTo("evento");
                         subscription.ack(message);
@@ -95,11 +99,10 @@ class RabbitAutoConfigurationTest {
 
     @Test
     void healthChecksExistingAndMissingQueues() {
-        runner().withPropertyValues(
-                        "messaging.destinations.pedidos.provider=rmq", "messaging.destinations.pedidos.queue=pedidos",
-                        "messaging.destinations.nada.provider=rmq", "messaging.destinations.nada.queue=nao-existe",
-                        "management.health.messaging.enabled=true")
+        runner().withPropertyValues("messaging.senders.pedidos.destination=pedidos", "management.health.messaging.enabled=true")
                 .run(context -> {
+                    context.getBean(MessagingDestinations.class)
+                            .receiver("nada", null, new Endpoint("nao-existe", null, null, null), null).close();
                     var health = context.getBean(HealthIndicator.class).health();
                     assertThat(health.getStatus()).isEqualTo(Status.DOWN);
                     assertThat(health.getDetails()).containsEntry("pedidos", "UP");
@@ -110,26 +113,18 @@ class RabbitAutoConfigurationTest {
     @Test
     void rabbitRulesAreValidated() {
         runner().withPropertyValues(
-                        "messaging.destinations.atraso.provider=rmq", "messaging.destinations.atraso.queue=pedidos",
-                        "messaging.destinations.atraso.redelivery=reschedule",
-                        "messaging.destinations.chave-em-fila.provider=rmq",
-                        "messaging.destinations.chave-em-fila.queue=pedidos",
-                        "messaging.destinations.chave-em-fila.routing-key=x",
-                        "messaging.destinations.duas-chaves.provider=rmq",
-                        "messaging.destinations.duas-chaves.topic=eventos",
-                        "messaging.destinations.duas-chaves.routing-key=x",
-                        "messaging.destinations.duas-chaves.routing-by-ordering-key=true",
-                        "messaging.destinations.por-chave-em-fila.provider=rmq",
-                        "messaging.destinations.por-chave-em-fila.queue=pedidos",
-                        "messaging.destinations.por-chave-em-fila.routing-by-ordering-key=true",
-                        "messaging.destinations.confirm-zero.provider=rmq",
-                        "messaging.destinations.confirm-zero.queue=pedidos",
-                        "messaging.destinations.confirm-zero.confirm-timeout=0s")
+                        "messaging.senders.atraso.destination=pedidos", "messaging.senders.atraso.options.redelivery=reschedule",
+                        "messaging.senders.chave-em-fila.destination=pedidos", "messaging.senders.chave-em-fila.options.routing-key=x",
+                        "messaging.senders.duas-chaves.destination=eventos", "messaging.senders.duas-chaves.kind=topic",
+                        "messaging.senders.duas-chaves.options.routing-key=x", "messaging.senders.duas-chaves.options.routing-by-ordering-key=true",
+                        "messaging.senders.por-chave-em-fila.destination=pedidos",
+                        "messaging.senders.por-chave-em-fila.options.routing-by-ordering-key=true",
+                        "messaging.senders.confirm-zero.destination=pedidos", "messaging.senders.confirm-zero.options.confirm-timeout=0s")
                 .run(context -> assertThat(context).getFailure().rootCause()
-                        .hasMessageContaining("atraso.redelivery=RESCHEDULE: o RabbitMQ não tem atraso")
-                        .hasMessageContaining("chave-em-fila.routing-key só vale para o RabbitMQ com topic")
-                        .hasMessageContaining("duas-chaves.routing-by-ordering-key não combina com routing-key")
-                        .hasMessageContaining("por-chave-em-fila.routing-by-ordering-key só vale para o RabbitMQ com topic")
-                        .hasMessageContaining("confirm-zero.confirm-timeout precisa ser positivo"));
+                        .hasMessageContaining("atraso.options.redelivery=RESCHEDULE: o RabbitMQ não tem atraso")
+                        .hasMessageContaining("chave-em-fila.options.routing-key só vale para o RabbitMQ com kind: topic")
+                        .hasMessageContaining("duas-chaves.options.routing-by-ordering-key não combina com routing-key")
+                        .hasMessageContaining("por-chave-em-fila.options.routing-by-ordering-key só vale para o RabbitMQ com kind: topic")
+                        .hasMessageContaining("confirm-zero.options.confirm-timeout precisa ser positivo"));
     }
 }

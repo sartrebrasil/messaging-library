@@ -6,6 +6,10 @@ import com.example.messaging.ReceivedMessage;
 import com.example.messaging.spring.MessagingAutoConfiguration;
 import com.example.messaging.spring.MessagingDestinations;
 import com.example.messaging.spring.MessagingHealthAutoConfiguration;
+import com.example.messaging.spring.MessagingProperties.Endpoint;
+import com.example.messaging.spring.MessagingProperties.Options;
+import com.example.messaging.spring.MessagingProperties.Redelivery;
+import com.example.messaging.MessageSender;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.health.contributor.HealthIndicator;
@@ -22,8 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ActiveMqAutoConfigurationTest {
 
     private static final String AMQ = "messaging.providers.amq.";
-    private static final String PEDIDOS = "messaging.destinations.pedidos.";
-    private static final String EVENTOS = "messaging.destinations.eventos.";
+    private static final String PEDIDOS = "messaging.senders.pedidos.";
 
     // um broker por teste: o vm:// para quando a última conexão fecha
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
@@ -32,34 +35,38 @@ class ActiveMqAutoConfigurationTest {
             .withPropertyValues(AMQ + "type=activemq-classic",
                     AMQ + "broker-url=vm://" + UUID.randomUUID() + "?broker.persistent=false&broker.useJmx=false");
 
+    private static Endpoint queue(String name) {
+        return new Endpoint(name, null, null, null);
+    }
+
     @Test
     void queueAndVirtualTopicSubscriptionRoundTrip() {
-        runner.withPropertyValues(
-                        PEDIDOS + "provider=amq", PEDIDOS + "queue=pedidos", PEDIDOS + "dead-letter=pedidos-dlq",
-                        PEDIDOS + "redelivery=reschedule", PEDIDOS + "lease=5s",
-                        "messaging.destinations.pedidos-dlq.provider=amq",
-                        "messaging.destinations.pedidos-dlq.queue=pedidos-dlq",
-                        EVENTOS + "provider=amq", EVENTOS + "topic=VirtualTopic.eventos",
-                        EVENTOS + "subscription=faturamento")
+        runner.withPropertyValues(PEDIDOS + "destination=pedidos",
+                        "messaging.senders.eventos.destination=VirtualTopic.eventos",
+                        "messaging.senders.eventos.kind=topic")
                 .run(context -> {
                     MessagingDestinations destinations = context.getBean(MessagingDestinations.class);
+                    MessageSender dlqSender = destinations.sender("pedidos.dead-letter", null, queue("pedidos-dlq"));
+                    Endpoint pedidos = new Endpoint("pedidos", null, null, new Options(null, null,
+                            Redelivery.RESCHEDULE, null, null, null, null, null, Duration.ofSeconds(5), null, null, null));
 
                     destinations.sender("pedidos").send(OutgoingMessage.ofText("pedido"));
-                    try (MessageReceiver receiver = destinations.receiver("pedidos")) {
+                    try (MessageReceiver receiver = destinations.receiver("pedidos", null, pedidos, dlqSender)) {
                         assertThat(receiver.capabilities().delayedRedelivery()).isTrue();
                         ReceivedMessage message = receiver.receive(1, Duration.ofSeconds(5)).getFirst();
                         assertThat(message.bodyAsString()).isEqualTo("pedido");
                         assertThat(message.leaseDuration()).isEqualTo(Duration.ofSeconds(5));
                         receiver.deadLetter(message, "teste");
                     }
-                    try (MessageReceiver dlq = destinations.receiver("pedidos-dlq")) {
+                    try (MessageReceiver dlq = destinations.receiver("pedidos-dlq", null, queue("pedidos-dlq"), null)) {
                         ReceivedMessage dead = dlq.receive(1, Duration.ofSeconds(5)).getFirst();
                         assertThat(dead.deadLetter().reason()).isEqualTo("teste");
                         dlq.ack(dead);
                     }
 
                     // o Virtual Topic só copia para filas Consumer.* que já existem
-                    try (MessageReceiver subscription = destinations.receiver("eventos")) {
+                    try (MessageReceiver subscription = destinations.receiver("eventos", null,
+                            new Endpoint("VirtualTopic.eventos", "faturamento", null, null), null)) {
                         assertThat(subscription.receive(1, Duration.ZERO)).isEmpty();
                         destinations.sender("eventos").send(OutgoingMessage.ofText("evento"));
                         List<ReceivedMessage> received = subscription.receive(1, Duration.ofSeconds(5));
@@ -71,11 +78,11 @@ class ActiveMqAutoConfigurationTest {
 
     @Test
     void healthChecksExistingAndMissingQueues() {
-        runner.withPropertyValues(PEDIDOS + "provider=amq", PEDIDOS + "queue=pedidos",
-                        "messaging.destinations.nada.provider=amq", "messaging.destinations.nada.queue=nao-existe",
-                        "management.health.messaging.enabled=true")
+        runner.withPropertyValues(PEDIDOS + "destination=pedidos", "management.health.messaging.enabled=true")
                 .run(context -> {
-                    context.getBean(MessagingDestinations.class).sender("pedidos").send(OutgoingMessage.ofText("x"));
+                    MessagingDestinations destinations = context.getBean(MessagingDestinations.class);
+                    destinations.sender("pedidos").send(OutgoingMessage.ofText("x"));
+                    destinations.receiver("nada", null, queue("nao-existe"), null).close();
 
                     var health = context.getBean(HealthIndicator.class).health();
                     assertThat(health.getStatus()).isEqualTo(Status.DOWN);
@@ -87,23 +94,15 @@ class ActiveMqAutoConfigurationTest {
     @Test
     void activeMqRulesAreValidated() {
         runner.withPropertyValues(
-                        "messaging.destinations.sem-endereco.provider=amq",
-                        "messaging.destinations.topico-comum.provider=amq",
-                        "messaging.destinations.topico-comum.topic=eventos",
-                        "messaging.destinations.sem-topico.provider=amq",
-                        "messaging.destinations.sem-topico.queue=x",
-                        "messaging.destinations.sem-topico.subscription=s",
-                        "messaging.destinations.lease-zero.provider=amq",
-                        "messaging.destinations.lease-zero.queue=y",
-                        "messaging.destinations.lease-zero.lease=0s",
-                        "messaging.destinations.campo-errado.provider=amq",
-                        "messaging.destinations.campo-errado.queue-url=http://x")
+                        "messaging.senders.sem-endereco.kind=queue",
+                        "messaging.senders.topico-comum.destination=eventos",
+                        "messaging.senders.topico-comum.kind=topic",
+                        "messaging.senders.lease-zero.destination=y",
+                        "messaging.senders.lease-zero.options.lease=0s")
                 .run(context -> assertThat(context).getFailure().rootCause()
-                        .hasMessageContaining("sem-endereco: defina queue ou topic")
-                        .hasMessageContaining("topico-comum.topic precisa ser um Virtual Topic")
-                        .hasMessageContaining("sem-topico: subscription exige topic")
-                        .hasMessageContaining("lease-zero.lease precisa ser positivo")
-                        .hasMessageContaining("campo-errado.queue-url não se aplica"));
+                        .hasMessageContaining("sem-endereco.destination é obrigatório")
+                        .hasMessageContaining("topico-comum.destination precisa ser um Virtual Topic")
+                        .hasMessageContaining("lease-zero.options.lease precisa ser positivo"));
     }
 
     @Test
@@ -112,7 +111,7 @@ class ActiveMqAutoConfigurationTest {
                 .withConfiguration(AutoConfigurations.of(MessagingAutoConfiguration.class))
                 .withPropertyValues(AMQ + "type=activemq-classic",
                         AMQ + "broker-url=tcp://localhost:1?connectionTimeout=500",
-                        PEDIDOS + "provider=amq", PEDIDOS + "queue=pedidos")
+                        PEDIDOS + "destination=pedidos")
                 .run(context -> assertThat(context).getFailure().hasStackTraceContaining("não conectou ao broker"));
     }
 }

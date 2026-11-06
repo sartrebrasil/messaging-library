@@ -6,19 +6,26 @@ import org.springframework.beans.factory.ListableBeanFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.env.Environment;
 
 /**
- * Cria {@link MessagingDestinations} a partir de {@code messaging.*}. Métricas quando há um
+ * Cria {@link MessagingDestinations} a partir de {@code messaging.providers} e {@code messaging.senders}. Métricas quando há um
  * {@link MeterRegistry}; {@code traceparent} quando há um {@link ObservationRegistry} com tracing.
  * Um {@code MessagingDestinations} próprio desliga esta auto-configuração.
  */
 @AutoConfiguration(afterName = {
         "org.springframework.boot.micrometer.metrics.autoconfigure.CompositeMeterRegistryAutoConfiguration",
         "org.springframework.boot.micrometer.observation.autoconfigure.ObservationAutoConfiguration"})
-@EnableConfigurationProperties(MessagingProperties.class)
 public class MessagingAutoConfiguration {
+
+    /** Binding estrito por raiz: {@code messaging.*} também guarda os receivers da inbox, que não são daqui. */
+    @Bean
+    @ConditionalOnMissingBean
+    MessagingProperties messagingProperties(Environment environment) {
+        return MessagingProperties.bind(Binder.get(environment));
+    }
 
     @Bean(destroyMethod = "close")
     @ConditionalOnMissingBean

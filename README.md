@@ -24,7 +24,7 @@ quem usa (a inbox-library, por exemplo).
 | `messaging-gcp` | Pub/Sub: publisher com ordem e pull síncrono. |
 | `messaging-jms` | ActiveMQ Classic e Artemis por Jakarta Messaging (`JmsDialect`): fila e tópico, com lease controlado pela lib (ADR-0009). Exige o cliente do broker na aplicação: `org.apache.activemq:activemq-client` ou `artemis-jakarta-client`. |
 | `messaging-rabbitmq` | RabbitMQ (AMQP 0-9-1, `amqp-client` sem Netty): fila e exchange, receive por `basicGet`, lease controlado pela lib (ADR-0009). |
-| `messaging-spring-boot-starter` | Destinos nomeados por properties (`messaging.*`), métricas, `traceparent` e health; consumidores `inbox.*` quando `messaging-inbox` e Jackson 3 estão na aplicação. Liga cada provedor cujo adapter está no classpath; os adapters não dependem de Spring. Spring Boot 4. |
+| `messaging-spring-boot-starter` | Providers, senders e receivers por properties (`messaging.*`), métricas, `traceparent` e health; os receivers (`messaging.receivers`) sobem quando `messaging-inbox` e Jackson 3 estão na aplicação. Liga cada provedor cujo adapter está no classpath; os adapters não dependem de Spring. Spring Boot 4. |
 | `messaging-inbox` | Consumo sobre `MessageReceiver`: envelope (CloudEvents, outbox, raw), retry em três níveis e loop de polling. Somente JDK. Plano e ADRs em `messaging-inbox/docs`. Em desenvolvimento. |
 | `messaging-bom` | Alinha as versões dos módulos acima. |
 
@@ -213,73 +213,76 @@ messaging:
       broker-url: failover:(tcp://amq-1:61616,tcp://amq-2:61616)
       user: ${AMQ_USER}
       password: ${AMQ_PASSWORD}
-  destinations:
+  senders:                     # provider opcional quando só existe um
     pedidos:
       provider: aws
-      queue-url: https://sqs.sa-east-1.amazonaws.com/123/pedidos.fifo
-      dead-letter: pedidos-dlq
-      require: [ordered-delivery]
-    pedidos-dlq:
-      provider: aws
-      queue-url: https://sqs.sa-east-1.amazonaws.com/123/pedidos-dlq.fifo
+      destination: https://sqs.sa-east-1.amazonaws.com/123/pedidos.fifo   # ou o nome da fila
+      options: { require: [ordered-delivery] }
     eventos:
       provider: azure
-      topic: eventos
-      subscription: faturamento
-      sessions: true
-    eventos-dlq:               # Service Bus: só recebe, da DLQ nativa da subscription
-      provider: azure
-      topic: eventos
-      subscription: faturamento
-      dead-letter-queue: true
+      destination: eventos
+      kind: topic                # envia ao tópico; sem kind, à fila
+      options: { sessions: true }
     notas:
       provider: gcp
-      topic: notas
-      subscription: notas-sub
-      ack-deadline: 60s
+      destination: notas         # no GCP, o envio é sempre a um tópico
     notas-amq:
       provider: amq
-      topic: VirtualTopic.notas  # envia ao Virtual Topic
-      subscription: faturamento  # recebe da fila Consumer.faturamento.VirtualTopic.notas
-      lease: 60s
-      redelivery: reschedule     # nack com atraso; exige schedulerSupport no broker
-      dead-letter: notas-amq-dlq
-    notas-amq-dlq:
-      provider: amq
-      queue: notas-dlq
+      destination: VirtualTopic.notas
+      kind: topic
 ```
 
-No RabbitMQ (`type: rabbitmq`), `broker-url` é a URI AMQP (`amqp://host:5672/vhost`), `topic` é o
-exchange, `routing-key` a routing key do envio e `subscription` a fila ligada ao exchange. Com
-`routing-by-ordering-key: true`, a routing key de cada envio é o `orderingKey` da mensagem (direct ou
-consistent-hash exchange), e o `deduplicationId`, quando existe, vira o `message-id`.
-`redelivery: reschedule` é recusado no startup, porque o RabbitMQ não tem atraso no `nack`.
+Senders ficam em `messaging.senders`; receivers, em `messaging.receivers`, consumidos pela
+messaging-inbox (veja abaixo). Os dois usam o mesmo endereço: `destination`, mais `subscription` para
+receber de um tópico, `kind: topic` para enviar a um, e `options` com as opções do provedor.
 
-No Artemis (`type: artemis`), `topic` é o endereço multicast e `topic` + `subscription` recebe do
-FQQN `<topic>::<subscription>`. A `broker-url` ganha `consumerWindowSize=0` quando não define a
-janela.
+| Provedor | Enviar (`destination` + `kind`) | Receber (`destination` [+ `subscription`]) |
+|---|---|---|
+| `aws` | ARN do SNS, URL da fila ou nome da fila | URL ou nome da fila (o nome é resolvido com `GetQueueUrl`, que exige `sqs:GetQueueUrl`) |
+| `azure` | `kind: topic`: tópico; senão fila | com `subscription`: tópico + subscription; senão fila |
+| `gcp` | tópico | subscription (exige `options.ack-deadline`) |
+| `activemq-classic` | `kind: topic`: Virtual Topic (`VirtualTopic.*`); senão fila | com `subscription`: fila `Consumer.<subscription>.<topic>`; senão fila |
+| `artemis` | `kind: topic`: endereço multicast; senão fila | com `subscription`: FQQN `<topic>::<subscription>`; senão fila |
+| `rabbitmq` | `kind: topic`: exchange (com `options.routing-key`); senão fila | com `subscription`: a fila ligada ao exchange; senão fila |
+
+`options`: `require`, `max-message-bytes` (SNS, Service Bus, ActiveMQ e RabbitMQ), `sessions` e
+`dead-letter-queue` (Service Bus; esta só para receber, da DLQ nativa), `redelivery: abandon |
+reschedule` (Service Bus e ActiveMQ), `ack-deadline`, `ordered` e `exactly-once` (Pub/Sub), `lease`
+(ActiveMQ e RabbitMQ, padrão 60 s), `routing-key`, `routing-by-ordering-key` e `confirm-timeout`
+(RabbitMQ, padrão 30 s). No RabbitMQ, `broker-url` é a URI AMQP (`amqp://host:5672/vhost`); com
+`routing-by-ordering-key: true`, a routing key de cada envio é o `orderingKey` da mensagem, e o
+`deduplicationId`, quando existe, vira o `message-id`; `redelivery: reschedule` é recusado no
+startup. No Artemis, a `broker-url` ganha `consumerWindowSize=0` quando não define a janela.
 
 ```java
 @Autowired MessagingDestinations destinations;
 
 destinations.sender("pedidos").send(message);            // mesma instância sempre
-try (MessageReceiver receiver = destinations.receiver("pedidos")) {   // instância nova a cada chamada
-    ...
-}
 ```
 
-| Destino | Envia para | Recebe de |
-|---|---|---|
-| `aws` | `topic-arn`, senão `queue-url` | `queue-url` |
-| `azure` | `topic`, senão `queue` | `topic` + `subscription`, senão `queue` |
-| `gcp` | `topic` | `subscription` (exige `ack-deadline`) |
-| `activemq-classic` | `topic` (`VirtualTopic.*`), senão `queue` | `topic` + `subscription` (fila `Consumer.<subscription>.<topic>`), senão `queue` |
-| `artemis` | `topic` (endereço multicast), senão `queue` | `topic` + `subscription` (FQQN `<topic>::<subscription>`), senão `queue` |
-| `rabbitmq` | `topic` (exchange, com `routing-key`), senão `queue` | `topic` + `subscription` (a fila ligada ao exchange), senão `queue` |
+Receivers configurados com a messaging-inbox:
 
-Outras propriedades do destino: `max-message-bytes` (SNS, Service Bus, ActiveMQ e RabbitMQ),
-`sessions` (Service Bus), `redelivery: abandon | reschedule` (Service Bus e ActiveMQ), `ordered` e
-`exactly-once` (Pub/Sub), `lease` (ActiveMQ e RabbitMQ, padrão 60 s), `routing-key`, `routing-by-ordering-key` e `confirm-timeout` (RabbitMQ, padrão 30 s).
+```yaml
+messaging:
+  receivers-enabled: ${RECEIVERS_ENABLED:true}   # false: nenhum receiver sobe
+  receiver-defaults:
+    concurrency: 4
+    poll-wait: 20s
+  receivers:
+    billing-orders:
+      enabled: true              # false: validado no startup, não inicia
+      destination: https://sqs.sa-east-1.amazonaws.com/123/orders
+      dead-letter: orders-dlq    # endereços no provider do receiver
+      failed: orders-failed
+```
+
+```java
+@MessageListener(receiver = "billing-orders")
+void on(Order order) { ... }
+```
+
+Chave desconhecida em `providers`, `senders`, `receivers` ou `receiver-defaults` derruba o startup,
+assim como as chaves removidas `messaging.destinations` e `inbox.*` (ADR-0008 da messaging-inbox).
 
 No ActiveMQ, o starter abre uma conexão por provider no startup e a fecha no shutdown. A lib não
 recria a conexão: a reconexão vem da URL. Com `broker-url`, o `JmsDialect` cuida disso:
@@ -304,7 +307,7 @@ falha, porque o `checkAccess` precisa da `ActiveMQConnection`. Nesse caso, use `
   `traceparent` na mensagem. No receive, `ReceivedMessage.traceparent()` traz o contexto de quem
   publicou; abrir o span de processamento é de quem consome.
 - Health `messaging`: opt-in com `management.health.messaging.enabled=true`; chama `checkAccess()`
-  de cada destino, sem consumir mensagens.
+  de cada sender e receiver, sem consumir mensagens.
 
 ## Permissões mínimas
 

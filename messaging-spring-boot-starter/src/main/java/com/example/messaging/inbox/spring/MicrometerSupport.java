@@ -36,6 +36,6 @@ final class MicrometerSupport {
                     .tag("consumer", c.name())
                     .register(meters);
         }
-        return new MicrometerConsumerObserver(c.name(), c.destination(), meters, observations, clock);
+        return new MicrometerConsumerObserver(c.name(), c.name(), meters, observations, clock);
     }
 }

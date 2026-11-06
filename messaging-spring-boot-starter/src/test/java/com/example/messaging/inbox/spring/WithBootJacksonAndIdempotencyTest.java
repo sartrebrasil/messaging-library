@@ -30,7 +30,7 @@ class WithBootJacksonAndIdempotencyTest {
                 .withPropertyValues("idempotency.store=memory",
                         C + "destination=orders", C + "failed=orders-failed", C + "dead-letter=orders-dlq",
                         C + "idempotency.enabled=true",
-                        C + "configuration.poll-wait=100ms", C + "configuration.shutdown-timeout=2s")
+                        C + "poll-wait=100ms", C + "shutdown-timeout=2s")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     Object mapper = ReflectionTestUtils.getField(context.getBean(PayloadDeserializer.class), "mapper");

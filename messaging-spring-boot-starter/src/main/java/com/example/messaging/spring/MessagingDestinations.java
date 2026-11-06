@@ -1,11 +1,12 @@
 package com.example.messaging.spring;
 
 import com.example.messaging.Capabilities;
+import com.example.messaging.DestinationNotFoundException;
 import com.example.messaging.MessageReceiver;
 import com.example.messaging.MessageSender;
 import com.example.messaging.spring.MessagingProperties.Destination;
+import com.example.messaging.spring.MessagingProperties.Endpoint;
 import com.example.messaging.spring.MessagingProperties.Provider;
-import com.example.messaging.spring.MessagingProperties.Redelivery;
 import com.example.messaging.spring.MessagingProperties.Requirement;
 import com.example.messaging.spring.MessagingProperties.Type;
 import com.example.messaging.spring.aws.AwsProviderConnection;
@@ -20,23 +21,30 @@ import org.springframework.util.ClassUtils;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Predicate;
 
 /**
- * Senders e receivers dos destinos de {@code messaging.destinations}, por nome (ADR-0008). A
- * configuração inteira é validada na construção, e o startup falha listando todos os problemas.
+ * Senders de {@code messaging.senders}, por nome, e senders e receivers por endereço ({@link Endpoint}), que a inbox
+ * usa para {@code messaging.receivers} (ADR-0008). Providers e senders configurados são validados na construção, e
+ * o startup falha listando todos os problemas; um endereço é validado no primeiro uso.
  *
  * <ul>
- *   <li>{@link #sender(String)} devolve sempre a mesma instância (senders são thread-safe).</li>
- *   <li>{@link #receiver(String)} devolve uma instância nova a cada chamada, compartilhando o
- *       cliente nativo; no Service Bus com sessions, cada uma segura uma session. Quem chama fecha;
+ *   <li>{@link #sender(String)} e {@link #sender(String, String, Endpoint)} devolvem sempre a mesma instância por
+ *       nome (senders são thread-safe).</li>
+ *   <li>{@link #receiver(String, String, Endpoint, MessageSender)} devolve uma instância nova a cada chamada,
+ *       compartilhando o cliente nativo; no Service Bus com sessions, cada uma segura uma session. Quem chama fecha;
  *       as que sobrarem são fechadas no shutdown.</li>
  * </ul>
+ *
+ * O nome de um sender ou receiver é a tag {@code destination} das métricas e a chave do health check. Os criados
+ * por endereço usam {@code messaging.receivers.<nome>} nas mensagens de erro.
  */
 public final class MessagingDestinations implements AutoCloseable {
 
@@ -57,13 +65,21 @@ public final class MessagingDestinations implements AutoCloseable {
                     "org.apache.activemq:activemq-client"},
             Type.ARTEMIS, new String[]{"org.apache.activemq.artemis.jms.client.ActiveMQConnectionFactory",
                     "org.apache.activemq:artemis-jakarta-client"});
-    private static final String VIRTUAL_TOPIC = "VirtualTopic.";
+    private static final String RECEIVERS = "messaging.receivers.";
+
+    /** Um endereço resolvido: o provider e os campos dele. */
+    private record Resolved(String provider, Destination destination) {
+    }
 
     private final MessagingProperties properties;
     private final MeterRegistry meters;
     private final ObservationRegistry observations;
     private final Map<String, ProviderConnection> connections = new HashMap<>();
     private final Map<String, MessageSender> senders = new HashMap<>();
+    private final Map<String, MessageSender> endpointSenders = new ConcurrentHashMap<>();
+    private final Map<String, Resolved> endpointAddresses = new ConcurrentHashMap<>();
+    /** Receivers já criados por endereço: o que o health check usa. */
+    private final Map<String, Resolved> receivers = new ConcurrentHashMap<>();
     private final Map<String, MessageReceiver> healthReceivers = new HashMap<>();
     private final List<MessageReceiver> created = new CopyOnWriteArrayList<>();
 
@@ -76,10 +92,25 @@ public final class MessagingDestinations implements AutoCloseable {
         try {
             // Validação de forma antes de criar qualquer cliente: erro de configuração não abre conexão
             validateProviders(problems);
-            properties.destinations().forEach((name, destination) -> validateShape(name, destination, problems));
+            Map<String, Resolved> configured = new LinkedHashMap<>();
+            properties.senders().forEach((name, sender) -> {
+                Resolved r = resolve("messaging.senders." + name, sender.provider(), sender.endpoint(), false,
+                        problems);
+                if (r != null) {
+                    configured.put(name, r);
+                }
+            });
             if (problems.isEmpty()) {
                 connect(beans);
-                createSendersAndCheckRequirements(problems);
+                configured.forEach((name, r) -> {
+                    try {
+                        senders.put(name, newSender(name, r));
+                    } catch (DestinationNotFoundException e) {
+                        problems.add("messaging.senders." + name + ".destination: " + e.getMessage());
+                    }
+                });
+                senders.forEach((name, sender) -> checkSenderRequirements("messaging.senders." + name,
+                        configured.get(name), sender, problems));
             }
         } catch (RuntimeException e) {
             close();
@@ -87,73 +118,149 @@ public final class MessagingDestinations implements AutoCloseable {
         }
         if (!problems.isEmpty()) {
             close();
-            throw new IllegalStateException("Configuração inválida de messaging.*:\n - " + String.join("\n - ", problems));
+            throw invalid(problems);
         }
     }
 
-    /** Nomes de {@code messaging.destinations}. */
+    /** Nomes no health check: senders de {@code messaging.senders}, os criados por endereço e os receivers. */
     public Set<String> names() {
-        return new TreeSet<>(properties.destinations().keySet());
+        Set<String> names = new TreeSet<>(senders.keySet());
+        names.addAll(endpointSenders.keySet());
+        names.addAll(receivers.keySet());
+        return names;
     }
 
     /**
-     * @throws IllegalArgumentException destino inexistente ou sem endereço de envio
+     * @throws IllegalArgumentException sender não configurado em {@code messaging.senders}
      */
     public MessageSender sender(String name) {
-        destination(name);
         MessageSender sender = senders.get(name);
         if (sender == null) {
-            throw new IllegalArgumentException("Destino '" + name + "' não envia (sem tópico ou fila de envio)");
+            throw new IllegalArgumentException("Sender não configurado em messaging.senders: " + name);
         }
         return sender;
     }
 
     /**
-     * Receiver novo a cada chamada.
+     * Problemas do endereço, sem abrir conexão.
      *
-     * @throws IllegalArgumentException destino inexistente ou sem endereço de recebimento
+     * @param key      chave completa, para as mensagens
+     * @param provider {@code null}: o único provider
      */
-    public MessageReceiver receiver(String name) {
-        MessageReceiver receiver = newReceiver(name, destination(name));
-        if (receiver == null) {
-            throw new IllegalArgumentException("Destino '" + name + "' não recebe (sem fila ou subscription)");
+    public List<String> validate(String key, String provider, Endpoint endpoint, boolean receive) {
+        List<String> problems = new ArrayList<>();
+        resolve(key, provider, endpoint, receive, problems);
+        return problems;
+    }
+
+    /**
+     * Receiver novo por endereço. Na primeira chamada de um nome, confere {@code options.require}.
+     *
+     * @param provider   {@code null}: o único provider
+     * @param deadLetter sender do dead-letter, para os adapters sem DLQ nativa; {@code null} sem DLQ
+     * @throws IllegalStateException endereço inválido ou capacidade exigida ausente
+     */
+    public MessageReceiver receiver(String name, String provider, Endpoint endpoint, MessageSender deadLetter) {
+        Resolved r = resolveOrThrow(RECEIVERS + name, provider, endpoint, true);
+        MessageReceiver receiver = notFound(RECEIVERS + name, () -> newReceiver(name, r, deadLetter));
+        if (!receivers.containsKey(name)) {
+            List<String> problems = new ArrayList<>();
+            for (Requirement requirement : r.destination().require()) {
+                String missing = missing(requirement, null, receiver.capabilities());
+                if (missing != null) {
+                    problems.add(RECEIVERS + name + ".options.require " + requirement + ": " + missing);
+                }
+            }
+            if (!problems.isEmpty()) {
+                receiver.close();
+                throw invalid(problems);
+            }
+            receivers.put(name, r);
         }
         created.add(receiver);
         return receiver;
     }
 
-    /** Usado pelo health check: um receiver por destino, reaproveitado entre checagens. */
+    /**
+     * Sender por endereço, criado uma vez por nome.
+     *
+     * @param provider {@code null}: o único provider
+     * @throws IllegalStateException endereço inválido, ou o nome já usado com outro endereço
+     */
+    public MessageSender sender(String name, String provider, Endpoint endpoint) {
+        Resolved r = resolveOrThrow(RECEIVERS + name, provider, endpoint, false);
+        Resolved first = endpointAddresses.putIfAbsent(name, r);
+        if (first != null && !first.equals(r)) {
+            throw new IllegalStateException("Sender '" + name + "' já existe com outro endereço (" + first + ")");
+        }
+        return endpointSenders.computeIfAbsent(name, n -> notFound(RECEIVERS + n, () -> newSender(n, r)));
+    }
+
+    /** Endereço que o provedor não encontra (fila SQS por nome) é erro de configuração. */
+    private static <T> T notFound(String key, java.util.function.Supplier<T> create) {
+        try {
+            return create.get();
+        } catch (DestinationNotFoundException e) {
+            throw invalid(List.of(key + ".destination: " + e.getMessage()));
+        }
+    }
+
+    /** Usado pelo health check: um receiver por nome, reaproveitado entre checagens; senão o sender. */
     synchronized void checkAccess(String name) {
-        Destination destination = destination(name);
-        MessageReceiver receiver = healthReceivers.get(name);
-        if (receiver == null) {
-            receiver = newReceiver(name, destination);
-            if (receiver != null) {
-                healthReceivers.put(name, receiver);
-            }
+        Resolved r = receivers.get(name);
+        if (r != null) {
+            healthReceivers.computeIfAbsent(name, n -> newReceiver(n, r, null)).checkAccess();
+            return;
         }
-        if (receiver != null) {
-            receiver.checkAccess();
-        } else {
-            senders.get(name).checkAccess();
+        MessageSender sender = senders.containsKey(name) ? senders.get(name) : endpointSenders.get(name);
+        if (sender == null) {
+            throw new IllegalArgumentException("Nome desconhecido no health check de messaging: " + name);
         }
+        sender.checkAccess();
     }
 
-    private Destination destination(String name) {
-        Destination destination = properties.destinations().get(name);
-        if (destination == null) {
-            throw new IllegalArgumentException("Destino não configurado em messaging.destinations: " + name);
+    private Resolved resolve(String key, String provider, Endpoint endpoint, boolean receive, List<String> problems) {
+        String name = Endpoints.provider(key, provider, null, properties.providers(), problems);
+        if (name == null) {
+            return null;
         }
-        return destination;
+        Provider p = properties.providers().get(name);
+        if (p.type() == null) {
+            return null; // validateProviders já reportou
+        }
+        Destination d = Endpoints.resolve(key, name, p, endpoint, receive, problems);
+        return d == null ? null : new Resolved(name, d);
     }
 
-    private MessageReceiver newReceiver(String name, Destination destination) {
-        MessageSender deadLetter = destination.deadLetter() == null ? null : senders.get(destination.deadLetter());
-        MessageReceiver receiver = connections.get(destination.provider()).receiver(name, destination, deadLetter);
-        if (receiver == null || meters == null) {
+    private Resolved resolveOrThrow(String key, String provider, Endpoint endpoint, boolean receive) {
+        List<String> problems = new ArrayList<>();
+        Resolved r = resolve(key, provider, endpoint, receive, problems);
+        if (!problems.isEmpty() || r == null) {
+            throw invalid(problems);
+        }
+        if (!connections.containsKey(r.provider())) {
+            throw invalid(List.of(key + ".provider '" + r.provider() + "' não tem conexão (veja messaging.providers)"));
+        }
+        return r;
+    }
+
+    private static IllegalStateException invalid(List<String> problems) {
+        return new IllegalStateException("Configuração inválida de messaging.*:\n - " + String.join("\n - ", problems));
+    }
+
+    private MessageSender newSender(String name, Resolved r) {
+        MessageSender sender = connections.get(r.provider()).sender(name, r.destination());
+        return meters != null || observations != null
+                ? new ObservedMessageSender(sender, providerType(r), name, meters, observations)
+                : sender;
+    }
+
+    private MessageReceiver newReceiver(String name, Resolved r, MessageSender deadLetter) {
+        MessageReceiver receiver = connections.get(r.provider()).receiver(name, r.destination(), deadLetter);
+        if (meters == null) {
             return receiver;
         }
-        return new MeteredMessageReceiver(receiver, providerType(destination), name, meters);
+        return new MeteredMessageReceiver(receiver, providerType(r), name, meters);
     }
 
     private void validateProviders(List<String> problems) {
@@ -182,140 +289,14 @@ public final class MessagingDestinations implements AutoCloseable {
         }));
     }
 
-    private void validateShape(String name, Destination d, List<String> problems) {
-        String prefix = "messaging.destinations." + name;
-        Provider provider = d.provider() == null ? null : properties.providers().get(d.provider());
-        if (provider == null) {
-            problems.add(prefix + ".provider '" + d.provider() + "' não existe em messaging.providers");
-            return;
-        }
-        if (provider.type() == null) {
-            return;
-        }
-        Type type = provider.type();
-        switch (type) {
-            case AWS -> {
-                if (d.queueUrl() == null && d.topicArn() == null) {
-                    problems.add(prefix + ": defina queue-url ou topic-arn");
-                }
-                unexpected(prefix, problems, "queue", d.queue(), "topic", d.topic(), "subscription", d.subscription());
-            }
-            case AZURE -> {
-                if (d.queue() == null && d.topic() == null) {
-                    problems.add(prefix + ": defina queue ou topic");
-                }
-                if (d.subscription() != null && d.topic() == null) {
-                    problems.add(prefix + ": subscription exige topic");
-                }
-                if (d.deadLetter() != null) {
-                    problems.add(prefix + ".dead-letter: o Service Bus tem DLQ nativa; leia-a com dead-letter-queue: true");
-                }
-                if (d.deadLetterQueue() && d.topic() != null && d.subscription() == null) {
-                    problems.add(prefix + ".dead-letter-queue em tópico exige subscription");
-                }
-                if (d.redelivery() == Redelivery.RESCHEDULE && (d.sessions() || d.queue() == null || d.topic() != null)) {
-                    problems.add(prefix + ".redelivery=RESCHEDULE só vale para fila sem sessions");
-                }
-                unexpected(prefix, problems, "queue-url", d.queueUrl(), "topic-arn", d.topicArn());
-            }
-            case GCP -> {
-                if (d.topic() == null && d.subscription() == null) {
-                    problems.add(prefix + ": defina topic ou subscription");
-                }
-                if (d.subscription() != null && d.ackDeadline() == null) {
-                    problems.add(prefix + ".ack-deadline é obrigatório para receber (o ack deadline da subscription)");
-                }
-                if (provider.project() == null && (isShort(d.topic()) || isShort(d.subscription()))) {
-                    problems.add(prefix + ": nome curto exige messaging.providers." + d.provider() + ".project");
-                }
-                unexpected(prefix, problems, "queue-url", d.queueUrl(), "topic-arn", d.topicArn(), "queue", d.queue());
-            }
-            case ACTIVEMQ_CLASSIC, ARTEMIS, RABBITMQ -> {
-                if (d.queue() == null && d.topic() == null) {
-                    problems.add(prefix + ": defina queue ou topic");
-                }
-                if (d.subscription() != null && d.topic() == null) {
-                    problems.add(prefix + ": subscription exige topic");
-                }
-                if (type == Type.ACTIVEMQ_CLASSIC && d.topic() != null && !d.topic().startsWith(VIRTUAL_TOPIC)) {
-                    problems.add(prefix + ".topic precisa ser um Virtual Topic (" + VIRTUAL_TOPIC + "<nome>)");
-                }
-                if (type == Type.RABBITMQ && d.redelivery() == Redelivery.RESCHEDULE) {
-                    problems.add(prefix + ".redelivery=RESCHEDULE: o RabbitMQ não tem atraso no nack");
-                }
-                if (d.lease() != null && (d.lease().isNegative() || d.lease().isZero())) {
-                    problems.add(prefix + ".lease precisa ser positivo");
-                }
-                unexpected(prefix, problems, "queue-url", d.queueUrl(), "topic-arn", d.topicArn());
+    /** Um sender não tem como provar capacidade do lado de quem recebe: essas exigências são de receiver. */
+    private static void checkSenderRequirements(String key, Resolved r, MessageSender sender, List<String> problems) {
+        for (Requirement requirement : r.destination().require()) {
+            String missing = missing(requirement, sender.capabilities(), null);
+            if (missing != null) {
+                problems.add(key + ".options.require " + requirement + ": " + missing);
             }
         }
-        if (d.routingKey() != null && (type != Type.RABBITMQ || d.topic() == null)) {
-            problems.add(prefix + ".routing-key só vale para o RabbitMQ com topic (exchange)");
-        }
-        if (d.routingByOrderingKey() && (type != Type.RABBITMQ || d.topic() == null)) {
-            problems.add(prefix + ".routing-by-ordering-key só vale para o RabbitMQ com topic (exchange)");
-        }
-        if (d.confirmTimeout() != null && type != Type.RABBITMQ) {
-            problems.add(prefix + ".confirm-timeout só vale para o RabbitMQ");
-        }
-        if (d.confirmTimeout() != null && (d.confirmTimeout().isNegative() || d.confirmTimeout().isZero())) {
-            problems.add(prefix + ".confirm-timeout precisa ser positivo");
-        }
-        if (d.routingByOrderingKey() && d.routingKey() != null) {
-            problems.add(prefix + ".routing-by-ordering-key não combina com routing-key");
-        }
-        if (d.lease() != null && type != Type.ACTIVEMQ_CLASSIC && type != Type.ARTEMIS && type != Type.RABBITMQ) {
-            problems.add(prefix + ".lease só vale para o ActiveMQ; nos outros, o lease é do destino");
-        }
-        if (d.sessions() && type != Type.AZURE) {
-            problems.add(prefix + ".sessions só vale para o Service Bus");
-        }
-        if (d.deadLetterQueue() && type != Type.AZURE) {
-            problems.add(prefix + ".dead-letter-queue só vale para o Service Bus; nos outros, a DLQ é um destino comum");
-        }
-        if (d.deadLetter() != null && type != Type.AZURE) {
-            Destination target = properties.destinations().get(d.deadLetter());
-            if (target == null) {
-                problems.add(prefix + ".dead-letter '" + d.deadLetter() + "' não existe em messaging.destinations");
-            }
-        }
-    }
-
-    private void createSendersAndCheckRequirements(List<String> problems) {
-        properties.destinations().forEach((name, destination) -> {
-            MessageSender sender = connections.get(destination.provider()).sender(name, destination);
-            if (sender != null) {
-                senders.put(name, meters != null || observations != null
-                        ? new ObservedMessageSender(sender, providerType(destination), name, meters, observations)
-                        : sender);
-            }
-        });
-        properties.destinations().forEach((name, destination) -> {
-            if (destination.deadLetter() != null && !destination.deadLetter().equals(name)
-                    && properties.destinations().containsKey(destination.deadLetter())
-                    && !senders.containsKey(destination.deadLetter())) {
-                problems.add("messaging.destinations." + name + ".dead-letter '" + destination.deadLetter()
-                        + "' não tem endereço de envio");
-            }
-        });
-        if (!problems.isEmpty()) {
-            return;
-        }
-        properties.destinations().forEach((name, destination) -> {
-            if (destination.require().isEmpty()) {
-                return;
-            }
-            MessageSender sender = senders.get(name);
-            try (MessageReceiver receiver = newReceiver(name, destination)) {
-                for (Requirement requirement : destination.require()) {
-                    String missing = missing(requirement, sender == null ? null : sender.capabilities(),
-                            receiver == null ? null : receiver.capabilities());
-                    if (missing != null) {
-                        problems.add("messaging.destinations." + name + ".require " + requirement + ": " + missing);
-                    }
-                }
-            }
-        });
     }
 
     /** {@code null} quando o lado que importa atende; senão o motivo. */
@@ -346,20 +327,8 @@ public final class MessagingDestinations implements AutoCloseable {
         return capability.test(receiver) ? null : "o receiver não suporta";
     }
 
-    private String providerType(Destination destination) {
-        return properties.providers().get(destination.provider()).type().name().toLowerCase().replace('_', '-');
-    }
-
-    private static boolean isShort(String name) {
-        return name != null && !name.startsWith("projects/");
-    }
-
-    private static void unexpected(String prefix, List<String> problems, String... namesAndValues) {
-        for (int i = 0; i < namesAndValues.length; i += 2) {
-            if (namesAndValues[i + 1] != null) {
-                problems.add(prefix + "." + namesAndValues[i] + " não se aplica a este provedor");
-            }
-        }
+    private String providerType(Resolved r) {
+        return properties.providers().get(r.provider()).type().name().toLowerCase().replace('_', '-');
     }
 
     /** Fecha receivers que sobraram, senders e os clientes criados pelo starter. */
@@ -368,6 +337,7 @@ public final class MessagingDestinations implements AutoCloseable {
         created.forEach(MessageReceiver::close);
         healthReceivers.values().forEach(MessageReceiver::close);
         senders.values().forEach(MessageSender::close);
+        endpointSenders.values().forEach(MessageSender::close);
         connections.values().forEach(ProviderConnection::close);
     }
 }

@@ -6,6 +6,11 @@ import com.example.messaging.ReceivedMessage;
 import com.example.messaging.spring.MessagingAutoConfiguration;
 import com.example.messaging.spring.MessagingDestinations;
 import com.example.messaging.spring.MessagingHealthAutoConfiguration;
+import com.example.messaging.spring.MessagingProperties.Endpoint;
+import com.example.messaging.spring.MessagingProperties.Options;
+import com.example.messaging.spring.MessagingProperties.Redelivery;
+import com.example.messaging.spring.MessagingProperties.Requirement;
+import java.util.Set;
 import jakarta.jms.Connection;
 import jakarta.jms.Session;
 import org.apache.activemq.artemis.api.core.QueueConfiguration;
@@ -68,23 +73,25 @@ class ArtemisAutoConfigurationTest {
     @Test
     void queueAndMulticastSubscriptionRoundTrip() {
         runner().withPropertyValues(
-                        "messaging.destinations.pedidos.provider=art", "messaging.destinations.pedidos.queue=pedidos",
-                        "messaging.destinations.pedidos.require=publisher-deduplication,delayed-redelivery",
-                        "messaging.destinations.pedidos.redelivery=reschedule",
-                        "messaging.destinations.eventos.provider=art", "messaging.destinations.eventos.topic=eventos",
-                        "messaging.destinations.eventos.subscription=faturamento")
+                        "messaging.senders.pedidos.destination=pedidos",
+                        "messaging.senders.pedidos.options.require=publisher-deduplication",
+                        "messaging.senders.eventos.destination=eventos", "messaging.senders.eventos.kind=topic")
                 .run(context -> {
                     MessagingDestinations destinations = context.getBean(MessagingDestinations.class);
+                    Endpoint pedidos = new Endpoint("pedidos", null, null, new Options(
+                            Set.of(Requirement.DELAYED_REDELIVERY), null, Redelivery.RESCHEDULE, null, null, null,
+                            null, null, null, null, null, null));
 
                     destinations.sender("pedidos").send(OutgoingMessage.ofText("pedido"));
-                    try (MessageReceiver receiver = destinations.receiver("pedidos")) {
+                    try (MessageReceiver receiver = destinations.receiver("pedidos", null, pedidos, null)) {
                         ReceivedMessage message = receiver.receive(1, Duration.ofSeconds(5)).getFirst();
                         assertThat(message.bodyAsString()).isEqualTo("pedido");
                         receiver.ack(message);
                     }
 
                     destinations.sender("eventos").send(OutgoingMessage.ofText("evento"));
-                    try (MessageReceiver subscription = destinations.receiver("eventos")) {
+                    try (MessageReceiver subscription = destinations.receiver("eventos", null,
+                            new Endpoint("eventos", "faturamento", null, null), null)) {
                         ReceivedMessage message = subscription.receive(1, Duration.ofSeconds(5)).getFirst();
                         assertThat(message.bodyAsString()).isEqualTo("evento");
                         subscription.ack(message);
@@ -94,12 +101,13 @@ class ArtemisAutoConfigurationTest {
 
     @Test
     void healthChecksExistingAndMissingQueues() {
-        runner().withPropertyValues(
-                        "messaging.destinations.eventos.provider=art", "messaging.destinations.eventos.topic=eventos",
-                        "messaging.destinations.eventos.subscription=faturamento",
-                        "messaging.destinations.nada.provider=art", "messaging.destinations.nada.queue=nao-existe",
-                        "management.health.messaging.enabled=true")
+        runner().withPropertyValues("management.health.messaging.enabled=true")
                 .run(context -> {
+                    MessagingDestinations destinations = context.getBean(MessagingDestinations.class);
+                    destinations.receiver("eventos", null, new Endpoint("eventos", "faturamento", null, null), null)
+                            .close();
+                    destinations.receiver("nada", null, new Endpoint("nao-existe", null, null, null), null).close();
+
                     var health = context.getBean(HealthIndicator.class).health();
                     assertThat(health.getStatus()).isEqualTo(Status.DOWN);
                     assertThat(health.getDetails()).containsEntry("eventos", "UP");

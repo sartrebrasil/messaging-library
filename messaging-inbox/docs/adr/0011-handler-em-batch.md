@@ -38,7 +38,7 @@ public final class BatchResult {
 ```
 
 ```java
-@InboxListener(consumer = "billing-orders", batch = true)
+@MessageListener(receiver = "billing-orders", batch = true)
 BatchResult on(List<TypedMessage<OrderCreated>> messages) {
     var result = BatchResult.builder();
     for (var m : messages) {
@@ -152,8 +152,8 @@ Uma mensagem com falha bloqueia as seguintes da mesma chave no lote:
 ### Configuração
 
 ```yaml
-inbox:
-  consumers:
+messaging:
+  receivers:
     billing-orders:
       batch:
         enabled: true

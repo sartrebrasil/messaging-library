@@ -402,8 +402,8 @@ No nível 3 do Kafka, `enqueuedAt` é o timestamp do record.
 ### Configuração
 
 ```yaml
-inbox:
-  consumers:
+messaging:
+  receivers:
     billing-orders:
       destination: orders
       dead-letter: orders-dlq

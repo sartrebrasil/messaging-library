@@ -27,8 +27,8 @@ import java.util.Set;
 import java.util.function.Supplier;
 
 /**
- * Finds the handler of each consumer (ADR-0008, plan): a functional bean named after the consumer (exact or
- * camelCase: {@code billing-orders} or {@code billingOrders}), or an {@link InboxListener} method. Exactly one per
+ * Finds the handler of each receiver (ADR-0008, plan): a functional bean named after the receiver (exact or
+ * camelCase: {@code billing-orders} or {@code billingOrders}), or an {@link MessageListener} method. Exactly one per
  * consumer; every problem is reported at once.
  */
 final class HandlerBinding {
@@ -40,22 +40,26 @@ final class HandlerBinding {
     private HandlerBinding() {
     }
 
-    /** @throws IllegalStateException listing every problem */
-    static Map<String, Bound> bind(Set<String> consumers, ConfigurableListableBeanFactory beans) {
+    /**
+     * @param known    every receiver in messaging.receivers: a handler may name any of them
+     * @param required the enabled receivers: each needs exactly one handler
+     * @throws IllegalStateException listing every problem
+     */
+    static Map<String, Bound> bind(Set<String> known, Set<String> required, ConfigurableListableBeanFactory beans) {
         List<String> problems = new ArrayList<>();
         Map<String, List<Bound>> found = new HashMap<>();
-        functional(consumers, beans, found, problems);
-        annotated(consumers, beans, found, problems);
+        functional(known, beans, found, problems);
+        annotated(known, beans, found, problems);
         Map<String, Bound> bound = new HashMap<>();
-        for (String consumer : consumers) {
+        for (String consumer : required) {
             List<Bound> candidates = found.getOrDefault(consumer, List.of());
             if (candidates.isEmpty()) {
                 String names = camel(consumer).equals(consumer) ? "'" + consumer + "'"
                         : "'" + consumer + "' or '" + camel(consumer) + "'";
-                problems.add("inbox.consumers." + consumer + " has no handler: declare a bean named " + names
-                        + " of type InboxHandler/InboxResultHandler, or an @InboxListener");
+                problems.add(InboxConfig.RECEIVERS + consumer + " has no handler: declare a bean named " + names
+                        + " of type InboxHandler/InboxResultHandler, or a @MessageListener");
             } else if (candidates.size() > 1) {
-                problems.add("inbox.consumers." + consumer + " has more than one handler: "
+                problems.add(InboxConfig.RECEIVERS + consumer + " has more than one handler: "
                         + candidates.stream().map(Bound::description).toList());
             } else {
                 bound.put(consumer, candidates.getFirst());
@@ -99,19 +103,19 @@ final class HandlerBinding {
                 continue;
             }
             Class<?> user = ClassUtils.getUserClass(type);
-            Map<Method, InboxListener> methods = MethodIntrospector.selectMethods(user,
-                    (MethodIntrospector.MetadataLookup<InboxListener>) m ->
-                            AnnotatedElementUtils.findMergedAnnotation(m, InboxListener.class));
+            Map<Method, MessageListener> methods = MethodIntrospector.selectMethods(user,
+                    (MethodIntrospector.MetadataLookup<MessageListener>) m ->
+                            AnnotatedElementUtils.findMergedAnnotation(m, MessageListener.class));
             methods.forEach((method, listener) -> {
                 String where = user.getName() + "#" + method.getName();
-                if (!consumers.contains(listener.consumer())) {
-                    problems.add("@InboxListener " + where + ": consumer '" + listener.consumer()
-                            + "' does not exist in inbox.consumers");
+                if (!consumers.contains(listener.receiver())) {
+                    problems.add("@MessageListener " + where + ": receiver '" + listener.receiver()
+                            + "' does not exist in messaging.receivers");
                     return;
                 }
                 Bound bound = listenerMethod(name, method, type, where, beans, problems);
                 if (bound != null) {
-                    found.computeIfAbsent(listener.consumer(), k -> new ArrayList<>()).add(bound);
+                    found.computeIfAbsent(listener.receiver(), k -> new ArrayList<>()).add(bound);
                 }
             });
         }
@@ -121,7 +125,7 @@ final class HandlerBinding {
                                         ConfigurableListableBeanFactory beans, List<String> problems) {
         Class<?> returns = method.getReturnType();
         if (returns != void.class && !HandlerResult.class.isAssignableFrom(returns)) {
-            problems.add("@InboxListener " + where + " must return void or HandlerResult");
+            problems.add("@MessageListener " + where + " must return void or HandlerResult");
             return null;
         }
         Type[] params = method.getGenericParameterTypes();
@@ -137,11 +141,11 @@ final class HandlerBinding {
             shape = Shape.PAYLOAD_AND_MESSAGE;
             payload = params[0];
         } else {
-            problems.add("@InboxListener " + where + ": parameters must be (T), (T, InboxMessage) or (TypedMessage<T>)");
+            problems.add("@MessageListener " + where + ": parameters must be (T), (T, InboxMessage) or (TypedMessage<T>)");
             return null;
         }
         if (payload == null || payload instanceof TypeVariable<?>) {
-            problems.add("@InboxListener " + where + ": cannot resolve the payload type");
+            problems.add("@MessageListener " + where + ": cannot resolve the payload type");
             return null;
         }
         Method invocable = AopUtils.selectInvocableMethod(method, beanType);
@@ -165,7 +169,7 @@ final class HandlerBinding {
                 }
             };
         };
-        return new Bound("@InboxListener " + where, payload, handler);
+        return new Bound("@MessageListener " + where, payload, handler);
     }
 
     private enum Shape { PAYLOAD, PAYLOAD_AND_MESSAGE, TYPED }

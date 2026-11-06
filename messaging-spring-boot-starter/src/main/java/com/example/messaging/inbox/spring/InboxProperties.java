@@ -3,7 +3,11 @@ package com.example.messaging.inbox.spring;
 import com.example.messaging.inbox.DelayedStrategy;
 import com.example.messaging.inbox.EnvelopeMode;
 import com.example.messaging.inbox.Ordering;
-import org.springframework.boot.context.properties.ConfigurationProperties;
+import com.example.messaging.spring.MessagingProperties;
+import org.springframework.boot.context.properties.bind.BindHandler;
+import org.springframework.boot.context.properties.bind.Bindable;
+import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.context.properties.bind.handler.NoUnboundElementsBindHandler;
 
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -11,38 +15,32 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * {@code inbox.*} (ADR-0008). Every option is nullable: {@code null} means "not set", and {@link InboxConfig} merges
- * consumer, defaults and the library defaults after binding. Unknown keys fail the startup.
+ * {@code messaging.receivers.<name>} and {@code messaging.receiver-defaults} (ADR-0008). Every option is nullable: {@code null} means "not set", and {@link InboxConfig} merges receiver,
+ * defaults and the library defaults after binding. Unknown keys fail the startup. {@code messaging.providers} and
+ * {@code messaging.senders} belong to {@link MessagingProperties}.
  */
-@ConfigurationProperties(prefix = "inbox", ignoreUnknownFields = false)
 public class InboxProperties {
 
-    /** {@code false} starts no consumer at all (API-only instances and tests). */
-    private boolean enabled = true;
-
-    public boolean isEnabled() {
-        return enabled;
+    /**
+     * Binds each root on its own, strictly: an unknown key under a receiver fails, while the other
+     * {@code messaging.*} roots are not looked at. {@code messaging.receivers-enabled} is the condition of
+     * {@link InboxAutoConfiguration}; leftover {@code inbox.*} keys fail in {@link MessagingProperties#bind}.
+     */
+    static InboxProperties bind(Binder binder) {
+        BindHandler strict = new NoUnboundElementsBindHandler(BindHandler.DEFAULT);
+        InboxProperties properties = new InboxProperties();
+        binder.bind("messaging.receiver-defaults", Bindable.of(ConsumerOptions.class), strict)
+                .ifBound(properties::setDefaults);
+        binder.bind("messaging.receivers", Bindable.mapOf(String.class, ConsumerOptions.class), strict)
+                .ifBound(properties::setConsumers);
+        return properties;
     }
 
-    public void setEnabled(boolean enabled) {
-        this.enabled = enabled;
-    }
-
-    /** Brokers; without any, the implicit {@code messaging} broker (messaging.destinations). */
-    private Map<String, Broker> brokers = new LinkedHashMap<>();
-
-    /** Options shared by every consumer. */
+    /** {@code messaging.receiver-defaults}: options shared by every receiver. */
     private ConsumerOptions defaults = new ConsumerOptions();
 
+    /** {@code messaging.receivers}. */
     private Map<String, ConsumerOptions> consumers = new LinkedHashMap<>();
-
-    public Map<String, Broker> getBrokers() {
-        return brokers;
-    }
-
-    public void setBrokers(Map<String, Broker> brokers) {
-        this.brokers = brokers;
-    }
 
     public ConsumerOptions getDefaults() {
         return defaults;
@@ -60,36 +58,17 @@ public class InboxProperties {
         this.consumers = consumers;
     }
 
-    public static class Broker {
-
-        /** Only {@code messaging} exists in this library (Kafka is out of scope). */
-        private String type;
-
-        /** Defaults of {@code configuration} for every consumer of this broker. */
-        private Map<String, String> configuration = new LinkedHashMap<>();
-
-        public String getType() {
-            return type;
-        }
-
-        public void setType(String type) {
-            this.type = type;
-        }
-
-        public Map<String, String> getConfiguration() {
-            return configuration;
-        }
-
-        public void setConfiguration(Map<String, String> configuration) {
-            this.configuration = configuration;
-        }
-    }
-
+    /** One receiver, or {@code receiver-defaults}. Addresses follow {@link MessagingProperties.Endpoint}. */
     public static class ConsumerOptions {
 
-        private String broker;
-        /** Name in messaging.destinations. */
+        /** {@code false}: validated at startup, never started. */
+        private Boolean enabled;
+        /** Name in messaging.providers; optional with a single provider. */
+        private String provider;
         private String destination;
+        /** Receive from a topic through this subscription. */
+        private String subscription;
+        private MessagingProperties.Options options;
         private String deadLetter;
         private String failed;
         private Integer concurrency;
@@ -97,8 +76,10 @@ public class InboxProperties {
         private EnvelopeMode envelope;
         private Retry retry;
         private Idempotency idempotency;
-        /** Broker-specific: max-messages-per-poll, poll-wait, max-processing, shutdown-timeout. */
-        private Map<String, String> configuration;
+        private Integer maxMessagesPerPoll;
+        private Duration pollWait;
+        private Duration maxProcessing;
+        private Duration shutdownTimeout;
 
         // Accepted by the ADRs but not built yet: present only to fail with a clear message
         private Map<String, Object> staleCheck;
@@ -108,12 +89,68 @@ public class InboxProperties {
         /** Lanes processing one receive in parallel, by orderingKey (ADR-0016); 1 = in sequence. */
         private Integer keyLanes;
 
-        public String getBroker() {
-            return broker;
+        public Boolean getEnabled() {
+            return enabled;
         }
 
-        public void setBroker(String broker) {
-            this.broker = broker;
+        public void setEnabled(Boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getProvider() {
+            return provider;
+        }
+
+        public void setProvider(String provider) {
+            this.provider = provider;
+        }
+
+        public String getSubscription() {
+            return subscription;
+        }
+
+        public void setSubscription(String subscription) {
+            this.subscription = subscription;
+        }
+
+        public MessagingProperties.Options getOptions() {
+            return options;
+        }
+
+        public void setOptions(MessagingProperties.Options options) {
+            this.options = options;
+        }
+
+        public Integer getMaxMessagesPerPoll() {
+            return maxMessagesPerPoll;
+        }
+
+        public void setMaxMessagesPerPoll(Integer maxMessagesPerPoll) {
+            this.maxMessagesPerPoll = maxMessagesPerPoll;
+        }
+
+        public Duration getPollWait() {
+            return pollWait;
+        }
+
+        public void setPollWait(Duration pollWait) {
+            this.pollWait = pollWait;
+        }
+
+        public Duration getMaxProcessing() {
+            return maxProcessing;
+        }
+
+        public void setMaxProcessing(Duration maxProcessing) {
+            this.maxProcessing = maxProcessing;
+        }
+
+        public Duration getShutdownTimeout() {
+            return shutdownTimeout;
+        }
+
+        public void setShutdownTimeout(Duration shutdownTimeout) {
+            this.shutdownTimeout = shutdownTimeout;
         }
 
         public String getDestination() {
@@ -178,14 +215,6 @@ public class InboxProperties {
 
         public void setIdempotency(Idempotency idempotency) {
             this.idempotency = idempotency;
-        }
-
-        public Map<String, String> getConfiguration() {
-            return configuration;
-        }
-
-        public void setConfiguration(Map<String, String> configuration) {
-            this.configuration = configuration;
         }
 
         public Map<String, Object> getStaleCheck() {
@@ -370,7 +399,7 @@ public class InboxProperties {
         }
     }
 
-    /** A band of retry-queues: messaging.destinations name and its fixed delay. */
+    /** A band of retry-queues: its address (in the provider of the receiver) and fixed delay. */
     public static class Queue {
 
         private Duration delay;

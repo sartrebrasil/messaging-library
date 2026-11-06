@@ -5,6 +5,7 @@ import com.example.idempotency.store.InMemoryIdempotencyStore;
 import com.example.messaging.Capabilities;
 import com.example.messaging.MessageReceiver;
 import com.example.messaging.MessageSender;
+import com.example.messaging.spring.MessagingProperties.Endpoint;
 import com.example.messaging.OutgoingMessage;
 import com.example.messaging.inbox.HandlerResult;
 import com.example.messaging.inbox.InboxHandler;
@@ -34,7 +35,7 @@ class InboxAutoConfigurationTest {
 
     static final String ORDER = "{\"messageId\":\"m-1\",\"eventType\":\"OrderCreated\",\"aggregateId\":\"o-1\","
             + "\"payload\":{\"id\":\"o-1\",\"total\":10}}";
-    static final String C = "inbox.consumers.billing-orders.";
+    static final String C = "messaging.receivers.billing-orders.";
 
     static final List<Object> HANDLED = new CopyOnWriteArrayList<>();
 
@@ -42,10 +43,11 @@ class InboxAutoConfigurationTest {
             .withConfiguration(AutoConfigurations.of(InboxAutoConfiguration.class))
             .withUserConfiguration(Broker.class)
             .withPropertyValues(C + "destination=orders", C + "failed=orders-failed", C + "dead-letter=orders-dlq",
-                    C + "configuration.poll-wait=100ms", C + "configuration.shutdown-timeout=2s");
+                    C + "poll-wait=100ms", C + "shutdown-timeout=2s");
 
     InboxAutoConfigurationTest() {
         HANDLED.clear();
+        Broker.REQUESTED.clear();
     }
 
     @Test
@@ -85,20 +87,77 @@ class InboxAutoConfigurationTest {
     @Test
     void startupFailsListingEveryHandlerProblem() {
         runner.withUserConfiguration(Functional.class, Listener.class, Stray.class)
-                .withPropertyValues("inbox.consumers.lonely.destination=orders", "inbox.consumers.lonely.failed=orders-failed")
+                .withPropertyValues("messaging.receivers.lonely.destination=orders", "messaging.receivers.lonely.failed=orders-failed")
                 .run(context -> assertThat(context).hasFailed().getFailure()
                         .hasMessageContaining("billing-orders has more than one handler")
                         .hasMessageContaining("lonely has no handler")
-                        .hasMessageContaining("consumer 'nobody' does not exist"));
+                        .hasMessageContaining("receiver 'nobody' does not exist in messaging.receivers"));
     }
 
     @Test
-    void disabledStartsNothingEvenWithoutHandlers() {
-        runner.withPropertyValues("inbox.enabled=false")
+    void globalSwitchOffStartsNothing() {
+        runner.withPropertyValues("messaging.receivers-enabled=false", C + "enabled=true")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context).doesNotHaveBean(InboxLifecycle.class);
+                    assertThat(Broker.REQUESTED).isEmpty();
                 });
+    }
+
+    @Test
+    void disabledReceiverIsValidatedButNotStarted() {
+        runner.withPropertyValues(C + "enabled=false")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(Broker.REQUESTED).isEmpty();
+                });
+        runner.withPropertyValues(C + "enabled=false", C + "destination=bad")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasStackTraceContaining(C + "destination: bad address"));
+        new ApplicationContextRunner().withConfiguration(AutoConfigurations.of(InboxAutoConfiguration.class))
+                .withUserConfiguration(Broker.class)
+                .withPropertyValues(C + "enabled=false", C + "destination=orders")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasStackTraceContaining(C + "failed is required"));
+    }
+
+    @Test
+    void listenerOfDisabledReceiverIsAccepted() {
+        runner.withUserConfiguration(Listener.class).withPropertyValues(C + "enabled=false")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(Broker.REQUESTED).isEmpty();
+                });
+    }
+
+    @Test
+    void listenerOfUnknownReceiverFails() {
+        runner.withUserConfiguration(Functional.class, Stray.class)
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasMessageContaining("@MessageListener")
+                        .hasMessageContaining("receiver 'nobody' does not exist in messaging.receivers"));
+    }
+
+    @Test
+    void retryBandsWithCloseDelaysGetTheirOwnSenders() {
+        runner.withUserConfiguration(Functional.class).withPropertyValues(
+                        C + "retry.delayed.strategy=retry-queues",
+                        C + "retry.delayed.queues[0].delay=500ms", C + "retry.delayed.queues[0].destination=q-fast",
+                        C + "retry.delayed.queues[1].delay=900ms", C + "retry.delayed.queues[1].destination=q-slow")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(Broker.REQUESTED).contains("sender billing-orders.retry.0", "sender billing-orders.retry.1");
+                });
+    }
+
+    @Test
+    void copiesUseReceiverScopedNames() {
+        runner.withUserConfiguration(Listener.class).run(context -> {
+            context.getBean(InMemoryMessaging.class).queueSender("orders").send(OutgoingMessage.ofText(ORDER));
+            await(() -> context.getBean(InMemoryMessaging.class).size("orders-failed") == 1);
+            assertThat(Broker.REQUESTED).contains("receiver billing-orders", "sender billing-orders.failed",
+                    "sender billing-orders.dead-letter");
+        });
     }
 
     @Test
@@ -152,7 +211,7 @@ class InboxAutoConfigurationTest {
                 .withUserConfiguration(Functional.class)
                 .withBean(InboxDestinations.class, () -> limited(Duration.ofMinutes(10)))
                 .withPropertyValues(C + "destination=orders", C + "failed=orders-failed", C + "dead-letter=orders-dlq",
-                        C + "configuration.poll-wait=100ms", C + "configuration.shutdown-timeout=2s");
+                        C + "poll-wait=100ms", C + "shutdown-timeout=2s");
 
         tenMinutes.run(context -> assertThat(context).hasNotFailed());
         tenMinutes.withPropertyValues(C + "retry.delayed.max=15m")
@@ -189,8 +248,8 @@ class InboxAutoConfigurationTest {
         InMemoryMessaging messaging = Broker.messaging();
         return new InboxDestinations() {
             @Override
-            public MessageReceiver receiver(String name) {
-                MessageReceiver delegate = messaging.receiver(name);
+            public MessageReceiver receiver(String name, String provider, Endpoint endpoint, MessageSender deadLetter) {
+                MessageReceiver delegate = messaging.receiver(endpoint.destination());
                 return (MessageReceiver) java.lang.reflect.Proxy.newProxyInstance(getClass().getClassLoader(),
                         new Class<?>[] {MessageReceiver.class}, (proxy, method, args) -> {
                             if (method.getName().equals("capabilities")) {
@@ -208,8 +267,8 @@ class InboxAutoConfigurationTest {
             }
 
             @Override
-            public MessageSender sender(String name) {
-                return messaging.queueSender(name);
+            public MessageSender sender(String name, String provider, Endpoint endpoint) {
+                return messaging.queueSender(endpoint.destination());
             }
         };
     }
@@ -217,9 +276,12 @@ class InboxAutoConfigurationTest {
     @Configuration(proxyBeanMethods = false)
     static class Broker {
 
+        /** What the inbox asked for: {@code receiver <name>} or {@code sender <name>}. */
+        static final List<String> REQUESTED = new CopyOnWriteArrayList<>();
+
         static InMemoryMessaging messaging() {
             InMemoryMessaging messaging = new InMemoryMessaging();
-            for (String q : List.of("orders", "orders-failed", "orders-dlq")) {
+            for (String q : List.of("orders", "orders-failed", "orders-dlq", "q-fast", "q-slow")) {
                 messaging.createQueue(q, QueueOptions.defaults());
             }
             return messaging;
@@ -234,13 +296,21 @@ class InboxAutoConfigurationTest {
         InboxDestinations inboxDestinations(InMemoryMessaging messaging) {
             return new InboxDestinations() {
                 @Override
-                public MessageReceiver receiver(String name) {
-                    return messaging.receiver(name);
+                public MessageReceiver receiver(String name, String provider, Endpoint endpoint,
+                                                MessageSender deadLetter) {
+                    REQUESTED.add("receiver " + name);
+                    return messaging.receiver(endpoint.destination());
                 }
 
                 @Override
-                public MessageSender sender(String name) {
-                    return messaging.queueSender(name);
+                public MessageSender sender(String name, String provider, Endpoint endpoint) {
+                    REQUESTED.add("sender " + name);
+                    return messaging.queueSender(endpoint.destination());
+                }
+
+                @Override
+                public List<String> validate(String key, String provider, Endpoint endpoint, boolean receive) {
+                    return "bad".equals(endpoint.destination()) ? List.of(key + ".destination: bad address") : List.of();
                 }
             };
         }
@@ -263,7 +333,7 @@ class InboxAutoConfigurationTest {
     }
 
     static class Handlers {
-        @InboxListener(consumer = "billing-orders")
+        @MessageListener(receiver = "billing-orders")
         HandlerResult on(JsonNode order, InboxMessage message) {
             HANDLED.add(order.path("id").asString() + "/" + message.type());
             return HandlerResult.reject("not today");
@@ -279,7 +349,7 @@ class InboxAutoConfigurationTest {
     }
 
     static class TypedHandlers {
-        @InboxListener(consumer = "billing-orders")
+        @MessageListener(receiver = "billing-orders")
         void on(TypedMessage<Order> message) {
             HANDLED.add(message.payload().id());
         }
@@ -294,7 +364,7 @@ class InboxAutoConfigurationTest {
     }
 
     static class StrayHandlers {
-        @InboxListener(consumer = "nobody")
+        @MessageListener(receiver = "nobody")
         void on(String payload) {
         }
     }

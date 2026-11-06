@@ -87,21 +87,20 @@ dentro da lane.
 ### Configuração
 
 ```yaml
-inbox:
-  consumers:
+messaging:
+  receivers:
     billing-orders:
       ordering: relaxed
       key-lanes: 8
-      configuration:
-        max-messages-per-poll: 10
+      max-messages-per-poll: 10
 ```
 
 ## Revisão de 2026-11-05: implementação
 
 - Feito no `messaging-inbox` antes da F6: o engine-tax trata cada lote do SQS
   em paralelo desde a T-128 (o consumo seguia o atraso do SQS real), e a
-  migração não pode perder isso. `key-lanes` em `inbox.consumers.<nome>` e em
-  `inbox.defaults`.
+  migração não pode perder isso. `key-lanes` em `messaging.receivers.<nome>` e em
+  `messaging.receiver-defaults`.
 - Cada worker tem um pool fixo de `key-lanes` platform threads, criado uma vez.
   Os efeitos no broker são aplicados na lane, logo depois de cada mensagem,
   como sem lanes; o worker espera todas as lanes antes do próximo `receive`.

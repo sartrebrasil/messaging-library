@@ -51,8 +51,8 @@ este projeto (ADR-0006), tinha esse descarte por idade (`stale.max-age`).
 ### Configuração
 
 ```yaml
-inbox:
-  consumers:
+messaging:
+  receivers:
     quotes:
       expiration:
         enabled: true

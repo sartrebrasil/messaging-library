@@ -2,6 +2,8 @@ package com.example.messaging.inbox.spring;
 
 import com.example.messaging.Capabilities;
 import com.example.messaging.MessageReceiver;
+import com.example.messaging.MessageSender;
+import com.example.messaging.spring.MessagingProperties.Endpoint;
 import com.example.messaging.inbox.ConsumerObserver;
 import com.example.messaging.inbox.ConsumerSettings;
 import com.example.messaging.inbox.Destinations;
@@ -19,6 +21,7 @@ import org.springframework.beans.factory.ListableBeanFactory;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -46,19 +49,37 @@ final class ConsumerBuilder {
         this.clock = clock;
     }
 
+    /** Address problems of one receiver and of its copies, without opening a connection. */
+    List<String> validate(InboxConfig.Consumer c) {
+        String prefix = InboxConfig.RECEIVERS + c.name();
+        List<String> problems = new ArrayList<>(destinations.validate(prefix, c.provider(), c.endpoint(), true));
+        if (c.deadLetter() != null) {
+            problems.addAll(destinations.validate(prefix + ".dead-letter", c.provider(), copy(c.deadLetter()), false));
+        }
+        problems.addAll(destinations.validate(prefix + ".failed", c.provider(), copy(c.failed()), false));
+        for (int i = 0; i < c.queues().size(); i++) {
+            problems.addAll(destinations.validate(prefix + ".retry.delayed.queues[" + i + "].destination",
+                    c.provider(), copy(c.queues().get(i).destination()), false));
+        }
+        return problems;
+    }
+
     InboxConsumer build(InboxConfig.Consumer c, HandlerBinding.Bound handler) {
+        MessageSender deadLetter = c.deadLetter() == null ? null
+                : destinations.sender(c.name() + ".dead-letter", c.provider(), copy(c.deadLetter()));
         // the probe receiver becomes worker 0's: on Service Bus with sessions an extra one would hold a session
-        MessageReceiver probe = destinations.receiver(c.destination());
+        MessageReceiver probe = destinations.receiver(c.name(), c.provider(), c.endpoint(), deadLetter);
         try {
-            return build(c, handler, probe);
+            return build(c, handler, probe, deadLetter);
         } catch (RuntimeException e) {
             probe.close();
             throw e;
         }
     }
 
-    private InboxConsumer build(InboxConfig.Consumer c, HandlerBinding.Bound handler, MessageReceiver probe) {
-        String prefix = "inbox.consumers." + c.name();
+    private InboxConsumer build(InboxConfig.Consumer c, HandlerBinding.Bound handler, MessageReceiver probe,
+                                MessageSender deadLetter) {
+        String prefix = InboxConfig.RECEIVERS + c.name();
         Capabilities caps = probe.capabilities();
         BackoffSpec delayed = c.delayed();
         if (!c.delayedMaxSet() && caps.delayedRedelivery()
@@ -74,7 +95,8 @@ final class ConsumerBuilder {
         }
         RetryPolicy policy = new RetryPolicy(c.immediate(), delayed, c.deadLetter() != null, 3, c.nonRetryable(),
                 c.skipImmediate(), c.retryable());
-        ConsumerSettings settings = new ConsumerSettings(c.name(), c.destination(), c.concurrency(),
+        // the destination of the settings is the metrics tag: the receiver name, never the address
+        ConsumerSettings settings = new ConsumerSettings(c.name(), c.name(), c.concurrency(),
                 c.maxMessagesPerPoll(), c.pollWait(), c.maxProcessing(), c.shutdownTimeout(), c.ordering(),
                 c.strategy(), c.includeExceptionMessage(), c.keyLanes());
         InboxIdempotency idempotency = null;
@@ -93,12 +115,22 @@ final class ConsumerBuilder {
                 idempotency);
         AtomicBoolean probeUsed = new AtomicBoolean();
         Supplier<MessageReceiver> receivers = () -> probeUsed.compareAndSet(false, true)
-                ? probe : destinations.receiver(c.destination());
-        List<RetryQueue> queues = c.queues().stream()
-                .map(q -> new RetryQueue(q.delay(), destinations.sender(q.destination()))).toList();
-        Destinations broker = new Destinations(receivers, destinations.sender(c.failed()),
-                c.deadLetter() == null ? null : destinations.sender(c.deadLetter()), queues);
+                ? probe : destinations.receiver(c.name(), c.provider(), c.endpoint(), deadLetter);
+        // by index: two bands may round to the same delay, and each needs its own sender
+        List<RetryQueue> queues = new ArrayList<>();
+        for (int i = 0; i < c.queues().size(); i++) {
+            InboxConfig.QueueBand q = c.queues().get(i);
+            queues.add(new RetryQueue(q.delay(),
+                    destinations.sender(c.name() + ".retry." + i, c.provider(), copy(q.destination()))));
+        }
+        Destinations broker = new Destinations(receivers,
+                destinations.sender(c.name() + ".failed", c.provider(), copy(c.failed())), deadLetter, queues);
         return new InboxConsumer(settings, pipeline, broker, stop, clock, () -> ThreadLocalRandom.current().nextDouble(),
                 observers.apply(c));
+    }
+
+    /** dead-letter, failed and the retry queues: plain queues in the provider of the receiver (ADR-0008). */
+    private static Endpoint copy(String destination) {
+        return new Endpoint(destination, null, null, null);
     }
 }

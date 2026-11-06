@@ -1,5 +1,6 @@
 package com.example.messaging.spring.aws;
 
+import com.example.messaging.DestinationNotFoundException;
 import com.example.messaging.MessageReceiver;
 import com.example.messaging.MessageSender;
 import com.example.messaging.aws.SnsMessageSender;
@@ -18,8 +19,11 @@ import software.amazon.awssdk.services.sns.SnsClient;
 import software.amazon.awssdk.services.sns.SnsClientBuilder;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.SqsClientBuilder;
+import software.amazon.awssdk.services.sqs.model.QueueDoesNotExistException;
 
 import java.time.Duration;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * SQS e SNS. Beans {@code SqsClient}/{@code SnsClient} da aplicação valem para todos os
@@ -32,6 +36,8 @@ public final class AwsProviderConnection implements ProviderConnection {
     private final SnsClient sns;
     private final boolean ownsSqs;
     private final boolean ownsSns;
+    /** URL de cada nome de fila, resolvida uma vez ({@code GetQueueUrl}). */
+    private final Map<String, String> queueUrls = new ConcurrentHashMap<>();
 
     public AwsProviderConnection(MessagingProperties.Provider provider, ListableBeanFactory beans) {
         SqsClient userSqs = beans.getBeanProvider(SqsClient.class).getIfAvailable();
@@ -79,14 +85,27 @@ public final class AwsProviderConnection implements ProviderConnection {
                     ? destination.maxMessageBytes() : SnsMessageSender.DEFAULT_MAX_MESSAGE_BYTES;
             return new SnsMessageSender(sns, destination.topicArn(), max);
         }
-        return destination.queueUrl() == null ? null : new SqsMessageSender(sqs, destination.queueUrl());
+        return new SqsMessageSender(sqs, queueUrl(destination));
     }
 
     @Override
     public MessageReceiver receiver(String name, MessagingProperties.Destination destination,
                                     MessageSender deadLetterSender) {
-        return destination.queueUrl() == null ? null
-                : new SqsMessageReceiver(sqs, destination.queueUrl(), deadLetterSender);
+        return new SqsMessageReceiver(sqs, queueUrl(destination), deadLetterSender);
+    }
+
+    /** {@code queue-url}, ou o nome da fila resolvido no primeiro uso; exige {@code sqs:GetQueueUrl}. */
+    private String queueUrl(MessagingProperties.Destination destination) {
+        if (destination.queueUrl() != null) {
+            return destination.queueUrl();
+        }
+        return queueUrls.computeIfAbsent(destination.queue(), name -> {
+            try {
+                return sqs.getQueueUrl(r -> r.queueName(name)).queueUrl();
+            } catch (QueueDoesNotExistException e) {
+                throw new DestinationNotFoundException("aws", "fila SQS '" + name + "' não existe", e);
+            }
+        });
     }
 
     @Override
