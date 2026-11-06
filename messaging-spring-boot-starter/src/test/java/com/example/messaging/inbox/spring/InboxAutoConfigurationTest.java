@@ -139,6 +139,18 @@ class InboxAutoConfigurationTest {
     }
 
     @Test
+    void retryBandsWithCloseDelaysGetTheirOwnSenders() {
+        runner.withUserConfiguration(Functional.class).withPropertyValues(
+                        C + "retry.delayed.strategy=retry-queues",
+                        C + "retry.delayed.queues[0].delay=500ms", C + "retry.delayed.queues[0].destination=q-fast",
+                        C + "retry.delayed.queues[1].delay=900ms", C + "retry.delayed.queues[1].destination=q-slow")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(Broker.REQUESTED).contains("sender billing-orders.retry.0", "sender billing-orders.retry.1");
+                });
+    }
+
+    @Test
     void copiesUseReceiverScopedNames() {
         runner.withUserConfiguration(Listener.class).run(context -> {
             context.getBean(InMemoryMessaging.class).queueSender("orders").send(OutgoingMessage.ofText(ORDER));
@@ -269,7 +281,7 @@ class InboxAutoConfigurationTest {
 
         static InMemoryMessaging messaging() {
             InMemoryMessaging messaging = new InMemoryMessaging();
-            for (String q : List.of("orders", "orders-failed", "orders-dlq")) {
+            for (String q : List.of("orders", "orders-failed", "orders-dlq", "q-fast", "q-slow")) {
                 messaging.createQueue(q, QueueOptions.defaults());
             }
             return messaging;

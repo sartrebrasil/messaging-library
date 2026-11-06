@@ -109,6 +109,35 @@ class MessagingAutoConfigurationTest {
     }
 
     @Test
+    void senderNameReusedWithAnotherAddressFails() {
+        runner.run(context -> {
+            MessagingDestinations destinations = context.getBean(MessagingDestinations.class);
+            destinations.sender("r.retry.0", "aws", queue(QUEUE + "a"));
+            assertThat(destinations.sender("r.retry.0", "aws", queue(QUEUE + "a"))).isNotNull();
+            assertThatThrownBy(() -> destinations.sender("r.retry.0", "aws", queue(QUEUE + "b")))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("r.retry.0");
+        });
+    }
+
+    @Test
+    void unknownTopLevelKeyFails() {
+        runner.withPropertyValues("messaging.receivers-enable=false")
+                .run(context -> assertThat(context).getFailure().rootCause()
+                        .hasMessageContaining("messaging.receivers-enable"));
+        runner.withPropertyValues("messaging.reciever-defaults.poll-wait=1s")
+                .run(context -> assertThat(context).getFailure().rootCause()
+                        .hasMessageContaining("messaging.reciever-defaults"));
+    }
+
+    @Test
+    void environmentVariableFormsOfTheRootsAreAccepted() {
+        runner.withInitializer(c -> c.getEnvironment().getPropertySources().addFirst(
+                        new org.springframework.core.env.SystemEnvironmentPropertySource("env", java.util.Map.of(
+                                "MESSAGING_RECEIVERDEFAULTS_POLLWAIT", "1s", "MESSAGING_RECEIVERSENABLED", "true"))))
+                .run(context -> assertThat(context).hasNotFailed());
+    }
+
+    @Test
     void legacyInboxKeysFail() {
         for (String key : java.util.List.of("inbox.consumers.x.destination", "inbox.defaults.key-lanes",
                 "inbox.enabled", "inbox.brokers.messaging.type")) {

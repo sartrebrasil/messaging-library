@@ -77,6 +77,7 @@ public final class MessagingDestinations implements AutoCloseable {
     private final Map<String, ProviderConnection> connections = new HashMap<>();
     private final Map<String, MessageSender> senders = new HashMap<>();
     private final Map<String, MessageSender> endpointSenders = new ConcurrentHashMap<>();
+    private final Map<String, Resolved> endpointAddresses = new ConcurrentHashMap<>();
     /** Receivers já criados por endereço: o que o health check usa. */
     private final Map<String, Resolved> receivers = new ConcurrentHashMap<>();
     private final Map<String, MessageReceiver> healthReceivers = new HashMap<>();
@@ -181,14 +182,18 @@ public final class MessagingDestinations implements AutoCloseable {
     }
 
     /**
-     * Sender por endereço, criado uma vez por nome (o endereço da primeira chamada vale).
+     * Sender por endereço, criado uma vez por nome.
      *
      * @param provider {@code null}: o único provider
-     * @throws IllegalStateException endereço inválido
+     * @throws IllegalStateException endereço inválido, ou o nome já usado com outro endereço
      */
     public MessageSender sender(String name, String provider, Endpoint endpoint) {
-        return endpointSenders.computeIfAbsent(name,
-                n -> notFound(RECEIVERS + n, () -> newSender(n, resolveOrThrow(RECEIVERS + n, provider, endpoint, false))));
+        Resolved r = resolveOrThrow(RECEIVERS + name, provider, endpoint, false);
+        Resolved first = endpointAddresses.putIfAbsent(name, r);
+        if (first != null && !first.equals(r)) {
+            throw new IllegalStateException("Sender '" + name + "' já existe com outro endereço (" + first + ")");
+        }
+        return endpointSenders.computeIfAbsent(name, n -> notFound(RECEIVERS + n, () -> newSender(n, r)));
     }
 
     /** Endereço que o provedor não encontra (fila SQS por nome) é erro de configuração. */

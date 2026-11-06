@@ -116,9 +116,13 @@ final class ConsumerBuilder {
         AtomicBoolean probeUsed = new AtomicBoolean();
         Supplier<MessageReceiver> receivers = () -> probeUsed.compareAndSet(false, true)
                 ? probe : destinations.receiver(c.name(), c.provider(), c.endpoint(), deadLetter);
-        List<RetryQueue> queues = c.queues().stream()
-                .map(q -> new RetryQueue(q.delay(), destinations.sender(c.name() + ".retry." + q.delay().toSeconds() + "s",
-                        c.provider(), copy(q.destination())))).toList();
+        // by index: two bands may round to the same delay, and each needs its own sender
+        List<RetryQueue> queues = new ArrayList<>();
+        for (int i = 0; i < c.queues().size(); i++) {
+            InboxConfig.QueueBand q = c.queues().get(i);
+            queues.add(new RetryQueue(q.delay(),
+                    destinations.sender(c.name() + ".retry." + i, c.provider(), copy(q.destination()))));
+        }
         Destinations broker = new Destinations(receivers,
                 destinations.sender(c.name() + ".failed", c.provider(), copy(c.failed())), deadLetter, queues);
         return new InboxConsumer(settings, pipeline, broker, stop, clock, () -> ThreadLocalRandom.current().nextDouble(),

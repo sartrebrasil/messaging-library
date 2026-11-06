@@ -29,6 +29,10 @@ import java.util.Set;
  */
 public record MessagingProperties(Map<String, Provider> providers, Map<String, Sender> senders) {
 
+    /** Raízes de {@code messaging.*}, sem hífen (a forma de variável de ambiente chega assim). */
+    private static final Set<String> ROOTS = Set.of("providers", "senders", "receivers", "receiverdefaults",
+            "receiversenabled");
+
     public MessagingProperties {
         providers = providers == null ? Map.of() : Map.copyOf(providers);
         senders = senders == null ? Map.of() : Map.copyOf(senders);
@@ -50,6 +54,14 @@ public record MessagingProperties(Map<String, Provider> providers, Map<String, S
             throw new IllegalStateException("inbox.* was removed; use messaging.receivers, messaging.receiver-defaults "
                     + "and messaging.receivers-enabled (ADR-0008)");
         }
+        // the roots themselves are strict too: a typo like receivers-enable would otherwise fall back to the default
+        binder.bind("messaging", Bindable.mapOf(String.class, Object.class)).orElse(Map.of()).keySet().stream()
+                .filter(k -> !ROOTS.contains(k.replace("-", "").toLowerCase(java.util.Locale.ROOT)))
+                .findFirst().ifPresent(k -> {
+                    throw new IllegalStateException("messaging." + k + " é desconhecida; aceitas: messaging.providers, "
+                            + "messaging.senders, messaging.receivers, messaging.receiver-defaults e "
+                            + "messaging.receivers-enabled");
+                });
         BindHandler strict = new NoUnboundElementsBindHandler(BindHandler.DEFAULT);
         return new MessagingProperties(
                 binder.bind("messaging.providers", Bindable.mapOf(String.class, Provider.class), strict).orElse(null),
