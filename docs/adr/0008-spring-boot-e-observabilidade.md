@@ -126,3 +126,14 @@ dependências):
   cujo adapter está no classpath.
 - Tentamos o contrário (cada adapter com a sua fábrica, descoberta por `ServiceLoader`) e
   voltamos atrás: amarrava os adapters ao starter e ao Spring.
+
+## Revisão (2026-11-06): endereço em quem usa
+
+`messaging.destinations` foi removido. Senders ficam em `messaging.senders.<nome>` e receivers em
+`messaging.receivers.<nome>` (consumidos pela messaging-inbox), cada um com o próprio endereço:
+`provider` (opcional com um provider só), `destination`, `subscription` (receber de tópico),
+`kind: topic` (enviar a tópico) e `options` (`require`, `sessions`, `redelivery`, `lease`, ...).
+`MessagingDestinations` expõe `sender(nome)` para os senders configurados e `sender`/`receiver` por
+endereço para a inbox. No AWS, `destination` aceita o nome da fila, resolvido com `GetQueueUrl`.
+Cada raiz faz binding estrito, e chaves removidas derrubam o startup. Detalhes na ADR-0008 da
+messaging-inbox (revisão de 2026-11-06).

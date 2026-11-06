@@ -73,8 +73,8 @@ O mapeamento para o Resilience4j é direto: `tryAcquirePermission`,
 Os parâmetros são os do Resilience4j. A inbox não repete propriedades.
 
 ```yaml
-inbox:
-  consumers:
+messaging:
+  receivers:
     billing-orders:
       circuit-breaker:
         enabled: true

@@ -6,6 +6,7 @@
 - Revisão: 2026-10-07 (bloco `inbox.defaults`, vindo da acme-messaging)
 - Revisão: 2026-10-07 (DLQ e `failed` do Kafka por campo explícito; `on-exhausted`)
 - Revisão: 2026-11-05 (implementação no starter da messaging-library)
+- Revisão: 2026-11-06 (configuração unificada em `messaging.*`; substitui o Modelo, os brokers e `configuration`)
 
 ## Contexto
 
@@ -197,6 +198,67 @@ messaging-lib aceita como bean do usuário.
   startup lista todos os problemas.
 - `retry.delayed.max` não definido vira `min(15 min, maxRedeliveryDelay)` quando
   a estratégia pode ser `broker-delay`; um valor explícito acima do limite falha.
+
+## Revisão de 2026-11-06: configuração unificada em `messaging.*`
+
+Substitui o Modelo, "Defaults dos consumers" no que diz respeito a nomes de
+chave, "Brokers implícitos e múltiplos", "Precedência de `configuration`" e a
+tabela de `configuration`. Configurar um listener exigia três camadas de nome
+(`inbox.consumers` → `messaging.destinations` → `messaging.providers`) em dois
+prefixos; com Kafka fora (ADR-0001), `inbox.brokers` só guardava
+`configuration`.
+
+```yaml
+messaging:
+  providers:
+    aws: { type: aws, region: sa-east-1 }
+  receivers-enabled: ${RECEIVERS_ENABLED:true}   # false: a inbox não sobe
+  receiver-defaults:
+    concurrency: 4
+    poll-wait: 20s
+  receivers:
+    billing-orders:
+      enabled: true                  # false: validado, não inicia
+      provider: aws                  # opcional com um provider só (ou em receiver-defaults)
+      destination: https://sqs.sa-east-1.amazonaws.com/123/orders   # ou o nome da fila
+      dead-letter: orders-dlq
+      failed: orders-failed
+  senders:
+    orders-out:
+      destination: arn:aws:sns:sa-east-1:123:orders
+```
+
+- O endereço fica em quem usa: `destination` (+ `subscription` para receber de
+  tópico, `kind: topic` para enviar a tópico) e `options` (as opções do
+  provedor que antes eram campos do destino: `require`, `sessions`,
+  `redelivery`, `lease`, `ack-deadline`, `routing-key`...).
+  `messaging.destinations` deixou de existir.
+- `dead-letter`, `failed` e `retry.delayed.queues[].destination` são endereços
+  de fila no provider do receiver.
+- O que `destination` significa por provedor: AWS, URL da fila, ARN do SNS
+  (envio) ou nome da fila (resolvido com `GetQueueUrl` no startup); Azure,
+  ActiveMQ e RabbitMQ, fila, ou tópico com `subscription`/`kind: topic`; GCP,
+  a subscription (recebimento) ou o tópico (envio).
+- `inbox.brokers`, `broker` e `configuration` saíram. As quatro opções de
+  `configuration` viraram campos do receiver e de `receiver-defaults`
+  (`max-messages-per-poll`, `poll-wait`, `max-processing`,
+  `shutdown-timeout`). Valor inválido (`poll-wait: soon`) falha no binding do
+  Spring, não na lista agregada de problemas.
+- Não são aceitos em `receiver-defaults`: `destination`, `subscription`,
+  `dead-letter`, `failed`, `options`, `enabled`, `retry.delayed.queues`.
+- `messaging.receivers-enabled: false` desliga a autoconfiguração da inbox
+  inteira (como o antigo `inbox.enabled`). `enabled: false` num receiver o
+  valida no startup sem abrir conexão nem exigir handler.
+- Cada raiz (`providers`, `senders`, `receivers`, `receiver-defaults`) faz
+  binding estrito: chave desconhecida derruba o startup. Chaves antigas
+  (`messaging.destinations`, `inbox.*`) derrubam o startup dizendo a chave
+  nova.
+- Handler: `@MessageListener(receiver = "...")` substitui
+  `@InboxListener(consumer = ...)`; o bean funcional com o nome do receiver
+  continua valendo.
+- A tag `destination` das métricas é o nome do receiver (nunca a URL); as
+  cópias usam `<receiver>.dead-letter`, `<receiver>.failed` e
+  `<receiver>.retry.<segundos>s`.
 
 ## Alternativas descartadas
 

@@ -79,8 +79,8 @@ aggregates de vida curta.
 ### Configuração
 
 ```yaml
-inbox:
-  consumers:
+messaging:
+  receivers:
     billing-orders:
       stale-check:
         enabled: true

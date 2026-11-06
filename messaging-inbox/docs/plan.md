@@ -17,7 +17,7 @@ outbox-library.
 | Ordem | `strict`/`relaxed` por consumer, validado pelas `Capabilities` | [0005](adr/0005-ordenacao.md) |
 | Coordenadas | `com.example:inbox-*`, Java 21, Boot 4, Apache-2.0 | [0006](adr/0006-coordenadas-licenca-publicacao.md) |
 | Observabilidade | Micrometer Observation `inbox.consume`, métricas `inbox_*`, tracing OpenTelemetry | [0007](adr/0007-observabilidade.md) |
-| Configuração | `inbox.brokers` (`kafka`, `messaging`), `inbox.defaults` e `inbox.consumers`, validados no startup | [0008](adr/0008-configuracao-de-brokers-e-consumers.md) |
+| Configuração | `messaging.receivers`, `messaging.receiver-defaults` e `messaging.receivers-enabled`, com o endereço no receiver, validados no startup (revisão de 2026-11-06) | [0008](adr/0008-configuracao-de-brokers-e-consumers.md) |
 | Loop de polling | Um receiver e uma platform thread por worker, `keepAlive` por entrega, shutdown em quatro passos | [0009](adr/0009-loop-de-polling-sobre-message-receiver.md) |
 | Circuit breaker | Pausa o `receive` em vez de falhar mensagens; gancho `ConsumptionGate` no core, Resilience4j no módulo opcional `inbox-resilience4j` | [0010](adr/0010-circuit-breaker.md) |
 | Batch | `InboxBatchHandler` com `BatchResult` por mensagem, `bisect` opcional, `max-wait`; pipeline continua por mensagem | [0011](adr/0011-handler-em-batch.md) |
@@ -34,13 +34,13 @@ outbox-library.
 
 ```java
 // Modelo por anotação
-@InboxListener(consumer = "billing-orders")
+@MessageListener(receiver = "billing-orders")
 void on(OrderCreated event, InboxMessage message) { ... }
 
-@InboxListener(consumer = "billing-orders-batch", batch = true)
+@MessageListener(receiver = "billing-orders-batch", batch = true)
 BatchResult on(List<TypedMessage<OrderCreated>> messages) { ... }
 
-// Modelo funcional: o bean é ligado ao consumer pelo nome em inbox.consumers.<nome>
+// Modelo funcional: o bean é ligado ao consumer pelo nome em messaging.receivers.<nome>
 @Bean
 InboxHandler<OrderCreated> billingOrders() {
     return message -> billing.register(message.payload());
@@ -85,23 +85,17 @@ observation -> envelope -> expiração -> idempotência -> stale check -> retry 
 Configuração (exemplo):
 
 ```yaml
-messaging:                         # starter da messaging-lib (ADR-0008 dela)
+messaging:                         # starter da messaging-lib (ADR-0008)
   providers:
     aws: { type: aws, region: sa-east-1 }
-  destinations:
-    orders:        { provider: aws, queue-url: https://sqs.sa-east-1.amazonaws.com/123/orders }
-    orders-dlq:    { provider: aws, queue-url: https://sqs.sa-east-1.amazonaws.com/123/orders-dlq }
-    orders-failed: { provider: aws, queue-url: https://sqs.sa-east-1.amazonaws.com/123/orders-failed }
-
-inbox:
-  defaults:                        # comum a todos os consumers (ADR-0008)
+  receiver-defaults:               # comum a todos os receivers (ADR-0008)
     idempotency: { enabled: true, ttl: P7D }
-  consumers:
+  receivers:
     billing-orders:
-      broker: messaging            # implícito quando só ele existe (ADR-0008)
-      destination: orders
-      dead-letter: orders-dlq
-      failed: orders-failed
+      provider: aws                # opcional quando só ele existe (ADR-0008)
+      destination: https://sqs.sa-east-1.amazonaws.com/123/orders
+      dead-letter: https://sqs.sa-east-1.amazonaws.com/123/orders-dlq
+      failed: orders-failed        # nome da fila, resolvido no startup
       concurrency: 4
       ordering: relaxed
       envelope: auto
@@ -115,9 +109,8 @@ inbox:
       expiration: { enabled: false, max-age: 10m }
       circuit-breaker: { enabled: true, name: billing-api }
       batch: { enabled: false, max-size: 10 }
-      configuration:               # específico do broker (ADR-0008)
-        poll-wait: 20s
-        max-processing: 10m
+      poll-wait: 20s
+      max-processing: 10m
 ```
 
 ## Regras de semântica
@@ -180,7 +173,7 @@ da messaging-lib; F4 (`inbox-kafka`) sai do escopo; os módulos `inbox-*` viram
 |---|---|---|---|
 | F0 | Fundação do repo | Build verde no CI com módulos vazios; ADRs aceitos | Feita, exceto o CI: build local verde e ADRs aceitos em 2026-10-08; o CI roda no primeiro push (sem remoto ainda) |
 | F1 | Pré-requisitos nas libs irmãs | Itens de F1 abaixo com testes verdes | Pendente |
-| F2 | Core + testkit + starter | Pipeline completo (níveis 1 e 2, `failed`, classificação e `HandlerResult`, idempotência, envelope, `inbox.defaults`, anotação e funcional, métricas e tracing) passa no contrato com o broker em memória. Ponto de partida: o motor de retry da acme-messaging, portado | Pendente |
+| F2 | Core + testkit + starter | Pipeline completo (níveis 1 e 2, `failed`, classificação e `HandlerResult`, idempotência, envelope, `messaging.receiver-defaults`, anotação e funcional, métricas e tracing) passa no contrato com o broker em memória. Ponto de partida: o motor de retry da acme-messaging, portado | Pendente |
 | F3 | `inbox-messaging` | Contrato verde com os seis provedores da messaging-lib e as três estratégias do nível 2; valores padrão de DLQ nativa de cada broker conferidos | Pendente |
 | F4 | `inbox-kafka` | Contrato verde com Kafka; `strict` e `relaxed` testados | Pendente |
 | F5 | Nível 3, fingerprint e redrive | Passadas da DLQ e redrive (API e Actuator, filtro por fingerprint, limite de taxa) verdes no contrato dos dois adapters | Pendente |
@@ -275,7 +268,7 @@ storage-lib: sem mudanças até o claim-check (F8+).
   opcional `inbox-resilience4j`, core só com o gancho `ConsumptionGate`.
 - 2026-10-07: ADRs 0014 (resultado do handler e classificação), 0015
   (expiração por idade), 0016 (lanes por chave) e 0017 (fingerprint de erro)
-  propostos, com origem na acme-messaging. ADR-0008 ganha `inbox.defaults`;
+  propostos, com origem na acme-messaging. ADR-0008 ganha `messaging.receiver-defaults`;
   ADR-0011 troca o resultado por índice pelo resultado por mensagem, com
   `bisect` e `max-wait`; ADR-0012 ganha filtro por fingerprint, limite de taxa
   e `inbox_redrive`.
