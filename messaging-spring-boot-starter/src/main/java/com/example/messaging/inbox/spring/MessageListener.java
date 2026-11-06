@@ -7,7 +7,7 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Marks a bean method as the handler of {@code inbox.consumers.<consumer>}. Accepted shapes, with {@code T} the
+ * Marks a bean method as the handler of {@code messaging.receivers.<receiver>}. Accepted shapes, with {@code T} the
  * payload type (deserialized with Jackson; {@code String} and {@code byte[]} get it raw):
  *
  * <pre>{@code
@@ -20,8 +20,8 @@ import java.lang.annotation.Target;
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
-public @interface InboxListener {
+public @interface MessageListener {
 
-    /** Name in {@code inbox.consumers}. */
-    String consumer();
+    /** Name in {@code messaging.receivers}. */
+    String receiver();
 }

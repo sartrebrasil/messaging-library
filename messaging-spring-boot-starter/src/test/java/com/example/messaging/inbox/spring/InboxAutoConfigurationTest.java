@@ -91,7 +91,7 @@ class InboxAutoConfigurationTest {
                 .run(context -> assertThat(context).hasFailed().getFailure()
                         .hasMessageContaining("billing-orders has more than one handler")
                         .hasMessageContaining("lonely has no handler")
-                        .hasMessageContaining("consumer 'nobody' does not exist"));
+                        .hasMessageContaining("receiver 'nobody' does not exist in messaging.receivers"));
     }
 
     @Test
@@ -119,6 +119,23 @@ class InboxAutoConfigurationTest {
                 .withPropertyValues(C + "enabled=false", C + "destination=orders")
                 .run(context -> assertThat(context).hasFailed().getFailure()
                         .hasStackTraceContaining(C + "failed is required"));
+    }
+
+    @Test
+    void listenerOfDisabledReceiverIsAccepted() {
+        runner.withUserConfiguration(Listener.class).withPropertyValues(C + "enabled=false")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(Broker.REQUESTED).isEmpty();
+                });
+    }
+
+    @Test
+    void listenerOfUnknownReceiverFails() {
+        runner.withUserConfiguration(Functional.class, Stray.class)
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasMessageContaining("@MessageListener")
+                        .hasMessageContaining("receiver 'nobody' does not exist in messaging.receivers"));
     }
 
     @Test
@@ -304,7 +321,7 @@ class InboxAutoConfigurationTest {
     }
 
     static class Handlers {
-        @InboxListener(consumer = "billing-orders")
+        @MessageListener(receiver = "billing-orders")
         HandlerResult on(JsonNode order, InboxMessage message) {
             HANDLED.add(order.path("id").asString() + "/" + message.type());
             return HandlerResult.reject("not today");
@@ -320,7 +337,7 @@ class InboxAutoConfigurationTest {
     }
 
     static class TypedHandlers {
-        @InboxListener(consumer = "billing-orders")
+        @MessageListener(receiver = "billing-orders")
         void on(TypedMessage<Order> message) {
             HANDLED.add(message.payload().id());
         }
@@ -335,7 +352,7 @@ class InboxAutoConfigurationTest {
     }
 
     static class StrayHandlers {
-        @InboxListener(consumer = "nobody")
+        @MessageListener(receiver = "nobody")
         void on(String payload) {
         }
     }
