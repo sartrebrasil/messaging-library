@@ -99,9 +99,14 @@ final class JmsCodec {
                 deadLetter == null ? null : DeadLetterInfo.fromAttributeValue(deadLetter), handle);
     }
 
-    /** {@code JMS*}/{@code JMSX*} do JMS e {@code _AMQ*}/{@code __AMQ*} internas do Artemis (F8). */
+    /**
+     * {@code JMS*}/{@code JMSX*} do JMS, {@code _AMQ*}/{@code __AMQ*} internas do Artemis (F8) e as do agendador do
+     * Classic na cópia agendada ({@code scheduledJobId}, {@code AMQ_SCHEDULED_*}): no {@code nack} com atraso seguinte
+     * elas iriam para a cópia e quebrariam a validação dos atributos.
+     */
     private static boolean isBrokerProperty(String name) {
-        return name.startsWith("JMS") || name.startsWith("_AMQ") || name.startsWith("__AMQ");
+        return name.startsWith("JMS") || name.startsWith("_AMQ") || name.startsWith("__AMQ")
+                || name.startsWith("AMQ_SCHEDULED_") || name.equals("scheduledJobId");
     }
 
     /** {@code JMSXDeliveryCount} (1 na primeira entrega), somado às entregas de antes da cópia. */
