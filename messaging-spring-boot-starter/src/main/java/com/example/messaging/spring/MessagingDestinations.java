@@ -14,8 +14,10 @@ import org.springframework.beans.factory.ListableBeanFactory;
 import org.springframework.util.ClassUtils;
 
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
+import java.util.ServiceLoader;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -35,13 +37,6 @@ import java.util.function.Predicate;
  */
 public final class MessagingDestinations implements AutoCloseable {
 
-    private static final Map<Type, String> ADAPTERS = Map.of(
-            Type.AWS, "com.example.messaging.aws.SqsMessageSender",
-            Type.AZURE, "com.example.messaging.azure.ServiceBusMessageSender",
-            Type.GCP, "com.example.messaging.gcp.PubSubMessageSender",
-            Type.ACTIVEMQ_CLASSIC, "com.example.messaging.jms.JmsMessageSender",
-            Type.ARTEMIS, "com.example.messaging.jms.JmsMessageSender",
-            Type.RABBITMQ, "com.example.messaging.rabbitmq.RabbitMessageSender");
     private static final Map<Type, String> MODULES = Map.of(
             Type.AWS, "messaging-aws", Type.AZURE, "messaging-azure", Type.GCP, "messaging-gcp",
             Type.ACTIVEMQ_CLASSIC, "messaging-jms", Type.ARTEMIS, "messaging-jms", Type.RABBITMQ, "messaging-rabbitmq");
@@ -56,7 +51,8 @@ public final class MessagingDestinations implements AutoCloseable {
     private final MessagingProperties properties;
     private final MeterRegistry meters;
     private final ObservationRegistry observations;
-    private final Map<String, ProviderFactory> factories = new HashMap<>();
+    private final Map<Type, ProviderFactory> factories = new EnumMap<>(Type.class);
+    private final Map<String, ProviderConnection> connections = new HashMap<>();
     private final Map<String, MessageSender> senders = new HashMap<>();
     private final Map<String, MessageReceiver> healthReceivers = new HashMap<>();
     private final List<MessageReceiver> created = new CopyOnWriteArrayList<>();
@@ -72,7 +68,7 @@ public final class MessagingDestinations implements AutoCloseable {
             validateProviders(problems);
             properties.destinations().forEach((name, destination) -> validateShape(name, destination, problems));
             if (problems.isEmpty()) {
-                createFactories(beans);
+                connect(beans);
                 createSendersAndCheckRequirements(problems);
             }
         } catch (RuntimeException e) {
@@ -143,7 +139,7 @@ public final class MessagingDestinations implements AutoCloseable {
 
     private MessageReceiver newReceiver(String name, Destination destination) {
         MessageSender deadLetter = destination.deadLetter() == null ? null : senders.get(destination.deadLetter());
-        MessageReceiver receiver = factories.get(destination.provider()).receiver(name, destination, deadLetter);
+        MessageReceiver receiver = connections.get(destination.provider()).receiver(name, destination, deadLetter);
         if (receiver == null || meters == null) {
             return receiver;
         }
@@ -151,11 +147,12 @@ public final class MessagingDestinations implements AutoCloseable {
     }
 
     private void validateProviders(List<String> problems) {
+        factories.putAll(byType(ServiceLoader.load(ProviderFactory.class, getClass().getClassLoader()), problems));
         properties.providers().forEach((name, provider) -> {
             if (provider.type() == null) {
                 problems.add("messaging.providers." + name
                         + ".type é obrigatório (aws, azure, gcp, activemq-classic, artemis ou rabbitmq)");
-            } else if (!ClassUtils.isPresent(ADAPTERS.get(provider.type()), getClass().getClassLoader())) {
+            } else if (!factories.containsKey(provider.type())) {
                 problems.add("messaging.providers." + name + ": adicione a dependência " + MODULES.get(provider.type()));
             } else if (BROKER_CLIENTS.containsKey(provider.type())
                     && !ClassUtils.isPresent(BROKER_CLIENTS.get(provider.type())[0], getClass().getClassLoader())) {
@@ -165,16 +162,24 @@ public final class MessagingDestinations implements AutoCloseable {
         });
     }
 
-    private void createFactories(ListableBeanFactory beans) {
-        properties.providers().forEach((name, provider) -> {
-            factories.put(name, switch (provider.type()) {
-                case AWS -> new AwsProviderFactory(provider, beans);
-                case AZURE -> new AzureProviderFactory(name, provider, beans);
-                case GCP -> new GcpProviderFactory(name, provider);
-                case ACTIVEMQ_CLASSIC, ARTEMIS -> new JmsProviderFactory(name, provider, beans);
-                case RABBITMQ -> new RabbitProviderFactory(name, provider, beans);
-            });
-        });
+    /** Um adapter por tipo: dois jars atendendo o mesmo tipo é classpath quebrado. */
+    static Map<Type, ProviderFactory> byType(Iterable<ProviderFactory> available, List<String> problems) {
+        Map<Type, ProviderFactory> byType = new EnumMap<>(Type.class);
+        for (ProviderFactory factory : available) {
+            for (Type type : factory.types()) {
+                ProviderFactory other = byType.putIfAbsent(type, factory);
+                if (other != null) {
+                    problems.add("dois adapters atendem o tipo " + type + ": " + other.getClass().getName()
+                            + " e " + factory.getClass().getName());
+                }
+            }
+        }
+        return byType;
+    }
+
+    private void connect(ListableBeanFactory beans) {
+        properties.providers().forEach((name, provider) ->
+                connections.put(name, factories.get(provider.type()).connect(name, provider, beans)));
     }
 
     private void validateShape(String name, Destination d, List<String> problems) {
@@ -278,7 +283,7 @@ public final class MessagingDestinations implements AutoCloseable {
 
     private void createSendersAndCheckRequirements(List<String> problems) {
         properties.destinations().forEach((name, destination) -> {
-            MessageSender sender = factories.get(destination.provider()).sender(name, destination);
+            MessageSender sender = connections.get(destination.provider()).sender(name, destination);
             if (sender != null) {
                 senders.put(name, meters != null || observations != null
                         ? new ObservedMessageSender(sender, providerType(destination), name, meters, observations)
@@ -363,6 +368,6 @@ public final class MessagingDestinations implements AutoCloseable {
         created.forEach(MessageReceiver::close);
         healthReceivers.values().forEach(MessageReceiver::close);
         senders.values().forEach(MessageSender::close);
-        factories.values().forEach(ProviderFactory::close);
+        connections.values().forEach(ProviderConnection::close);
     }
 }
