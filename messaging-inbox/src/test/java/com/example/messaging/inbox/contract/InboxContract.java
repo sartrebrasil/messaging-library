@@ -131,8 +131,9 @@ public abstract class InboxContract {
         drain(newReceiver());
         drain(failedReceiver());
         drain(deadLetterReceiver());
-        if (retryQueueReceiver() != null) {
-            drain(retryQueueReceiver());
+        MessageReceiver band = retryQueueReceiver();
+        if (band != null) {
+            drain(band);
         }
     }
 
@@ -242,7 +243,12 @@ public abstract class InboxContract {
         });
         send("held");
 
+        await(() -> delivered.size() == 1);
+        // um receiver concorrente durante a espera: se o lease vencesse, ele pegaria a mensagem
+        assertNothingFor(newReceiver(), lease().multipliedBy(2));
         ReceivedMessage copy = copies(deadLetterReceiver(), 1).getFirst();
+        consumer.stop();
+        assertNothingFor(newReceiver(), lease().plus(receiveWait()));
         assertEquals(3, calls.get());
         assertEquals("l2=2;l3=0", copy.attributes().get("inbox_attempts"));
         assertEquals(1, delivered.size(), "o hold não devolve ao broker");
@@ -274,6 +280,9 @@ public abstract class InboxContract {
         });
         send("slow");
 
+        await(() -> !delivered.isEmpty());
+        // um receiver concorrente enquanto o handler trabalha: se o lease vencesse, ele pegaria a mensagem
+        assertNothingFor(newReceiver(), lease().multipliedBy(5).dividedBy(4));
         await(() -> calls.get() == 1);
         consumer.stop();
         assertNothingFor(newReceiver(), lease().plus(receiveWait()));
@@ -282,25 +291,35 @@ public abstract class InboxContract {
 
     @Test
     void stopReleasesUnstarted() {
-        List<String> handled = new CopyOnWriteArrayList<>();
+        List<String> started = new CopyOnWriteArrayList<>();
         send("a");
         send("b");
         send("c");
         start(DelayedStrategy.AUTO, immediatePolicy(), 3, m -> {
+            started.add(m.payload());
+            // abaixo do shutdown-timeout (5 s): o stop espera a que está em andamento e a confirma
             Thread.sleep(1000);
-            handled.add(m.payload());
             return HandlerResult.ack();
         });
-        await(() -> !delivered.isEmpty());
+        await(() -> !started.isEmpty());
+        // só prova a liberação se o poll trouxe mais de uma (Pub/Sub e Service Bus às vezes trazem uma por receive)
+        assumeTrue(delivered.size() >= 2, "o broker entregou uma mensagem por receive");
+
+        // receiver aberto antes do stop: o primeiro receive de um link novo (Service Bus) não come a janela abaixo
+        MessageReceiver probe = open(newReceiver());
+        assertTrue(ours(probe, probe.receive(10, receiveWait())).isEmpty(), "presas pelo consumer antes do stop");
 
         consumer.stop();
 
-        // as do poll que não começaram voltam já; as que nem foram recebidas continuam lá
-        Set<String> back = copies(newReceiver(), 3 - handled.size()).stream()
+        // depois do stop: enquanto ele espera a que está em andamento, o worker pode ainda ter começado outra
+        Set<String> unstarted = delivered.stream().map(ReceivedMessage::bodyAsString)
+                .filter(b -> !started.contains(b)).collect(Collectors.toSet());
+        // as não iniciadas voltam (não são confirmadas nem perdidas) e a iniciada não volta. O tempo não distingue
+        // liberação de lease vencido em todo broker: no JMS os dois fecham a session.
+        Set<String> back = copiesWithin(probe, unstarted.size(), settle()).stream()
                 .map(ReceivedMessage::bodyAsString).collect(Collectors.toSet());
-        Set<String> expected = new java.util.HashSet<>(Set.of("a", "b", "c"));
-        handled.forEach(expected::remove);
-        assertEquals(expected, back);
+        assertNothingFor(probe, lease().plus(receiveWait()));
+        assertEquals(unstarted, back);
     }
 
     @Test
@@ -375,9 +394,13 @@ public abstract class InboxContract {
 
     /** Espera {@code expected} mensagens desta execução no destino, confirma e devolve. */
     private List<ReceivedMessage> copies(MessageReceiver receiver, int expected) {
+        return copiesWithin(receiver, expected, settle());
+    }
+
+    private List<ReceivedMessage> copiesWithin(MessageReceiver receiver, int expected, Duration window) {
         MessageReceiver r = open(receiver);
         List<ReceivedMessage> found = new ArrayList<>();
-        long until = deadline(settle());
+        long until = deadline(window);
         while (found.size() < expected && System.nanoTime() < until) {
             List<ReceivedMessage> mine = ours(r, r.receive(10, receiveWait()));
             mine.forEach(r::ack);
@@ -412,15 +435,17 @@ public abstract class InboxContract {
         return mine;
     }
 
+    /** Fecha o receiver ao terminar: no JMS, um consumer ocioso com prefetch tomaria as mensagens dos testes. */
     private void drain(MessageReceiver receiver) {
-        MessageReceiver r = open(receiver);
-        long until = deadline(settle().dividedBy(3));
-        while (System.nanoTime() < until) {
-            List<ReceivedMessage> stale = r.receive(10, receiveWait());
-            if (stale.isEmpty()) {
-                return;
+        try (MessageReceiver r = receiver) {
+            long until = deadline(settle().dividedBy(3));
+            while (System.nanoTime() < until) {
+                List<ReceivedMessage> stale = r.receive(10, receiveWait());
+                if (stale.isEmpty()) {
+                    return;
+                }
+                stale.forEach(r::ack);
             }
-            stale.forEach(r::ack);
         }
     }
 

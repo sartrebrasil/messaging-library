@@ -425,7 +425,7 @@ configuração padrão de cada broker:
 |---|---|---|---|
 | SQS | nenhum: só com redrive policy (`maxReceiveCount`) | DLQ da redrive policy | `broker-delay` (visibility) |
 | Service Bus (fila e subscription) | 10 entregas (`MaxDeliveryCount`) | DLQ nativa da entidade | `broker-delay` por cópia (`RESCHEDULE`, só fila); `hold`/`retry-queues` na subscription |
-| Pub/Sub | nenhum: só com dead-letter policy | tópico de dead letter | `hold` ou `retry-queues` (veja abaixo) |
+| Pub/Sub | nenhum: só com dead-letter policy | tópico de dead letter | o `auto` escolhe `broker-delay`, que **não funciona sem dead-letter policy** (veja abaixo); configure `hold` ou `retry-queues` |
 | ActiveMQ Classic | nenhum com este adapter (30 `nack` sem sair) | — | `broker-delay` por cópia (`SCHEDULED`) |
 | Artemis | 10 entregas (`max-delivery-attempts`) | endereço `DLQ` | `broker-delay` por cópia (`SCHEDULED`) |
 | RabbitMQ 4 (quorum) | 21 entregas (`delivery-limit` 20 conta devoluções) | descartada, ou DLX se configurado | `hold` ou `retry-queues` |
