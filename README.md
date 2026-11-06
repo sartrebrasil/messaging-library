@@ -306,6 +306,12 @@ void on(Order order) { ... }
 Chave desconhecida em `providers`, `senders`, `receivers` ou `receiver-defaults` derruba o startup,
 assim como as chaves removidas `messaging.destinations` e `inbox.*` (ADR-0008 da messaging-inbox).
 
+No shutdown, cada receiver espera o `poll-wait` do `receive` em curso e até `shutdown-timeout` pelos handlers em
+andamento. Mantenha `spring.lifecycle.timeout-per-shutdown-phase` (padrão 30 s) acima de `shutdown-timeout +
+poll-wait`; senão o Spring segue o shutdown com workers ainda rodando, e as mensagens deles voltam ao broker só
+quando o lease vencer. Com os padrões (`shutdown-timeout` 30 s, `poll-wait` 20 s), suba a fase para pelo menos 50 s,
+ou baixe os dois, como o engine-tax (`poll-wait` 10 s, `shutdown-timeout` 15 s).
+
 No ActiveMQ, o starter abre uma conexão por provider no startup e a fecha no shutdown. A lib não
 recria a conexão: a reconexão vem da URL. Com `broker-url`, o `JmsDialect` cuida disso:
 - no Classic, embrulha a URL em `failover:(...)`, salvo `failover:` e `vm:`;
