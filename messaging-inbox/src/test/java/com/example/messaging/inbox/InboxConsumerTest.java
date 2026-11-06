@@ -376,6 +376,45 @@ class InboxConsumerTest {
         assertEquals(0, messaging.size(DLQ));
     }
 
+    /**
+     * O dono da reserva caiu: o hold não segura a mensagem além do orçamento do keepAlive; libera ao broker. Daí em
+     * diante as reentregas contam no nível 2, como no broker-delay (ADR-0004).
+     */
+    @Test
+    void holdWaitingForAnotherInstanceReleasesAfterTheLeaseBudget() {
+        var store = new com.example.idempotency.store.InMemoryIdempotencyStore();
+        var key = new com.example.idempotency.model.IdempotencyKeyId("m-1", "billing");
+        store.reserve(com.example.idempotency.model.IdempotencyRecord.inProgress(key, "other", null, Instant.now(),
+                Instant.now().plusSeconds(60)));
+        var receives = new AtomicInteger();
+        var stop = new StopSignal();
+        var pipeline = new Pipeline<String>("billing", new EnvelopeReader(EnvelopeMode.AUTO), (m, t) -> m.payloadAsString(),
+                String.class, m -> {
+                    handled.add(m);
+                    return null;
+                }, policy(5, Duration.ofMillis(20)), stop, () -> 0.0,
+                new com.example.messaging.inbox.InboxIdempotency(store, Duration.ofMinutes(1), Duration.ofDays(7),
+                        Clock.systemUTC()));
+        var shortBudget = new ConsumerSettings("billing", MAIN, 1, 1, Duration.ofMillis(100), Duration.ofMillis(300),
+                Duration.ofSeconds(5), Ordering.RELAXED, DelayedStrategy.HOLD, true);
+        var counting = new Destinations(() -> new Delegating(messaging.receiver(MAIN)) {
+            @Override
+            public List<ReceivedMessage> receive(int maxMessages, Duration maxWait) {
+                List<ReceivedMessage> received = super.receive(maxMessages, maxWait);
+                receives.addAndGet(received.size());
+                return received;
+            }
+        }, messaging.queueSender(FAILED), messaging.queueSender(DLQ), List.of());
+        var consumer = new InboxConsumer(shortBudget, pipeline, counting, stop, Clock.systemUTC(), () -> 0.0);
+        consumers.add(consumer);
+        consumer.start();
+        send("{\"messageId\":\"m-1\",\"eventType\":\"E\",\"payload\":\"hi\"}");
+
+        await(() -> receives.get() >= 2);
+        assertTrue(handled.isEmpty());
+        assertEquals(0, messaging.size(DLQ));
+    }
+
     @Test
     void startupRejectsAReservationTtlBelowMaxProcessing() {
         var idempotency = new com.example.messaging.inbox.InboxIdempotency(
