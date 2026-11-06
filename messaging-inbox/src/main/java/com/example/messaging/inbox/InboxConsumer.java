@@ -81,7 +81,8 @@ public final class InboxConsumer {
             firstReceiver.close();
             throw e;
         }
-        Duration hold = strategy == DelayedStrategy.HOLD
+        // broker-delay holds in memory too when a message has no delivery count (Worker.holdsInMemory)
+        Duration hold = strategy == DelayedStrategy.HOLD || strategy == DelayedStrategy.BROKER_DELAY
                 ? policy.delayed().totalBaseDelay(policy.delayed().maxAttempts()) : Duration.ZERO;
         this.leaseBudget = settings.maxProcessing().plus(hold);
         InboxIdempotency idempotency = pipeline.idempotency();
