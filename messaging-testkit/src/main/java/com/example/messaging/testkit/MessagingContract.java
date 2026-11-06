@@ -83,6 +83,11 @@ public abstract class MessagingContract {
         return null;
     }
 
+    /** {@code false} pula o teste da DLQ, para um emulador que não confirma o ack lido dela. */
+    protected boolean deadLetterQueueAckWorks() {
+        return true;
+    }
+
     /** Sender de um destino inexistente; {@code null} pula. */
     protected MessageSender newMissingDestinationSender() {
         return null;
@@ -361,6 +366,7 @@ public abstract class MessagingContract {
 
     @Test
     void deadLetterMovesMessageToDeadLetterQueue() {
+        assumeTrue(deadLetterQueueAckWorks(), "emulador não confirma o ack na DLQ");
         MessageReceiver receiver = receiver();
         MessageReceiver deadLetters = track(newDeadLetterReceiver());
         sender().send(own(OutgoingMessage.ofText("veneno").withAttribute("tenant", "acme")));
