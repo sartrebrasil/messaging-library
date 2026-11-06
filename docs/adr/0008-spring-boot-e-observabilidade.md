@@ -113,3 +113,21 @@ dependências):
 - A combinação Azure SDK + Netty 4.2 + Reactor 3.8 não é a base oficial do SDK
   avulso, só da trilha Spring. Se aparecer problema, a saída é fixar Netty e
   Reactor da Azure no módulo de teste e reportar.
+
+## Revisão (2026-11-06): um starter, provedores nos adapters
+
+- `messaging-inbox-spring-boot-starter` foi incorporado ao `messaging-spring-boot-starter`.
+  A autoconfiguração `inbox.*` liga com `messaging-inbox` e `jackson-databind` (Jackson 3) no
+  classpath; as duas dependências são `optional` no starter, e a aplicação que consome declara
+  as duas.
+- O starter não depende mais dos adapters. Cada adapter traz a sua `ProviderFactory`
+  (`com.example.messaging.<adapter>.spring`), registrada em
+  `META-INF/services/com.example.messaging.spring.ProviderFactory`, e depende do starter como
+  `optional`: sem Spring na aplicação, a classe nunca é carregada.
+- Toda fábrica do classpath é instanciada na validação, antes de qualquer conexão. Por isso a
+  fábrica só referencia tipos do core e do starter; o código que toca o SDK fica na
+  `ProviderConnection` que ela cria. Tipo sem adapter e dois adapters para o mesmo tipo fazem o
+  startup falhar.
+- Os testes do starter rodam sobre uma `ProviderFactory` em memória (testkit). Os testes que
+  dependem de um SDK ou broker real ficam no adapter, porque o starter não pode ter os
+  adapters nem como dependência de teste (ciclo no reactor).
