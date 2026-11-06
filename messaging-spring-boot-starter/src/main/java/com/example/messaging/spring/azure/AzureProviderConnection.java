@@ -1,4 +1,4 @@
-package com.example.messaging.azure.spring;
+package com.example.messaging.spring.azure;
 
 import com.azure.messaging.servicebus.ServiceBusClientBuilder;
 import com.example.messaging.MessageReceiver;
@@ -16,11 +16,11 @@ import org.springframework.beans.factory.ListableBeanFactory;
  * {@code ServiceBusClientBuilder} da aplicação. Os clientes são fechados pelos próprios
  * senders e receivers ({@code for*}).
  */
-final class AzureProviderConnection implements ProviderConnection {
+public final class AzureProviderConnection implements ProviderConnection {
 
     private final ServiceBusClientBuilder builder;
 
-    AzureProviderConnection(String providerName, MessagingProperties.Provider provider, ListableBeanFactory beans) {
+    public AzureProviderConnection(String providerName, MessagingProperties.Provider provider, ListableBeanFactory beans) {
         if (provider.connectionString() != null) {
             builder = new ServiceBusClientBuilder().connectionString(provider.connectionString());
         } else {

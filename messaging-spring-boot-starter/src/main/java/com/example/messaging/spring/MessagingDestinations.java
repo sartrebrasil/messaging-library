@@ -8,16 +8,19 @@ import com.example.messaging.spring.MessagingProperties.Provider;
 import com.example.messaging.spring.MessagingProperties.Redelivery;
 import com.example.messaging.spring.MessagingProperties.Requirement;
 import com.example.messaging.spring.MessagingProperties.Type;
+import com.example.messaging.spring.aws.AwsProviderConnection;
+import com.example.messaging.spring.azure.AzureProviderConnection;
+import com.example.messaging.spring.gcp.GcpProviderConnection;
+import com.example.messaging.spring.jms.JmsProviderConnection;
+import com.example.messaging.spring.rabbitmq.RabbitProviderConnection;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.observation.ObservationRegistry;
 import org.springframework.beans.factory.ListableBeanFactory;
 import org.springframework.util.ClassUtils;
 
 import java.util.ArrayList;
-import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
-import java.util.ServiceLoader;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -37,6 +40,14 @@ import java.util.function.Predicate;
  */
 public final class MessagingDestinations implements AutoCloseable {
 
+    /** Classe de cada adapter: o starter só cria a conexão de um tipo cujo adapter está no classpath. */
+    private static final Map<Type, String> ADAPTERS = Map.of(
+            Type.AWS, "com.example.messaging.aws.SqsMessageSender",
+            Type.AZURE, "com.example.messaging.azure.ServiceBusMessageSender",
+            Type.GCP, "com.example.messaging.gcp.PubSubMessageSender",
+            Type.ACTIVEMQ_CLASSIC, "com.example.messaging.jms.JmsMessageSender",
+            Type.ARTEMIS, "com.example.messaging.jms.JmsMessageSender",
+            Type.RABBITMQ, "com.example.messaging.rabbitmq.RabbitMessageSender");
     private static final Map<Type, String> MODULES = Map.of(
             Type.AWS, "messaging-aws", Type.AZURE, "messaging-azure", Type.GCP, "messaging-gcp",
             Type.ACTIVEMQ_CLASSIC, "messaging-jms", Type.ARTEMIS, "messaging-jms", Type.RABBITMQ, "messaging-rabbitmq");
@@ -51,7 +62,6 @@ public final class MessagingDestinations implements AutoCloseable {
     private final MessagingProperties properties;
     private final MeterRegistry meters;
     private final ObservationRegistry observations;
-    private final Map<Type, ProviderFactory> factories = new EnumMap<>(Type.class);
     private final Map<String, ProviderConnection> connections = new HashMap<>();
     private final Map<String, MessageSender> senders = new HashMap<>();
     private final Map<String, MessageReceiver> healthReceivers = new HashMap<>();
@@ -147,12 +157,11 @@ public final class MessagingDestinations implements AutoCloseable {
     }
 
     private void validateProviders(List<String> problems) {
-        factories.putAll(byType(ServiceLoader.load(ProviderFactory.class, getClass().getClassLoader()), problems));
         properties.providers().forEach((name, provider) -> {
             if (provider.type() == null) {
                 problems.add("messaging.providers." + name
                         + ".type é obrigatório (aws, azure, gcp, activemq-classic, artemis ou rabbitmq)");
-            } else if (!factories.containsKey(provider.type())) {
+            } else if (!ClassUtils.isPresent(ADAPTERS.get(provider.type()), getClass().getClassLoader())) {
                 problems.add("messaging.providers." + name + ": adicione a dependência " + MODULES.get(provider.type()));
             } else if (BROKER_CLIENTS.containsKey(provider.type())
                     && !ClassUtils.isPresent(BROKER_CLIENTS.get(provider.type())[0], getClass().getClassLoader())) {
@@ -162,24 +171,15 @@ public final class MessagingDestinations implements AutoCloseable {
         });
     }
 
-    /** Um adapter por tipo: dois jars atendendo o mesmo tipo é classpath quebrado. */
-    static Map<Type, ProviderFactory> byType(Iterable<ProviderFactory> available, List<String> problems) {
-        Map<Type, ProviderFactory> byType = new EnumMap<>(Type.class);
-        for (ProviderFactory factory : available) {
-            for (Type type : factory.types()) {
-                ProviderFactory other = byType.putIfAbsent(type, factory);
-                if (other != null) {
-                    problems.add("dois adapters atendem o tipo " + type + ": " + other.getClass().getName()
-                            + " e " + factory.getClass().getName());
-                }
-            }
-        }
-        return byType;
-    }
-
     private void connect(ListableBeanFactory beans) {
-        properties.providers().forEach((name, provider) ->
-                connections.put(name, factories.get(provider.type()).connect(name, provider, beans)));
+        // as classes de cada provedor só são carregadas aqui, depois da checagem do adapter em validateProviders
+        properties.providers().forEach((name, provider) -> connections.put(name, switch (provider.type()) {
+            case AWS -> new AwsProviderConnection(provider, beans);
+            case AZURE -> new AzureProviderConnection(name, provider, beans);
+            case GCP -> new GcpProviderConnection(name, provider);
+            case ACTIVEMQ_CLASSIC, ARTEMIS -> new JmsProviderConnection(name, provider, beans);
+            case RABBITMQ -> new RabbitProviderConnection(name, provider, beans);
+        }));
     }
 
     private void validateShape(String name, Destination d, List<String> problems) {

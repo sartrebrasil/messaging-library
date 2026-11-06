@@ -1,4 +1,4 @@
-package com.example.messaging.jms.spring;
+package com.example.messaging.spring.jms;
 
 import com.example.messaging.MessageReceiver;
 import com.example.messaging.OutgoingMessage;

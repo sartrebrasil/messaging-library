@@ -1,7 +1,6 @@
-package com.example.messaging.aws.spring;
+package com.example.messaging.inbox.spring;
 
 import com.example.messaging.inbox.InboxHandler;
-import com.example.messaging.inbox.spring.InboxAutoConfiguration;
 import com.example.messaging.spring.MessagingAutoConfiguration;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -29,10 +28,9 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.function.BooleanSupplier;
 
+import static com.example.messaging.inbox.spring.InboxAutoConfigurationTest.await;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.fail;
 
 /** The starter over the real messaging-lib path: MessagingDestinations, the SQS adapter and LocalStack (as engine-tax). */
 @Testcontainers(disabledWithoutDocker = true)
@@ -112,20 +110,6 @@ class SqsLocalStackTest {
         @Bean
         InboxHandler<JsonNode> orders() {
             return message -> HANDLED.add(message.payload());
-        }
-    }
-
-    private static void await(BooleanSupplier condition) {
-        long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
-        while (!condition.getAsBoolean()) {
-            if (System.nanoTime() > deadline) {
-                fail("condition not met in 10 s");
-            }
-            try {
-                Thread.sleep(10);
-            } catch (InterruptedException e) {
-                throw new IllegalStateException(e);
-            }
         }
     }
 }

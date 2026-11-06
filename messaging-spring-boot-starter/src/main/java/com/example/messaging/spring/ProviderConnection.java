@@ -4,8 +4,9 @@ import com.example.messaging.MessageReceiver;
 import com.example.messaging.MessageSender;
 
 /**
- * Os clientes nativos de um provider configurado, criados por {@link ProviderFactory#connect}
- * (ou os beans da aplicação), e os senders e receivers sobre eles.
+ * Os clientes nativos de um provider configurado (criados pelo starter ou beans da aplicação) e os
+ * senders e receivers sobre eles. Uma implementação por tipo, em {@code com.example.messaging.spring.<provedor>},
+ * criada só quando o adapter está no classpath.
  */
 public interface ProviderConnection extends AutoCloseable {
 
