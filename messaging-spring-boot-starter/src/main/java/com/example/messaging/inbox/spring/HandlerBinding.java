@@ -40,14 +40,18 @@ final class HandlerBinding {
     private HandlerBinding() {
     }
 
-    /** @throws IllegalStateException listing every problem */
-    static Map<String, Bound> bind(Set<String> consumers, ConfigurableListableBeanFactory beans) {
+    /**
+     * @param known    every receiver in messaging.receivers: a handler may name any of them
+     * @param required the enabled receivers: each needs exactly one handler
+     * @throws IllegalStateException listing every problem
+     */
+    static Map<String, Bound> bind(Set<String> known, Set<String> required, ConfigurableListableBeanFactory beans) {
         List<String> problems = new ArrayList<>();
         Map<String, List<Bound>> found = new HashMap<>();
-        functional(consumers, beans, found, problems);
-        annotated(consumers, beans, found, problems);
+        functional(known, beans, found, problems);
+        annotated(known, beans, found, problems);
         Map<String, Bound> bound = new HashMap<>();
-        for (String consumer : consumers) {
+        for (String consumer : required) {
             List<Bound> candidates = found.getOrDefault(consumer, List.of());
             if (candidates.isEmpty()) {
                 String names = camel(consumer).equals(consumer) ? "'" + consumer + "'"

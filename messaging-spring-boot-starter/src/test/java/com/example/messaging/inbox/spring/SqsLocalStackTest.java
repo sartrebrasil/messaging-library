@@ -72,15 +72,12 @@ class SqsLocalStackTest {
                         InboxAutoConfiguration.class))
                 .withUserConfiguration(Handler.class)
                 .withPropertyValues("messaging.providers.aws.type=aws", "messaging.providers.aws.region=us-east-1",
-                        "messaging.destinations.orders.provider=aws", "messaging.destinations.orders.queue-url=" + main,
-                        "messaging.destinations.orders-dlq.provider=aws", "messaging.destinations.orders-dlq.queue-url=" + dlq,
-                        "messaging.destinations.orders-failed.provider=aws",
-                        "messaging.destinations.orders-failed.queue-url=" + failed,
-                        "inbox.consumers.orders.destination=orders", "inbox.consumers.orders.dead-letter=orders-dlq",
-                        "inbox.consumers.orders.failed=orders-failed", "inbox.consumers.orders.key-lanes=4",
-                        "inbox.consumers.orders.configuration.max-messages-per-poll=10",
-                        "inbox.consumers.orders.configuration.poll-wait=1s",
-                        "inbox.consumers.orders.configuration.shutdown-timeout=5s")
+                        "messaging.receivers.orders.destination=" + main,
+                        "messaging.receivers.orders.dead-letter=orders-dlq",
+                        "messaging.receivers.orders.failed=" + failed, "messaging.receivers.orders.key-lanes=4",
+                        "messaging.receivers.orders.max-messages-per-poll=10",
+                        "messaging.receivers.orders.poll-wait=1s",
+                        "messaging.receivers.orders.shutdown-timeout=5s")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     String id = sqs.sendMessage(b -> b.queueUrl(main).messageBody("not json")).messageId();
@@ -99,6 +96,19 @@ class SqsLocalStackTest {
                     assertThat(copies.getFirst().messageAttributes().toString())
                             .contains("inbox_failure", "exception=tools.jackson.core.exc.StreamReadException", "inbox_attempts", "dead_letter", id);
                 });
+    }
+
+    @Test
+    void unknownQueueNameFailsAtStartup() {
+        new ApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(JacksonAutoConfiguration.class, MessagingAutoConfiguration.class,
+                        InboxAutoConfiguration.class))
+                .withUserConfiguration(Handler.class)
+                .withPropertyValues("messaging.providers.aws.type=aws", "messaging.providers.aws.region=us-east-1",
+                        "messaging.receivers.orders.destination=nao-existe",
+                        "messaging.receivers.orders.failed=" + failed)
+                .run(context -> assertThat(context).hasFailed().getFailure().hasStackTraceContaining(
+                        "messaging.receivers.orders.destination: fila SQS 'nao-existe' não existe"));
     }
 
     @Test
@@ -143,7 +153,8 @@ class SqsLocalStackTest {
 
     @Configuration(proxyBeanMethods = false)
     static class Handler {
-        @Bean
+        /** Shared by every test of the class: the context must not close it. */
+        @Bean(destroyMethod = "")
         SqsClient sqsClient() {
             return sqs;
         }

@@ -42,7 +42,7 @@ class ObservabilityTest {
             .withConfiguration(AutoConfigurations.of(InboxAutoConfiguration.class))
             .withUserConfiguration(InboxAutoConfigurationTest.Broker.class, Telemetry.class)
             .withPropertyValues(C + "destination=orders", C + "failed=orders-failed", C + "dead-letter=orders-dlq",
-                    C + "configuration.poll-wait=100ms", C + "configuration.shutdown-timeout=2s");
+                    C + "poll-wait=100ms", C + "shutdown-timeout=2s");
 
     @Test
     void metricsAreExportedWithTheInboxNames() {
@@ -55,10 +55,10 @@ class ObservabilityTest {
 
             String scrape = registry.scrape();
             assertThat(scrape)
-                    .contains("inbox_messages_received_total{consumer=\"billing-orders\",destination=\"orders\"} 1.0")
-                    .contains("inbox_messages_processed_total{consumer=\"billing-orders\",destination=\"orders\",outcome=\"failed\"} 1.0")
-                    .contains("inbox_failed_total{consumer=\"billing-orders\",destination=\"orders\",exception=\"none\",reason=\"rejected\"} 1.0")
-                    .contains("inbox_processing_duration_seconds_count{consumer=\"billing-orders\",destination=\"orders\",outcome=\"failed\"} 1")
+                    .contains("inbox_messages_received_total{consumer=\"billing-orders\",destination=\"billing-orders\"} 1.0")
+                    .contains("inbox_messages_processed_total{consumer=\"billing-orders\",destination=\"billing-orders\",outcome=\"failed\"} 1.0")
+                    .contains("inbox_failed_total{consumer=\"billing-orders\",destination=\"billing-orders\",exception=\"none\",reason=\"rejected\"} 1.0")
+                    .contains("inbox_processing_duration_seconds_count{consumer=\"billing-orders\",destination=\"billing-orders\",outcome=\"failed\"} 1")
                     .contains("inbox_last_receive_age_seconds{consumer=\"billing-orders\"}")
                     .doesNotContain("_total_total");
         });

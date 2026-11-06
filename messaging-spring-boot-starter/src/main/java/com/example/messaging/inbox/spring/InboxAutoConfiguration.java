@@ -6,7 +6,7 @@ import com.example.messaging.inbox.ConsumerObserver;
 import com.example.messaging.inbox.PayloadDeserializer;
 import com.example.messaging.spring.MessagingAutoConfiguration;
 import com.example.messaging.spring.MessagingDestinations;
-import com.example.messaging.spring.MessagingProperties;
+import com.example.messaging.spring.MessagingProperties.Endpoint;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -22,6 +22,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Clock;
+import java.util.List;
 import java.util.function.Function;
 
 /**
@@ -54,13 +55,18 @@ public class InboxAutoConfiguration {
     InboxDestinations inboxDestinations(MessagingDestinations destinations) {
         return new InboxDestinations() {
             @Override
-            public MessageReceiver receiver(String name) {
-                return destinations.receiver(name, null, new MessagingProperties.Endpoint(name, null, null, null), null);
+            public MessageReceiver receiver(String name, String provider, Endpoint endpoint, MessageSender deadLetter) {
+                return destinations.receiver(name, provider, endpoint, deadLetter);
             }
 
             @Override
-            public MessageSender sender(String name) {
-                return destinations.sender(name, null, new MessagingProperties.Endpoint(name, null, null, null));
+            public MessageSender sender(String name, String provider, Endpoint endpoint) {
+                return destinations.sender(name, provider, endpoint);
+            }
+
+            @Override
+            public List<String> validate(String key, String provider, Endpoint endpoint, boolean receive) {
+                return destinations.validate(key, provider, endpoint, receive);
             }
         };
     }
@@ -88,13 +94,18 @@ public class InboxAutoConfiguration {
     private static InboxDestinations lazy(ObjectProvider<InboxDestinations> provider) {
         return new InboxDestinations() {
             @Override
-            public MessageReceiver receiver(String name) {
-                return required().receiver(name);
+            public MessageReceiver receiver(String name, String provider, Endpoint endpoint, MessageSender deadLetter) {
+                return required().receiver(name, provider, endpoint, deadLetter);
             }
 
             @Override
-            public MessageSender sender(String name) {
-                return required().sender(name);
+            public MessageSender sender(String name, String provider, Endpoint endpoint) {
+                return required().sender(name, provider, endpoint);
+            }
+
+            @Override
+            public List<String> validate(String key, String provider, Endpoint endpoint, boolean receive) {
+                return required().validate(key, provider, endpoint, receive);
             }
 
             private InboxDestinations required() {

@@ -10,6 +10,9 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.Set;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -41,10 +44,21 @@ public final class InboxLifecycle implements SmartLifecycle, SmartInitializingSi
 
     @Override
     public void afterSingletonsInstantiated() {
-        configs = InboxConfig.resolve(properties, beans.getBeanClassLoader());
-        handlers = HandlerBinding.bind(configs.stream().map(InboxConfig.Consumer::name)
-                .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new)), beans);
+        List<InboxConfig.Consumer> all = InboxConfig.resolve(properties, beans.getBeanClassLoader());
+        // disabled receivers are validated too: a bad address fails now, not when someone turns it on
+        List<String> problems = all.stream().flatMap(c -> builder.validate(c).stream()).toList();
+        if (!problems.isEmpty()) {
+            throw new IllegalStateException("Invalid messaging.receivers configuration:\n - "
+                    + String.join("\n - ", problems));
+        }
+        configs = all.stream().filter(InboxConfig.Consumer::enabled).toList();
+        handlers = HandlerBinding.bind(names(all), names(configs), beans);
         configs.forEach(c -> current.put(c.name(), new AtomicReference<>()));
+    }
+
+    private static Set<String> names(List<InboxConfig.Consumer> consumers) {
+        return consumers.stream().map(InboxConfig.Consumer::name)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
     @Override
