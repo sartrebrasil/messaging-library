@@ -162,6 +162,28 @@ existe em quorum queue; em classic queue, fica vazio a partir da segunda entrega
 usa `mandatory`, então fila inexistente lança `DestinationNotFoundException`. O sender de exchange
 não usa `mandatory`: exchange sem fila ligada descarta, como um tópico sem subscriptions.
 
+## DLQ nativa e o orçamento da inbox
+
+A inbox decide a cópia para `failed` ou DLQ comum depois de um número de entregas que depende da estratégia do
+nível 2 (padrões: nível 1 com 3 tentativas, nível 2 com 5): `broker-delay` usa 6 entregas no broker (mais as de lease
+vencido ou `stop`), `hold` e `retry-queues` usam 1 no original. Se a DLQ nativa do broker agir antes, a mensagem sai
+sem a cópia com `inbox_failure`. Valores medidos pelo `InboxContract` (F3) com a configuração padrão de cada broker:
+
+| Broker | Limite nativo padrão (medido pelo contrato da inbox) | Depois do limite | Atraso do nível 2 |
+|---|---|---|---|
+| SQS | nenhum: só com redrive policy (`maxReceiveCount`) | DLQ da redrive policy | `broker-delay` (visibility) |
+| Service Bus (fila e subscription) | 10 entregas (`MaxDeliveryCount`) | DLQ nativa da entidade | `broker-delay` por cópia (`RESCHEDULE`, só fila); `hold`/`retry-queues` na subscription |
+| Pub/Sub | nenhum: só com dead-letter policy | tópico de dead letter | `hold` ou `retry-queues` (veja abaixo) |
+| ActiveMQ Classic | nenhum com este adapter (30 `nack` sem sair) | — | `broker-delay` por cópia (`SCHEDULED`) |
+| Artemis | 10 entregas (`max-delivery-attempts`) | endereço `DLQ` | `broker-delay` por cópia (`SCHEDULED`) |
+| RabbitMQ 4 (quorum) | 21 entregas (`delivery-limit` 20 conta devoluções) | descartada, ou DLX se configurado | `hold` ou `retry-queues` |
+
+- Com `broker-delay` sem cópia (atraso no próprio `nack`, como no SQS), o limite nativo precisa ficar acima de 6;
+  no SQS isso é o `maxReceiveCount` da redrive policy.
+- No Pub/Sub sem dead-letter policy o `deliveryAttempt` não vem, e o `broker-delay` não consegue contar o nível 2: a
+  mensagem vai à DLQ comum na primeira falha. Lá, configure `retry.delayed.strategy: hold` ou `retry-queues`, ou a
+  dead-letter policy na subscription.
+
 ## Mensagem
 
 | Regra | Valor |

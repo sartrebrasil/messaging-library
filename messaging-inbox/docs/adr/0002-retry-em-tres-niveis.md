@@ -416,6 +416,28 @@ messaging:
         include-exception-message: true
 ```
 
+## Revisão de 2026-11-06: DLQ nativa medida (F3)
+
+O `InboxContract` (test-jar da `messaging-inbox`, uma subclasse por broker) mediu o limite nativo de entregas com a
+configuração padrão de cada broker:
+
+| Broker | Limite nativo padrão (medido pelo contrato da inbox) | Depois do limite | Atraso do nível 2 |
+|---|---|---|---|
+| SQS | nenhum: só com redrive policy (`maxReceiveCount`) | DLQ da redrive policy | `broker-delay` (visibility) |
+| Service Bus (fila e subscription) | 10 entregas (`MaxDeliveryCount`) | DLQ nativa da entidade | `broker-delay` por cópia (`RESCHEDULE`, só fila); `hold`/`retry-queues` na subscription |
+| Pub/Sub | nenhum: só com dead-letter policy | tópico de dead letter | `hold` ou `retry-queues` (veja abaixo) |
+| ActiveMQ Classic | nenhum com este adapter (30 `nack` sem sair) | — | `broker-delay` por cópia (`SCHEDULED`) |
+| Artemis | 10 entregas (`max-delivery-attempts`) | endereço `DLQ` | `broker-delay` por cópia (`SCHEDULED`) |
+| RabbitMQ 4 (quorum) | 21 entregas (`delivery-limit` 20 conta devoluções) | descartada, ou DLX se configurado | `hold` ou `retry-queues` |
+
+- Regra: com `broker-delay` sem cópia, o limite nativo precisa ser maior que 6 (1 + 5 do nível 2). Por cópia
+  (`RESCHEDULE`, `SCHEDULED`) a contagem nativa recomeça a cada cópia.
+- Lacuna aberta: no Pub/Sub sem dead-letter policy o `deliveryCount` vem vazio e o `broker-delay` (que o `auto`
+  escolhe ali, porque o receiver tem `delayedRedelivery`) manda à DLQ na primeira falha do nível 2.
+- Corrigido junto: no ActiveMQ Classic, a cópia agendada trazia `scheduledJobId` e `AMQ_SCHEDULED_*` como atributos,
+  e o segundo `nack` com atraso falhava na validação dos atributos; o `JmsCodec` passou a tratá-las como
+  propriedades do broker.
+
 ## Alternativas descartadas
 
 - `RetryTemplate` do Spring Framework 7: o core não depende de Spring, e a
