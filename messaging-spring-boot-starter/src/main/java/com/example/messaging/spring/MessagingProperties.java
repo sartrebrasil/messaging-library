@@ -1,6 +1,9 @@
 package com.example.messaging.spring;
 
-import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.BindHandler;
+import org.springframework.boot.context.properties.bind.Bindable;
+import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.context.properties.bind.handler.NoUnboundElementsBindHandler;
 
 import java.net.URI;
 import java.time.Duration;
@@ -8,26 +11,44 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * {@code messaging.providers.<nome>} e {@code messaging.destinations.<nome>} (ADR-0008).
+ * {@code messaging.providers.<nome>} e {@code messaging.senders.<nome>} (ADR-0008). Os receivers
+ * ({@code messaging.receivers}) são da inbox; o endereço deles usa {@link Endpoint} e {@link Options} daqui.
  *
  * <pre>{@code
  * messaging:
  *   providers:
  *     aws: { type: aws, region: sa-east-1 }
- *   destinations:
+ *   senders:
  *     pedidos:
- *       provider: aws
- *       queue-url: https://sqs.sa-east-1.amazonaws.com/123/pedidos.fifo
- *       dead-letter: pedidos-dlq
- *       require: [ordered-delivery]
+ *       provider: aws            # opcional com um provider só
+ *       destination: https://sqs.sa-east-1.amazonaws.com/123/pedidos.fifo
+ *       options: { require: [ordered-delivery] }
  * }</pre>
+ *
+ * Chave desconhecida derruba o startup.
  */
-@ConfigurationProperties("messaging")
-public record MessagingProperties(Map<String, Provider> providers, Map<String, Destination> destinations) {
+public record MessagingProperties(Map<String, Provider> providers, Map<String, Sender> senders) {
 
     public MessagingProperties {
         providers = providers == null ? Map.of() : Map.copyOf(providers);
-        destinations = destinations == null ? Map.of() : Map.copyOf(destinations);
+        senders = senders == null ? Map.of() : Map.copyOf(senders);
+    }
+
+    /**
+     * Liga {@code messaging.providers} e {@code messaging.senders}, cada raiz em modo estrito. As outras chaves de
+     * {@code messaging.*} (receivers) não são deste binding.
+     *
+     * @throws IllegalStateException com {@code messaging.destinations}, removido
+     */
+    public static MessagingProperties bind(Binder binder) {
+        if (binder.bind("messaging.destinations", Bindable.mapOf(String.class, Object.class)).isBound()) {
+            throw new IllegalStateException("messaging.destinations foi removido; use messaging.senders e "
+                    + "messaging.receivers, com o endereço em destination (ADR-0008)");
+        }
+        BindHandler strict = new NoUnboundElementsBindHandler(BindHandler.DEFAULT);
+        return new MessagingProperties(
+                binder.bind("messaging.providers", Bindable.mapOf(String.class, Provider.class), strict).orElse(null),
+                binder.bind("messaging.senders", Bindable.mapOf(String.class, Sender.class), strict).orElse(null));
     }
 
     /** {@code activemq-classic}, {@code artemis} e {@code rabbitmq} no YAML. */
@@ -56,7 +77,7 @@ public record MessagingProperties(Map<String, Provider> providers, Map<String, D
                            String user, String password) {
     }
 
-    /** Capacidades que um destino pode exigir no startup ({@code require}). */
+    /** Capacidades que um destino pode exigir no startup ({@code options.require}). */
     public enum Requirement {
         ORDERED_DELIVERY, DELAYED_REDELIVERY, NATIVE_DEAD_LETTER, PUBLISHER_DEDUPLICATION, LEASE_EXPIRED_ON_ACK
     }
@@ -67,23 +88,12 @@ public record MessagingProperties(Map<String, Provider> providers, Map<String, D
      */
     public enum Redelivery { ABANDON, RESCHEDULE }
 
+    /** Envio para fila ({@code QUEUE}, padrão) ou tópico. No AWS, o ARN do SNS já diz que é tópico; no GCP, sempre tópico. */
+    public enum Kind { QUEUE, TOPIC }
+
     /**
-     * Um destino. O endereço de envio e o de recebimento dependem do tipo do provedor:
+     * Opções do provedor de um endereço; todas opcionais, e cada uma só vale para alguns tipos.
      *
-     * <table>
-     *   <tr><th>Tipo</th><th>Envio</th><th>Recebimento</th></tr>
-     *   <tr><td>aws</td><td>{@code topic-arn}, senão {@code queue-url}</td><td>{@code queue-url}</td></tr>
-     *   <tr><td>azure</td><td>{@code topic}, senão {@code queue}</td><td>{@code topic} + {@code subscription}, senão {@code queue}</td></tr>
-     *   <tr><td>gcp</td><td>{@code topic}</td><td>{@code subscription}</td></tr>
-     *   <tr><td>activemq-classic</td><td>{@code topic} ({@code VirtualTopic.*}), senão {@code queue}</td>
-     *       <td>{@code topic} + {@code subscription} (fila {@code Consumer.<subscription>.<topic>}), senão {@code queue}</td></tr>
-     *   <tr><td>artemis</td><td>{@code topic} (endereço multicast), senão {@code queue}</td>
-     *       <td>{@code topic} + {@code subscription} (FQQN {@code <topic>::<subscription>}), senão {@code queue}</td></tr>
-     *   <tr><td>rabbitmq</td><td>{@code topic} (exchange, com {@code routing-key}), senão {@code queue}</td>
-     *       <td>{@code topic} + {@code subscription} (a fila ligada ao exchange), senão {@code queue}</td></tr>
-     * </table>
-     *
-     * @param deadLetter      destino que recebe a cópia de {@code deadLetter} (todos menos o Service Bus, que é nativo)
      * @param require         capacidades exigidas; o startup falha se o adapter não tiver
      * @param sessions        Azure: entidade com sessions
      * @param redelivery      Azure e ActiveMQ: {@code nack} imediato ({@code ABANDON}, padrão) ou por cópia
@@ -97,16 +107,68 @@ public record MessagingProperties(Map<String, Provider> providers, Map<String, D
      * @param deadLetterQueue Azure: só recebe, da DLQ nativa da fila ou da subscription
      * @param lease           ActiveMQ e RabbitMQ: prazo controlado pela lib até a mensagem voltar ao broker
      *                        (padrão 60 s)
-     * @param routingKey      RabbitMQ: routing key do envio ao exchange ({@code topic}); padrão {@code ""}
+     * @param routingKey      RabbitMQ: routing key do envio ao exchange ({@code kind: topic}); padrão {@code ""}
      * @param routingByOrderingKey RabbitMQ: routing key de cada envio ao exchange é o {@code orderingKey};
      *                        não combina com {@code routingKey}
      * @param confirmTimeout  RabbitMQ: espera máxima do publisher confirm (padrão 30 s)
      */
-    public record Destination(String provider, String queueUrl, String topicArn, String queue, String topic,
-                              String subscription, String deadLetter, Set<Requirement> require, boolean sessions,
-                              Redelivery redelivery, Long maxMessageBytes, Duration ackDeadline, boolean ordered,
-                              boolean exactlyOnce, boolean deadLetterQueue, Duration lease, String routingKey,
-                              boolean routingByOrderingKey, Duration confirmTimeout) {
+    public record Options(Set<Requirement> require, Boolean sessions, Redelivery redelivery, Long maxMessageBytes,
+                          Duration ackDeadline, Boolean ordered, Boolean exactlyOnce, Boolean deadLetterQueue,
+                          Duration lease, String routingKey, Boolean routingByOrderingKey, Duration confirmTimeout) {
+
+        public static final Options NONE = new Options(null, null, null, null, null, null, null, null, null, null,
+                null, null);
+
+        public Options {
+            require = require == null ? Set.of() : Set.copyOf(require);
+        }
+    }
+
+    /**
+     * Um endereço no provedor. O que {@code destination} significa depende do tipo (ADR-0008):
+     *
+     * <table>
+     *   <tr><th>Tipo</th><th>Receber</th><th>Enviar</th></tr>
+     *   <tr><td>aws</td><td>URL da fila ({@code http(s)://}), senão nome da fila</td>
+     *       <td>ARN do SNS, URL da fila, senão nome da fila</td></tr>
+     *   <tr><td>azure, activemq-classic, artemis, rabbitmq</td><td>com {@code subscription}, o tópico; senão a fila</td>
+     *       <td>com {@code kind: topic}, o tópico; senão a fila</td></tr>
+     *   <tr><td>gcp</td><td>a subscription</td><td>o tópico</td></tr>
+     * </table>
+     *
+     * @param subscription só para receber de um tópico
+     * @param kind         só para enviar
+     */
+    public record Endpoint(String destination, String subscription, Kind kind, Options options) {
+
+        public Endpoint {
+            options = options == null ? Options.NONE : options;
+        }
+    }
+
+    /** {@code messaging.senders.<nome>}: {@code provider} é opcional quando existe um provider só. */
+    public record Sender(String provider, String destination, Kind kind, Options options) {
+
+        public Sender {
+            options = options == null ? Options.NONE : options;
+        }
+
+        public Endpoint endpoint() {
+            return new Endpoint(destination, null, kind, options);
+        }
+    }
+
+    /**
+     * Um endereço já traduzido para os campos de cada provedor; é o que os {@link ProviderConnection} consomem.
+     * Criado por {@link Endpoints#resolve}, nunca ligado a properties.
+     *
+     * @param queue no AWS, o nome da fila, resolvido para a URL pela conexão
+     */
+    public record Destination(String queueUrl, String topicArn, String queue, String topic, String subscription,
+                              Set<Requirement> require, boolean sessions, Redelivery redelivery, Long maxMessageBytes,
+                              Duration ackDeadline, boolean ordered, boolean exactlyOnce, boolean deadLetterQueue,
+                              Duration lease, String routingKey, boolean routingByOrderingKey,
+                              Duration confirmTimeout) {
 
         public Destination {
             require = require == null ? Set.of() : Set.copyOf(require);

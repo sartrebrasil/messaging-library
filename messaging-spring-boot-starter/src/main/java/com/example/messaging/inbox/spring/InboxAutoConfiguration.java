@@ -6,6 +6,7 @@ import com.example.messaging.inbox.ConsumerObserver;
 import com.example.messaging.inbox.PayloadDeserializer;
 import com.example.messaging.spring.MessagingAutoConfiguration;
 import com.example.messaging.spring.MessagingDestinations;
+import com.example.messaging.spring.MessagingProperties;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -48,12 +49,12 @@ public class InboxAutoConfiguration {
         return new InboxDestinations() {
             @Override
             public MessageReceiver receiver(String name) {
-                return destinations.receiver(name);
+                return destinations.receiver(name, null, new MessagingProperties.Endpoint(name, null, null, null), null);
             }
 
             @Override
             public MessageSender sender(String name) {
-                return destinations.sender(name);
+                return destinations.sender(name, null, new MessagingProperties.Endpoint(name, null, null, null));
             }
         };
     }

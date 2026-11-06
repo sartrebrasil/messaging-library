@@ -3,18 +3,26 @@ package com.example.messaging.spring;
 import com.example.messaging.MessageReceiver;
 import com.example.messaging.MessageSender;
 import com.example.messaging.aws.SnsMessageSender;
+import com.example.messaging.spring.MessagingProperties.Endpoint;
+import com.example.messaging.spring.MessagingProperties.Options;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
+import java.time.Duration;
+import java.util.Set;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Sem rede: os clientes do SDK só conectam no primeiro uso. */
 class MessagingAutoConfigurationTest {
 
     private static final String AWS = "messaging.providers.aws.";
     private static final String QUEUE = "http://localhost:4566/000000000000/";
+    private static final String AZURE = "Endpoint=sb://localhost;SharedAccessKeyName=k;SharedAccessKey=v;"
+            + "UseDevelopmentEmulator=true;";
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(MessagingAutoConfiguration.class,
@@ -22,153 +30,169 @@ class MessagingAutoConfigurationTest {
             .withPropertyValues(AWS + "type=aws", AWS + "region=us-east-1", AWS + "endpoint=http://localhost:4566",
                     AWS + "access-key=test", AWS + "secret-key=test");
 
+    private static Endpoint queue(String url) {
+        return new Endpoint(url, null, null, null);
+    }
+
     @Test
-    void createsSendersAndReceiversByName() {
+    void createsSendersByNameAndReceiversByEndpoint() {
         runner.withPropertyValues(
-                        "messaging.destinations.pedidos.provider=aws",
-                        "messaging.destinations.pedidos.queue-url=" + QUEUE + "pedidos",
-                        "messaging.destinations.pedidos.dead-letter=pedidos-dlq",
-                        "messaging.destinations.pedidos-dlq.provider=aws",
-                        "messaging.destinations.pedidos-dlq.queue-url=" + QUEUE + "pedidos-dlq",
-                        "messaging.destinations.eventos.provider=aws",
-                        "messaging.destinations.eventos.topic-arn=arn:aws:sns:us-east-1:000000000000:eventos",
-                        "messaging.destinations.eventos.max-message-bytes=1048576")
+                        "messaging.senders.pedidos.destination=" + QUEUE + "pedidos",
+                        "messaging.senders.eventos.destination=arn:aws:sns:us-east-1:000000000000:eventos",
+                        "messaging.senders.eventos.options.max-message-bytes=1048576")
                 .run(context -> {
                     MessagingDestinations destinations = context.getBean(MessagingDestinations.class);
-                    assertThat(destinations.names()).containsExactly("eventos", "pedidos", "pedidos-dlq");
+                    assertThat(destinations.names()).containsExactly("eventos", "pedidos");
 
                     MessageSender sender = destinations.sender("pedidos");
                     assertThat(destinations.sender("pedidos")).isSameAs(sender);
                     assertThat(destinations.sender("eventos").capabilities().maxMessageBytes()).isEqualTo(1048576);
+                    assertThatThrownBy(() -> destinations.sender("nao-existe"))
+                            .isInstanceOf(IllegalArgumentException.class);
 
-                    MessageReceiver first = destinations.receiver("pedidos");
-                    MessageReceiver second = destinations.receiver("pedidos");
+                    MessageSender dlq = destinations.sender("r.dead-letter", "aws", queue(QUEUE + "pedidos-dlq"));
+                    assertThat(destinations.sender("r.dead-letter", "aws", queue(QUEUE + "pedidos-dlq"))).isSameAs(dlq);
+                    MessageReceiver first = destinations.receiver("r", null, queue(QUEUE + "pedidos"), dlq);
+                    MessageReceiver second = destinations.receiver("r", null, queue(QUEUE + "pedidos"), dlq);
                     assertThat(first).isNotSameAs(second);
-                    // DLQ por cópia configurada a partir de dead-letter
+                    // DLQ por cópia, pelo sender recebido
                     assertThat(first.capabilities().nativeDeadLetter()).isFalse();
                 });
     }
 
     @Test
-    void topicOnlyDestinationDoesNotReceive() {
-        runner.withPropertyValues("messaging.destinations.eventos.provider=aws",
-                        "messaging.destinations.eventos.topic-arn=arn:aws:sns:us-east-1:000000000000:eventos")
-                .run(context -> {
-                    MessagingDestinations destinations = context.getBean(MessagingDestinations.class);
-                    assertThat(destinations.sender("eventos").capabilities().maxMessageBytes())
-                            .isEqualTo(SnsMessageSender.DEFAULT_MAX_MESSAGE_BYTES);
-                    org.assertj.core.api.Assertions.assertThatThrownBy(() -> destinations.receiver("eventos"))
-                            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("não recebe");
-                    org.assertj.core.api.Assertions.assertThatThrownBy(() -> destinations.sender("nao-existe"))
-                            .isInstanceOf(IllegalArgumentException.class);
-                });
+    void snsSenderHasTheSnsLimit() {
+        runner.withPropertyValues("messaging.senders.eventos.destination=arn:aws:sns:us-east-1:000000000000:eventos")
+                .run(context -> assertThat(context.getBean(MessagingDestinations.class).sender("eventos")
+                        .capabilities().maxMessageBytes()).isEqualTo(SnsMessageSender.DEFAULT_MAX_MESSAGE_BYTES));
+    }
+
+    @Test
+    void receiverByEndpointIsInHealth() {
+        runner.run(context -> {
+            MessagingDestinations destinations = context.getBean(MessagingDestinations.class);
+            destinations.receiver("r", "aws", queue(QUEUE + "pedidos"), null).close();
+            assertThat(destinations.names()).containsExactly("r");
+        });
     }
 
     @Test
     void invalidConfigurationFailsStartupListingEveryProblem() {
         runner.withPropertyValues(
-                        "messaging.destinations.sem-provider.provider=nao-existe",
-                        "messaging.destinations.sem-endereco.provider=aws",
-                        "messaging.destinations.sessions.provider=aws",
-                        "messaging.destinations.sessions.queue-url=" + QUEUE + "x",
-                        "messaging.destinations.sessions.sessions=true",
-                        "messaging.destinations.dlq-inexistente.provider=aws",
-                        "messaging.destinations.dlq-inexistente.queue-url=" + QUEUE + "y",
-                        "messaging.destinations.dlq-inexistente.dead-letter=nada",
-                        "messaging.destinations.campo-errado.provider=aws",
-                        "messaging.destinations.campo-errado.queue-url=" + QUEUE + "z",
-                        "messaging.destinations.campo-errado.subscription=s")
+                        "messaging.senders.sem-provider.provider=nao-existe",
+                        "messaging.senders.sem-provider.destination=x",
+                        "messaging.senders.sem-endereco.provider=aws",
+                        "messaging.senders.sessions.destination=" + QUEUE + "x",
+                        "messaging.senders.sessions.options.sessions=true",
+                        "messaging.senders.topico.destination=eventos",
+                        "messaging.senders.topico.kind=topic")
                 .run(context -> assertThat(context).getFailure().rootCause()
-                        .hasMessageContaining("sem-provider.provider 'nao-existe' não existe")
-                        .hasMessageContaining("sem-endereco: defina queue-url ou topic-arn")
-                        .hasMessageContaining("sessions.sessions só vale para o Service Bus")
-                        .hasMessageContaining("dlq-inexistente.dead-letter 'nada' não existe")
-                        .hasMessageContaining("campo-errado.subscription não se aplica"));
+                        .hasMessageContaining("messaging.senders.sem-provider.provider 'nao-existe' não existe")
+                        .hasMessageContaining("messaging.senders.sem-endereco.destination é obrigatório")
+                        .hasMessageContaining("messaging.senders.sessions.options.sessions só vale para o Service Bus")
+                        .hasMessageContaining("messaging.senders.topico.kind: topic exige um ARN do SNS"));
+    }
+
+    @Test
+    void unknownSenderKeyFails() {
+        runner.withPropertyValues("messaging.senders.s.destination=" + QUEUE + "x",
+                        "messaging.senders.s.queue-url=" + QUEUE + "x")
+                .run(context -> assertThat(context).getFailure().rootCause()
+                        .hasMessageContaining("messaging.senders.s.queue-url"));
+    }
+
+    @Test
+    void legacyDestinationsFail() {
+        runner.withPropertyValues("messaging.destinations.x.provider=aws")
+                .run(context -> assertThat(context).getFailure().rootCause().hasMessageContaining(
+                        "messaging.destinations foi removido; use messaging.senders e messaging.receivers"));
     }
 
     @Test
     void requiredCapabilitiesAreCheckedAtStartup() {
-        runner.withPropertyValues("messaging.destinations.pedidos.provider=aws",
-                        "messaging.destinations.pedidos.queue-url=" + QUEUE + "pedidos",
-                        "messaging.destinations.pedidos.require=ordered-delivery,lease-expired-on-ack")
+        runner.withPropertyValues("messaging.senders.pedidos.destination=" + QUEUE + "pedidos",
+                        "messaging.senders.pedidos.options.require=ordered-delivery,lease-expired-on-ack")
                 .run(context -> assertThat(context).getFailure().rootCause()
-                        .hasMessageContaining("pedidos.require ORDERED_DELIVERY: o sender não suporta")
-                        .hasMessageContaining("pedidos.require LEASE_EXPIRED_ON_ACK: o receiver não suporta"));
+                        .hasMessageContaining("pedidos.options.require ORDERED_DELIVERY: o sender não suporta")
+                        .hasMessageContaining("pedidos.options.require LEASE_EXPIRED_ON_ACK: exige endereço de recebimento"));
 
-        runner.withPropertyValues("messaging.destinations.pedidos.provider=aws",
-                        "messaging.destinations.pedidos.queue-url=" + QUEUE + "pedidos.fifo",
-                        "messaging.destinations.pedidos.require=ordered-delivery,delayed-redelivery")
+        runner.withPropertyValues("messaging.senders.pedidos.destination=" + QUEUE + "pedidos.fifo",
+                        "messaging.senders.pedidos.options.require=ordered-delivery")
                 .run(context -> assertThat(context).hasNotFailed());
+    }
+
+    @Test
+    void receiverRequirementsAreCheckedOnCreation() {
+        runner.run(context -> {
+            MessagingDestinations destinations = context.getBean(MessagingDestinations.class);
+            Endpoint lease = new Endpoint(QUEUE + "pedidos", null, null, new Options(
+                    Set.of(MessagingProperties.Requirement.LEASE_EXPIRED_ON_ACK), null, null, null, null,
+                    null, null, null, null, null, null, null));
+            assertThatThrownBy(() -> destinations.receiver("r", "aws", lease, null))
+                    .hasMessageContaining("r.options.require LEASE_EXPIRED_ON_ACK: o receiver não suporta");
+        });
     }
 
     @Test
     void azureAndGcpRulesAreValidated() {
         runner.withPropertyValues(
                         "messaging.providers.azure.type=azure",
-                        "messaging.providers.azure.connection-string=Endpoint=sb://localhost;SharedAccessKeyName=k;"
-                                + "SharedAccessKey=v;UseDevelopmentEmulator=true;",
+                        "messaging.providers.azure.connection-string=" + AZURE,
                         "messaging.providers.gcp.type=gcp",
-                        "messaging.providers.gcp.emulator-host=localhost:8085",
-                        "messaging.destinations.sb.provider=azure",
-                        "messaging.destinations.sb.queue=pedidos",
-                        "messaging.destinations.sb.sessions=true",
-                        "messaging.destinations.sb.redelivery=reschedule",
-                        "messaging.destinations.sb.dead-letter=outro",
-                        "messaging.destinations.ps.provider=gcp",
-                        "messaging.destinations.ps.subscription=pedidos-sub")
-                .run(context -> assertThat(context).getFailure().rootCause()
-                        .hasMessageContaining("sb.dead-letter: o Service Bus tem DLQ nativa; leia-a com dead-letter-queue")
-                        .hasMessageContaining("sb.redelivery=RESCHEDULE só vale para fila sem sessions")
-                        .hasMessageContaining("ps.ack-deadline é obrigatório")
-                        .hasMessageContaining("ps: nome curto exige messaging.providers.gcp.project"));
+                        "messaging.providers.gcp.emulator-host=localhost:8085")
+                .run(context -> {
+                    MessagingDestinations destinations = context.getBean(MessagingDestinations.class);
+                    assertThat(destinations.validate("messaging.receivers.sb", "azure", new Endpoint("pedidos", null,
+                            null, new Options(null, true, MessagingProperties.Redelivery.RESCHEDULE, null, null, null,
+                            null, null, null, null, null, null)), true))
+                            .anyMatch(p -> p.contains("sb.options.redelivery=RESCHEDULE só vale para fila sem sessions"));
+                    assertThat(destinations.validate("messaging.receivers.ps", "gcp", queue("pedidos-sub"), true))
+                            .anyMatch(p -> p.contains("ps.options.ack-deadline é obrigatório"))
+                            .anyMatch(p -> p.contains("ps.destination: nome curto exige messaging.providers.gcp.project"));
+                    assertThat(destinations.validate("messaging.receivers.x", null, queue("q"), true))
+                            .anyMatch(p -> p.contains("x.provider é obrigatório com mais de um provider"));
+                });
     }
 
     @Test
     void azureDeadLetterQueueIsReceiveOnly() {
-        ApplicationContextRunner azure = runner.withPropertyValues(
-                "messaging.providers.azure.type=azure",
-                "messaging.providers.azure.connection-string=Endpoint=sb://localhost;SharedAccessKeyName=k;"
-                        + "SharedAccessKey=v;UseDevelopmentEmulator=true;");
+        ApplicationContextRunner azure = new ApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(MessagingAutoConfiguration.class))
+                .withPropertyValues("messaging.providers.azure.type=azure",
+                        "messaging.providers.azure.connection-string=" + AZURE);
+        Options dlq = new Options(null, null, null, null, null, null, null, true, null, null, null, null);
+        Options sessionsDlq = new Options(null, true, null, null, null, null, null, true, null, null, null, null);
 
-        azure.withPropertyValues(
-                        "messaging.destinations.pedidos-dlq.provider=azure",
-                        "messaging.destinations.pedidos-dlq.queue=pedidos",
-                        "messaging.destinations.pedidos-dlq.sessions=true",
-                        "messaging.destinations.pedidos-dlq.dead-letter-queue=true",
-                        "messaging.destinations.eventos-dlq.provider=azure",
-                        "messaging.destinations.eventos-dlq.topic=eventos",
-                        "messaging.destinations.eventos-dlq.subscription=faturamento",
-                        "messaging.destinations.eventos-dlq.dead-letter-queue=true")
-                .run(context -> {
-                    MessagingDestinations destinations = context.getBean(MessagingDestinations.class);
-                    // a DLQ não tem sessions: receiver comum, mesmo com sessions na entidade
-                    assertThat(destinations.receiver("pedidos-dlq").capabilities().orderedDelivery()).isFalse();
-                    assertThat(destinations.receiver("eventos-dlq").capabilities().nativeDeadLetter()).isTrue();
-                    org.assertj.core.api.Assertions.assertThatThrownBy(() -> destinations.sender("pedidos-dlq"))
-                            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("não envia");
-                });
+        azure.run(context -> {
+            MessagingDestinations destinations = context.getBean(MessagingDestinations.class);
+            // a DLQ não tem sessions: receiver comum, mesmo com sessions na entidade
+            assertThat(destinations.receiver("pedidos-dlq", null, new Endpoint("pedidos", null, null, sessionsDlq),
+                    null).capabilities().orderedDelivery()).isFalse();
+            assertThat(destinations.receiver("eventos-dlq", null, new Endpoint("eventos", "faturamento", null, dlq),
+                    null).capabilities().nativeDeadLetter()).isTrue();
+        });
 
-        azure.withPropertyValues(
-                        "messaging.destinations.sem-sub.provider=azure",
-                        "messaging.destinations.sem-sub.topic=eventos",
-                        "messaging.destinations.sem-sub.dead-letter-queue=true",
-                        "messaging.destinations.sqs.provider=aws",
-                        "messaging.destinations.sqs.queue-url=" + QUEUE + "x",
-                        "messaging.destinations.sqs.dead-letter-queue=true")
+        azure.withPropertyValues("messaging.senders.s.destination=pedidos",
+                        "messaging.senders.s.options.dead-letter-queue=true")
                 .run(context -> assertThat(context).getFailure().rootCause()
-                        .hasMessageContaining("sem-sub.dead-letter-queue em tópico exige subscription")
-                        .hasMessageContaining("sqs.dead-letter-queue só vale para o Service Bus"));
+                        .hasMessageContaining("messaging.senders.s.options.dead-letter-queue só vale para receber"));
     }
 
     @Test
     void healthIndicatorIsOptIn() {
-        runner.withPropertyValues("messaging.destinations.pedidos.provider=aws",
-                        "messaging.destinations.pedidos.queue-url=" + QUEUE + "pedidos")
+        runner.withPropertyValues("messaging.senders.pedidos.destination=" + QUEUE + "pedidos")
                 .run(context -> assertThat(context).doesNotHaveBean(HealthIndicator.class));
 
-        runner.withPropertyValues("messaging.destinations.pedidos.provider=aws",
-                        "messaging.destinations.pedidos.queue-url=" + QUEUE + "pedidos",
+        runner.withPropertyValues("messaging.senders.pedidos.destination=" + QUEUE + "pedidos",
                         "management.health.messaging.enabled=true")
                 .run(context -> assertThat(context).hasSingleBean(HealthIndicator.class));
+    }
+
+    @Test
+    void durationOptionsBind() {
+        runner.withPropertyValues("messaging.senders.pedidos.destination=" + QUEUE + "pedidos",
+                        "messaging.senders.pedidos.options.ack-deadline=5s")
+                .run(context -> assertThat(context.getBean(MessagingProperties.class).senders().get("pedidos")
+                        .options().ackDeadline()).isEqualTo(Duration.ofSeconds(5)));
     }
 }
