@@ -302,21 +302,29 @@ public final class RabbitMessageReceiver implements MessageReceiver {
     }
 
     private void scheduleExpiry(long tagEpoch, long tag, Instant at) {
-        long delay = Math.max(0, Duration.between(Instant.now(), at).toMillis());
+        long delay = Math.max(0, Duration.between(Instant.now(), at).toNanos());
         try {
-            expirer.schedule(() -> Thread.startVirtualThread(() -> expire(tagEpoch, tag)), delay,
-                    TimeUnit.MILLISECONDS);
+            expirer.schedule(() -> Thread.startVirtualThread(() -> expire(tagEpoch, tag, at)), delay,
+                    TimeUnit.NANOSECONDS);
         } catch (RejectedExecutionException e) {
             // receiver fechado: o close devolve as mensagens
         }
     }
 
-    /** Devolve a mensagem se o prazo venceu; um prazo estendido tem a própria verificação. */
-    private void expire(long tagEpoch, long tag) {
+    /**
+     * Devolve a mensagem quando vence o prazo {@code at}; um prazo estendido tem o próprio timer.
+     * O agendador conta pelo relógio monotônico e pode acordar antes de {@code at} pelo
+     * {@link Instant#now()}: aí reagenda, senão a mensagem ficaria presa até o channel fechar.
+     */
+    private void expire(long tagEpoch, long tag, Instant at) {
         lock.lock();
         try {
-            Instant expiresAt = pending.get(tag);
-            if (tagEpoch == epoch.get() && expiresAt != null && !Instant.now().isBefore(expiresAt)) {
+            if (tagEpoch != epoch.get() || !at.equals(pending.get(tag))) {
+                return;
+            }
+            if (Instant.now().isBefore(at)) {
+                scheduleExpiry(tagEpoch, tag, at);
+            } else {
                 requeue(tag);
             }
         } finally {
