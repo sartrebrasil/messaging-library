@@ -1,4 +1,4 @@
-package com.example.messaging.aws.spring;
+package com.example.messaging.spring.aws;
 
 import com.example.messaging.MessageReceiver;
 import com.example.messaging.MessageSender;
@@ -26,14 +26,14 @@ import java.time.Duration;
  * providers {@code aws}; sem eles, um cliente por provider com {@code apache-client} e read
  * timeout de 30 s (acima dos 20 s do long poll).
  */
-final class AwsProviderConnection implements ProviderConnection {
+public final class AwsProviderConnection implements ProviderConnection {
 
     private final SqsClient sqs;
     private final SnsClient sns;
     private final boolean ownsSqs;
     private final boolean ownsSns;
 
-    AwsProviderConnection(MessagingProperties.Provider provider, ListableBeanFactory beans) {
+    public AwsProviderConnection(MessagingProperties.Provider provider, ListableBeanFactory beans) {
         SqsClient userSqs = beans.getBeanProvider(SqsClient.class).getIfAvailable();
         SnsClient userSns = beans.getBeanProvider(SnsClient.class).getIfAvailable();
         this.ownsSqs = userSqs == null;

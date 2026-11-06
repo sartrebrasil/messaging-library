@@ -19,8 +19,8 @@
     <module>messaging-gcp</module>
     <module>messaging-jms</module>
     <module>messaging-rabbitmq</module>
-    <module>messaging-inbox</module>
     <module>messaging-spring-boot-starter</module>
+    <module>messaging-inbox</module>
   </modules>
 
   <properties>
@@ -36,10 +36,6 @@
     <artemis.version>2.40.0</artemis.version>
     <amqp-client.version>5.35.0</amqp-client.version>
     <idempotency.version>0.1.0-SNAPSHOT</idempotency.version>
-    <!-- Linha do Boot do starter e dos ProviderFactory dos adapters (ADR-0008) -->
-    <spring-boot.version>4.1.1</spring-boot.version>
-    <assertj.version>3.27.7</assertj.version>
-    <jackson.version>3.1.5</jackson.version>
   </properties>
 
   <dependencyManagement>
@@ -58,21 +54,6 @@
         <groupId>com.example</groupId>
         <artifactId>messaging-inbox</artifactId>
         <version>${project.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.example</groupId>
-        <artifactId>messaging-spring-boot-starter</artifactId>
-        <version>${project.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-test</artifactId>
-        <version>${spring-boot.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>org.assertj</groupId>
-        <artifactId>assertj-core</artifactId>
-        <version>${assertj.version}</version>
       </dependency>
       <dependency>
         <groupId>com.example.idempotency</groupId>
