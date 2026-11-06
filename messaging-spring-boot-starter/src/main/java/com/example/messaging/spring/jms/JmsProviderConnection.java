@@ -1,4 +1,4 @@
-package com.example.messaging.jms.spring;
+package com.example.messaging.spring.jms;
 
 import com.example.messaging.MessageReceiver;
 import com.example.messaging.MessageSender;
@@ -25,12 +25,12 @@ import org.springframework.beans.factory.ListableBeanFactory;
  *       ({@code pooled-jms}, {@code CachingConnectionFactory}) derruba o health check.</li>
  * </ul>
  */
-final class JmsProviderConnection implements ProviderConnection {
+public final class JmsProviderConnection implements ProviderConnection {
 
     private final JmsDialect dialect;
     private final Connection connection;
 
-    JmsProviderConnection(String providerName, MessagingProperties.Provider provider, ListableBeanFactory beans) {
+    public JmsProviderConnection(String providerName, MessagingProperties.Provider provider, ListableBeanFactory beans) {
         this.dialect = provider.type() == MessagingProperties.Type.ARTEMIS
                 ? JmsDialect.ARTEMIS : JmsDialect.ACTIVEMQ_CLASSIC;
         ConnectionFactory factory = provider.brokerUrl() != null
