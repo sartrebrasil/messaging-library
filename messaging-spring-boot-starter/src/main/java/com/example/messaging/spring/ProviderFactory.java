@@ -1,26 +1,26 @@
 package com.example.messaging.spring;
 
-import com.example.messaging.MessageReceiver;
-import com.example.messaging.MessageSender;
+import org.springframework.beans.factory.ListableBeanFactory;
+
+import java.util.Set;
 
 /**
- * Cria senders e receivers de um provedor configurado, com os clientes nativos que ele mesmo
- * criou (ou os beans da aplicação). Uma implementação por tipo, carregada só quando o adapter
- * está no classpath.
+ * Provedor de {@code messaging.providers.<nome>.type}, descoberto por {@link java.util.ServiceLoader}
+ * ({@code META-INF/services/com.example.messaging.spring.ProviderFactory}) no jar de cada adapter.
+ *
+ * <p>Toda fábrica do classpath é instanciada, mesmo sem provider configurado: a implementação só
+ * referencia tipos do core e do starter, e as classes do SDK ficam na {@link ProviderConnection}.
  */
-interface ProviderFactory extends AutoCloseable {
+public interface ProviderFactory {
 
-    /** {@code null} quando o destino não tem endereço de envio. */
-    MessageSender sender(String name, MessagingProperties.Destination destination);
+    /** Tipos atendidos; dois adapters não podem atender o mesmo tipo. */
+    Set<MessagingProperties.Type> types();
 
     /**
-     * {@code null} quando o destino não tem endereço de recebimento.
+     * Cria os clientes do provider (pode conectar). Chamado só depois da validação de
+     * {@code messaging.*}.
      *
-     * @param deadLetterSender sender do destino {@code dead-letter}; {@code null} sem DLQ
+     * @param beans beans da aplicação, para clientes nativos declarados por ela
      */
-    MessageReceiver receiver(String name, MessagingProperties.Destination destination, MessageSender deadLetterSender);
-
-    /** Fecha só os clientes que a fábrica criou; os beans da aplicação são de quem os declarou. */
-    @Override
-    void close();
+    ProviderConnection connect(String providerName, MessagingProperties.Provider provider, ListableBeanFactory beans);
 }
