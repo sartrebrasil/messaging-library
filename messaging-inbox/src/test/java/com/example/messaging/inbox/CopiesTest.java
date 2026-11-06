@@ -95,4 +95,16 @@ class CopiesTest {
         return new ReceivedMessage(id, "body".getBytes(StandardCharsets.UTF_8), attributes, null, orderingKey,
                 OptionalInt.of(1), NOW, NOW, NOW.plusSeconds(30), null, null, new Object());
     }
+
+    /** Atributos de um produtor de fora da lib que a cópia não aceitaria ficam de fora, e a cópia sai. */
+    @Test
+    void attributesACopyCannotCarryAreLeftOut() {
+        var received = received("m-1", Map.of("order_id", "o-1", "orderId", "o-1", "note", "café"), null);
+
+        var copy = Copies.build(received, AttemptState.initial(), null);
+
+        assertEquals("o-1", copy.message().attributes().get("order_id"));
+        assertFalse(copy.message().attributes().containsKey("orderId"));
+        assertFalse(copy.message().attributes().containsKey("note"));
+    }
 }

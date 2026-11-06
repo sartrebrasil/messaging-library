@@ -80,12 +80,28 @@ public record OutgoingMessage(byte[] body,
 
     /**
      * Cópia de uma mensagem recebida para reenviá-la (DLQ, fila de retry, {@code failed}): corpo, atributos do
-     * usuário, {@code contentType}, {@code orderingKey} e {@code traceparent}. {@code deduplicationId} e
+     * usuário que uma cópia aceita ({@link #copiable}), {@code contentType}, {@code orderingKey} e {@code traceparent}.
+     * {@code deduplicationId} e
      * {@code deadLetter} ficam vazios; cada chamador decide os seus com {@code with*}.
      */
     public static OutgoingMessage copyOf(ReceivedMessage message) {
-        return new OutgoingMessage(message.body(), message.attributes(), message.contentType(), message.orderingKey(),
-                null, message.traceparent(), null);
+        return new OutgoingMessage(message.body(), copiable(message.attributes()), message.contentType(),
+                message.orderingKey(), null, message.traceparent(), null);
+    }
+
+    /**
+     * Os atributos que uma cópia pode levar. Um produtor de fora da lib pode mandar chave ou valor que esta API não
+     * aceita ({@code orderId}, não ASCII); a cópia (DLQ, {@code failed}, atraso por cópia) os deixa de fora em vez de
+     * falhar, senão a mensagem não sairia nunca do destino. A mensagem recebida continua com todos.
+     */
+    public static Map<String, String> copiable(Map<String, String> attributes) {
+        Map<String, String> kept = new java.util.HashMap<>();
+        attributes.forEach((key, value) -> {
+            if (attributeProblem(key, value) == null) {
+                kept.put(key, value);
+            }
+        });
+        return kept;
     }
 
     public OutgoingMessage withAttribute(String key, String value) {
@@ -118,21 +134,29 @@ public record OutgoingMessage(byte[] body,
         return new OutgoingMessage(body, attributes, contentType, orderingKey, deduplicationId, traceparent, newDeadLetter);
     }
 
+    /** {@code null} quando o atributo pode ir numa mensagem; senão o motivo. */
+    private static String attributeProblem(String key, String value) {
+        if (key.length() > MAX_KEY_LENGTH || !KEY.matcher(key).matches() || key.startsWith("goog")) {
+            return "Chave de atributo inválida: '" + key
+                    + "' (use [a-z_][a-z0-9_]*, até " + MAX_KEY_LENGTH + " caracteres, sem prefixo goog)";
+        }
+        if (ReservedAttributes.isReserved(key)) {
+            return "Chave de atributo reservada pela lib: '" + key + "'";
+        }
+        if (value.length() > MAX_VALUE_LENGTH || !PRINTABLE.matcher(value).matches()) {
+            return "Valor do atributo '" + key + "' fora de ASCII imprimível ou acima de " + MAX_VALUE_LENGTH + " bytes";
+        }
+        return null;
+    }
+
     private static void validateAttributes(Map<String, String> attributes) {
         if (attributes.size() > MAX_ATTRIBUTES) {
             throw new IllegalArgumentException("Mais de " + MAX_ATTRIBUTES + " atributos: " + attributes.size());
         }
         attributes.forEach((key, value) -> {
-            if (key.length() > MAX_KEY_LENGTH || !KEY.matcher(key).matches() || key.startsWith("goog")) {
-                throw new IllegalArgumentException("Chave de atributo inválida: '" + key
-                        + "' (use [a-z_][a-z0-9_]*, até " + MAX_KEY_LENGTH + " caracteres, sem prefixo goog)");
-            }
-            if (ReservedAttributes.isReserved(key)) {
-                throw new IllegalArgumentException("Chave de atributo reservada pela lib: '" + key + "'");
-            }
-            if (value.length() > MAX_VALUE_LENGTH || !PRINTABLE.matcher(value).matches()) {
-                throw new IllegalArgumentException("Valor do atributo '" + key
-                        + "' fora de ASCII imprimível ou acima de " + MAX_VALUE_LENGTH + " bytes");
+            String problem = attributeProblem(key, value);
+            if (problem != null) {
+                throw new IllegalArgumentException(problem);
             }
         });
     }
