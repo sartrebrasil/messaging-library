@@ -114,20 +114,15 @@ dependências):
   avulso, só da trilha Spring. Se aparecer problema, a saída é fixar Netty e
   Reactor da Azure no módulo de teste e reportar.
 
-## Revisão (2026-11-06): um starter, provedores nos adapters
+## Revisão (2026-11-06): um starter só
 
 - `messaging-inbox-spring-boot-starter` foi incorporado ao `messaging-spring-boot-starter`.
   A autoconfiguração `inbox.*` liga com `messaging-inbox` e `jackson-databind` (Jackson 3) no
   classpath; as duas dependências são `optional` no starter, e a aplicação que consome declara
   as duas.
-- O starter não depende mais dos adapters. Cada adapter traz a sua `ProviderFactory`
-  (`com.example.messaging.<adapter>.spring`), registrada em
-  `META-INF/services/com.example.messaging.spring.ProviderFactory`, e depende do starter como
-  `optional`: sem Spring na aplicação, a classe nunca é carregada.
-- Toda fábrica do classpath é instanciada na validação, antes de qualquer conexão. Por isso a
-  fábrica só referencia tipos do core e do starter; o código que toca o SDK fica na
-  `ProviderConnection` que ela cria. Tipo sem adapter e dois adapters para o mesmo tipo fazem o
-  startup falhar.
-- Os testes do starter rodam sobre uma `ProviderFactory` em memória (testkit). Os testes que
-  dependem de um SDK ou broker real ficam no adapter, porque o starter não pode ter os
-  adapters nem como dependência de teste (ciclo no reactor).
+- A ligação com cada provedor fica no starter, em `com.example.messaging.spring.<provedor>`
+  (`aws`, `azure`, `gcp`, `jms`, `rabbitmq`), uma `ProviderConnection` por tipo. Os adapters
+  continuam sem Spring: o starter depende deles como `optional` e só cria a conexão de um tipo
+  cujo adapter está no classpath.
+- Tentamos o contrário (cada adapter com a sua fábrica, descoberta por `ServiceLoader`) e
+  voltamos atrás: amarrava os adapters ao starter e ao Spring.

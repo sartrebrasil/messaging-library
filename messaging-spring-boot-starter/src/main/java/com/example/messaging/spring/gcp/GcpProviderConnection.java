@@ -1,4 +1,4 @@
-package com.example.messaging.gcp.spring;
+package com.example.messaging.spring.gcp;
 
 import com.example.messaging.MessageReceiver;
 import com.example.messaging.MessageSender;
@@ -27,14 +27,14 @@ import java.io.IOException;
  * {@code emulator-host}, canal sem TLS e sem credenciais. Nomes curtos de tópico e subscription
  * são completados com {@code project}.
  */
-final class GcpProviderConnection implements ProviderConnection {
+public final class GcpProviderConnection implements ProviderConnection {
 
     private final MessagingProperties.Provider provider;
     private final ManagedChannel emulatorChannel;
     private final TransportChannelProvider channel;
     private final TopicAdminClient admin;
 
-    GcpProviderConnection(String providerName, MessagingProperties.Provider provider) {
+    public GcpProviderConnection(String providerName, MessagingProperties.Provider provider) {
         this.provider = provider;
         if (provider.emulatorHost() != null) {
             emulatorChannel = ManagedChannelBuilder.forTarget(provider.emulatorHost()).usePlaintext().build();

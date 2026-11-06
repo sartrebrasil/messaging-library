@@ -24,7 +24,7 @@ quem usa (a inbox-library, por exemplo).
 | `messaging-gcp` | Pub/Sub: publisher com ordem e pull síncrono. |
 | `messaging-jms` | ActiveMQ Classic e Artemis por Jakarta Messaging (`JmsDialect`): fila e tópico, com lease controlado pela lib (ADR-0009). Exige o cliente do broker na aplicação: `org.apache.activemq:activemq-client` ou `artemis-jakarta-client`. |
 | `messaging-rabbitmq` | RabbitMQ (AMQP 0-9-1, `amqp-client` sem Netty): fila e exchange, receive por `basicGet`, lease controlado pela lib (ADR-0009). |
-| `messaging-spring-boot-starter` | Destinos nomeados por properties (`messaging.*`), métricas, `traceparent` e health; consumidores `inbox.*` quando `messaging-inbox` e Jackson 3 estão na aplicação. Os provedores vêm dos adapters no classpath (`ProviderFactory` por `ServiceLoader`). Spring Boot 4. |
+| `messaging-spring-boot-starter` | Destinos nomeados por properties (`messaging.*`), métricas, `traceparent` e health; consumidores `inbox.*` quando `messaging-inbox` e Jackson 3 estão na aplicação. Liga cada provedor cujo adapter está no classpath; os adapters não dependem de Spring. Spring Boot 4. |
 | `messaging-inbox` | Consumo sobre `MessageReceiver`: envelope (CloudEvents, outbox, raw), retry em três níveis e loop de polling. Somente JDK. Plano e ADRs em `messaging-inbox/docs`. Em desenvolvimento. |
 | `messaging-bom` | Alinha as versões dos módulos acima. |
 

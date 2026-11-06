@@ -1,4 +1,4 @@
-package com.example.messaging.rabbitmq.spring;
+package com.example.messaging.spring.rabbitmq;
 
 import com.example.messaging.MessageReceiver;
 import com.example.messaging.OutgoingMessage;

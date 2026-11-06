@@ -1,4 +1,4 @@
-package com.example.messaging.rabbitmq.spring;
+package com.example.messaging.spring.rabbitmq;
 
 import com.example.messaging.MessageReceiver;
 import com.example.messaging.MessageSender;
@@ -21,11 +21,11 @@ import java.util.concurrent.TimeoutException;
  * {@link ConnectionFactory} da aplicação. A conexão é aberta no startup e fechada no
  * {@link #close()}.
  */
-final class RabbitProviderConnection implements ProviderConnection {
+public final class RabbitProviderConnection implements ProviderConnection {
 
     private final Connection connection;
 
-    RabbitProviderConnection(String providerName, MessagingProperties.Provider provider, ListableBeanFactory beans) {
+    public RabbitProviderConnection(String providerName, MessagingProperties.Provider provider, ListableBeanFactory beans) {
         ConnectionFactory factory = provider.brokerUrl() != null
                 ? new ConnectionFactory() : beans.getBeanProvider(ConnectionFactory.class).getIfAvailable();
         if (factory == null) {
