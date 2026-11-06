@@ -195,6 +195,34 @@ class InboxConsumerTest {
         assertEquals("plain", copy.bodyAsString());
     }
 
+    /** Pub/Sub sem dead-letter policy: sem deliveryCount o nível 2 não conta pelo broker, então segura em memória. */
+    @Test
+    void brokerDelayWithoutDeliveryCountHoldsInMemory() {
+        var receives = new AtomicInteger();
+        Destinations noCount = new Destinations(() -> new Delegating(messaging.receiver(MAIN)) {
+            @Override
+            public List<ReceivedMessage> receive(int maxMessages, Duration maxWait) {
+                return super.receive(maxMessages, maxWait).stream().map(m -> {
+                    receives.incrementAndGet();
+                    return new ReceivedMessage(m.messageId(), m.body(), m.attributes(), m.contentType(),
+                            m.orderingKey(), java.util.OptionalInt.empty(), m.enqueuedAt(), m.receivedAt(),
+                            m.leaseExpiresAt(), m.traceparent(), m.deadLetter(), m.handle());
+                }).toList();
+            }
+        }, messaging.queueSender(FAILED), messaging.queueSender(DLQ), List.of());
+        start(settings(DelayedStrategy.BROKER_DELAY, 1), policy(2, Duration.ofMillis(50)), m -> {
+            calls.incrementAndGet();
+            throw new RateLimited();
+        }, noCount);
+        send("plain");
+
+        await(() -> messaging.size(DLQ) == 1);
+        assertEquals(3, calls.get());
+        assertEquals(1, receives.get(), "the delayed level stayed in memory");
+        ReceivedMessage copy = messaging.receiver(DLQ).receive(1, Duration.ZERO).getFirst();
+        assertEquals("l2=2;l3=0", copy.attributes().get("inbox_attempts"));
+    }
+
     @Test
     void holdRetriesInMemoryWithoutReturningToTheBroker() {
         var levels = new CopyOnWriteArrayList<Delivery>();

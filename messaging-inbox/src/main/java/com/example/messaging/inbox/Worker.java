@@ -44,6 +44,8 @@ final class Worker implements Runnable {
     private final DoubleSupplier random;
     private final ConsumerObserver observer;
     private final ExecutorService lanePool;
+    /** One warning per worker; lanes may race on it, and a second warning is harmless. */
+    private volatile boolean warnedNoDeliveryCount;
 
     Worker(ConsumerSettings settings, MessageReceiver receiver, Pipeline<?> pipeline, OutcomeApplier applier,
            DelayedStrategy strategy, Duration leaseBudget, StopSignal stop, AtomicReference<Instant> lastReceive,
@@ -229,7 +231,7 @@ final class Worker implements Runnable {
                 Pipeline.Execution execution = pipeline.process(message, settings.destination(), hold, observer);
                 inbox = execution.message();
                 outcome = execution.outcome();
-                if (outcome instanceof Outcome.Retry retry && strategy == DelayedStrategy.HOLD) {
+                if (outcome instanceof Outcome.Retry retry && holdsInMemory(message)) {
                     observer.held(inbox, retry);
                     try {
                         stop.sleep(retry.delay());
@@ -256,6 +258,27 @@ final class Worker implements Runnable {
             applied = applier.release(receiver, message, Effect.RELEASED);
         }
         report(message, inbox, outcome, applied, start);
+    }
+
+    /**
+     * {@code hold}, or {@code broker-delay} on a message without {@code deliveryCount} (Pub/Sub without a dead-letter
+     * policy): the broker cannot count the delayed attempts, so they stay in memory instead of going to the
+     * dead-letter destination on the first one.
+     */
+    private boolean holdsInMemory(ReceivedMessage message) {
+        if (strategy == DelayedStrategy.HOLD) {
+            return true;
+        }
+        if (strategy != DelayedStrategy.BROKER_DELAY || message.deliveryCount().isPresent()) {
+            return false;
+        }
+        if (!warnedNoDeliveryCount) {
+            warnedNoDeliveryCount = true;
+            LOG.log(System.Logger.Level.WARNING, "Consumer {0}: messages without a delivery count; broker-delay holds "
+                    + "the delayed attempts in memory (configure a dead-letter policy, or delayed.strategy: hold)",
+                    settings.consumer());
+        }
+        return true;
     }
 
     private void report(ReceivedMessage message, InboxMessage inbox, Outcome outcome, OutcomeApplier.Applied applied,

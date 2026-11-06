@@ -173,16 +173,16 @@ sem a cópia com `inbox_failure`. Valores medidos pelo `InboxContract` (F3) com 
 |---|---|---|---|
 | SQS | nenhum: só com redrive policy (`maxReceiveCount`) | DLQ da redrive policy | `broker-delay` (visibility) |
 | Service Bus (fila e subscription) | 10 entregas (`MaxDeliveryCount`) | DLQ nativa da entidade | `broker-delay` por cópia (`RESCHEDULE`, só fila); `hold`/`retry-queues` na subscription |
-| Pub/Sub | nenhum: só com dead-letter policy | tópico de dead letter | o `auto` escolhe `broker-delay`, que **não funciona sem dead-letter policy** (veja abaixo); configure `hold` ou `retry-queues` |
+| Pub/Sub | nenhum: só com dead-letter policy | tópico de dead letter | `broker-delay` (ack deadline); sem dead-letter policy, em memória como o `hold` (veja abaixo) |
 | ActiveMQ Classic | nenhum com este adapter (30 `nack` sem sair) | — | `broker-delay` por cópia (`SCHEDULED`) |
 | Artemis | 10 entregas (`max-delivery-attempts`) | endereço `DLQ` | `broker-delay` por cópia (`SCHEDULED`) |
 | RabbitMQ 4 (quorum) | 21 entregas (`delivery-limit` 20 conta devoluções) | descartada, ou DLX se configurado | `hold` ou `retry-queues` |
 
 - Com `broker-delay` sem cópia (atraso no próprio `nack`, como no SQS), o limite nativo precisa ficar acima de 6;
   no SQS isso é o `maxReceiveCount` da redrive policy.
-- No Pub/Sub sem dead-letter policy o `deliveryAttempt` não vem, e o `broker-delay` não consegue contar o nível 2: a
-  mensagem vai à DLQ comum na primeira falha. Lá, configure `retry.delayed.strategy: hold` ou `retry-queues`, ou a
-  dead-letter policy na subscription.
+- No Pub/Sub sem dead-letter policy o `deliveryAttempt` não vem, e o broker não conta o nível 2. O `broker-delay`
+  faz então as tentativas do nível 2 em memória, como o `hold` (a mensagem fica com o consumer, sob `keepAlive`), e
+  avisa uma vez por worker no log. Com a dead-letter policy, ou com `retry-queues`, o nível 2 volta ao broker.
 
 ## Mensagem
 

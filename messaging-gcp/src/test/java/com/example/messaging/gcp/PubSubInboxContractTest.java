@@ -80,7 +80,7 @@ class PubSubInboxContractTest extends InboxContract {
         return receiver(retry);
     }
 
-    /** Sem dead-letter policy, o Pub/Sub não informa {@code deliveryAttempt}. */
+    /** Sem dead-letter policy, o Pub/Sub não informa {@code deliveryAttempt}: o broker-delay fica em memória. */
     @Override
     protected boolean reportsDeliveryCount() {
         return false;

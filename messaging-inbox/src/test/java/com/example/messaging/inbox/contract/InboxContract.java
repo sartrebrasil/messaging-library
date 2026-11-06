@@ -104,8 +104,8 @@ public abstract class InboxContract {
     }
 
     /**
-     * O receiver informa {@code deliveryCount}. Sem ele, o {@code broker-delay} não conta as tentativas do nível 2 e
-     * manda à DLQ na primeira (o Pub/Sub sem dead-letter policy); o caso de {@code broker-delay} é pulado.
+     * O receiver informa {@code deliveryCount}. Sem ele (o Pub/Sub sem dead-letter policy), o {@code broker-delay}
+     * segura as tentativas do nível 2 em memória, como o {@code hold}: uma entrega só no broker.
      */
     protected boolean reportsDeliveryCount() {
         return true;
@@ -219,7 +219,6 @@ public abstract class InboxContract {
     @Test
     void brokerDelayThenDeadLetter() {
         assumeTrue(capabilities().delayedRedelivery(), "o receiver não tem atraso no nack");
-        assumeTrue(reportsDeliveryCount(), "sem deliveryCount o broker-delay não conta o nível 2");
         AtomicInteger calls = new AtomicInteger();
         start(DelayedStrategy.BROKER_DELAY, delayedPolicy(delayedInitial()), 1, m -> {
             calls.incrementAndGet();
@@ -230,7 +229,8 @@ public abstract class InboxContract {
         ReceivedMessage copy = copies(deadLetterReceiver(), 1).getFirst();
         assertEquals(3, calls.get());
         assertEquals("l2=2;l3=0", copy.attributes().get("inbox_attempts"));
-        assertEquals(3, delivered.size(), "o nível 2 volta ao broker a cada tentativa");
+        assertEquals(reportsDeliveryCount() ? 3 : 1, delivered.size(),
+                reportsDeliveryCount() ? "o nível 2 volta ao broker a cada tentativa" : "sem deliveryCount, em memória");
     }
 
     @Test
