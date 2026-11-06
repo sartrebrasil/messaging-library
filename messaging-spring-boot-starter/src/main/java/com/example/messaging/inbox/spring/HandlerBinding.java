@@ -52,10 +52,10 @@ final class HandlerBinding {
             if (candidates.isEmpty()) {
                 String names = camel(consumer).equals(consumer) ? "'" + consumer + "'"
                         : "'" + consumer + "' or '" + camel(consumer) + "'";
-                problems.add("inbox.consumers." + consumer + " has no handler: declare a bean named " + names
+                problems.add(InboxConfig.RECEIVERS + consumer + " has no handler: declare a bean named " + names
                         + " of type InboxHandler/InboxResultHandler, or an @InboxListener");
             } else if (candidates.size() > 1) {
-                problems.add("inbox.consumers." + consumer + " has more than one handler: "
+                problems.add(InboxConfig.RECEIVERS + consumer + " has more than one handler: "
                         + candidates.stream().map(Bound::description).toList());
             } else {
                 bound.put(consumer, candidates.getFirst());
@@ -106,7 +106,7 @@ final class HandlerBinding {
                 String where = user.getName() + "#" + method.getName();
                 if (!consumers.contains(listener.consumer())) {
                     problems.add("@InboxListener " + where + ": consumer '" + listener.consumer()
-                            + "' does not exist in inbox.consumers");
+                            + "' does not exist in messaging.receivers");
                     return;
                 }
                 Bound bound = listenerMethod(name, method, type, where, beans, problems);

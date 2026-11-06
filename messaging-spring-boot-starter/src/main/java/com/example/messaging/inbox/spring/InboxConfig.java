@@ -8,25 +8,21 @@ import com.example.messaging.inbox.retry.BackoffSpec;
 import com.example.messaging.inbox.retry.ThrowableTypes;
 import com.example.messaging.inbox.spring.InboxProperties.Backoff;
 import com.example.messaging.inbox.spring.InboxProperties.ConsumerOptions;
-import org.springframework.boot.convert.DurationStyle;
+import com.example.messaging.spring.MessagingProperties.Endpoint;
 
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.function.Function;
 
 /**
- * Merges {@code inbox.consumers.<name>} over {@code inbox.defaults} over the library defaults, property by property
- * (ADR-0008), and validates everything that does not need a broker. All problems are reported at once.
+ * Merges {@code messaging.receivers.<name>} over {@code messaging.receiver-defaults} over the library defaults,
+ * property by property (ADR-0008), and validates everything that does not need a provider. All problems are reported
+ * at once; the address is validated against its provider by {@link InboxDestinations#validate}.
  */
 final class InboxConfig {
 
-    static final String MESSAGING = "messaging";
-    static final Set<String> CONFIGURATION_KEYS = Set.of("max-messages-per-poll", "poll-wait", "max-processing",
-            "shutdown-timeout");
+    static final String RECEIVERS = "messaging.receivers.";
+    static final String DEFAULTS = "messaging.receiver-defaults";
 
     private static final Backoff IMMEDIATE = backoff(3, Duration.ofMillis(100), 2.0, Duration.ofSeconds(2), 0.2);
     private static final Backoff DELAYED = backoff(5, Duration.ofSeconds(30), 2.0, Duration.ofMinutes(15), 0.2);
@@ -40,12 +36,15 @@ final class InboxConfig {
     /**
      * One consumer after the merge.
      *
+     * @param enabled         {@code false}: validated, never started
+     * @param provider        {@code null}: the only provider
+     * @param endpoint        receive address: {@code destination}, {@code subscription}, {@code options}
      * @param deadLetter      {@code null} without a dead-letter destination
      * @param delayedMaxSet   {@code retry.delayed.max} was set by the user; when not, the starter caps it to the
      *                        receiver's limit
      * @param reservationTtl  {@code null}: derived from the loop settings
      */
-    record Consumer(String name, String destination, String deadLetter, String failed, int concurrency,
+    record Consumer(String name, boolean enabled, String provider, Endpoint endpoint, String destination, String deadLetter, String failed, int concurrency,
                     Ordering ordering, EnvelopeMode envelope, boolean includeExceptionMessage,
                     BackoffSpec immediate, BackoffSpec delayed, boolean delayedMaxSet, DelayedStrategy strategy,
                     List<QueueBand> queues, List<Class<? extends Throwable>> nonRetryable,
@@ -61,63 +60,33 @@ final class InboxConfig {
     /** @throws IllegalStateException listing every problem */
     static List<Consumer> resolve(InboxProperties properties, ClassLoader loader) {
         List<String> problems = new ArrayList<>();
-        properties.getBrokers().forEach((name, broker) -> {
-            if (!MESSAGING.equals(broker.getType())) {
-                problems.add("inbox.brokers." + name + ".type must be 'messaging' (Kafka is not part of this library)");
-            }
-            unknownConfiguration("inbox.brokers." + name + ".configuration", broker.getConfiguration(), problems);
-        });
         ConsumerOptions defaults = properties.getDefaults() == null ? new ConsumerOptions() : properties.getDefaults();
         forbiddenInDefaults(defaults, problems);
-        unsupported("inbox.defaults", defaults, problems);
+        unsupported(DEFAULTS, defaults, problems);
         List<Consumer> consumers = new ArrayList<>();
         properties.getConsumers().forEach((name, options) -> {
-            Consumer consumer = consumer(name, options, defaults, properties, loader, problems);
+            Consumer consumer = consumer(name, options, defaults, loader, problems);
             if (consumer != null) {
                 consumers.add(consumer);
             }
         });
         if (!problems.isEmpty()) {
-            throw new IllegalStateException("Invalid inbox.* configuration:\n - " + String.join("\n - ", problems));
+            throw new IllegalStateException("Invalid messaging.receivers configuration:\n - "
+                    + String.join("\n - ", problems));
         }
         return consumers;
     }
 
-    private static Consumer consumer(String name, ConsumerOptions c, ConsumerOptions d, InboxProperties properties,
-                                     ClassLoader loader, List<String> problems) {
-        String prefix = "inbox.consumers." + name;
+    private static Consumer consumer(String name, ConsumerOptions c, ConsumerOptions d, ClassLoader loader,
+                                     List<String> problems) {
+        String prefix = RECEIVERS + name;
         int before = problems.size();
         unsupported(prefix, c, problems);
-        String broker = first(c.getBroker(), d.getBroker());
-        Map<String, String> brokerConfiguration = Map.of();
-        if (properties.getBrokers().isEmpty()) {
-            if (broker != null && !MESSAGING.equals(broker)) {
-                problems.add(prefix + ".broker '" + broker + "' does not exist (the implicit broker is 'messaging')");
-            }
-        } else if (broker == null) {
-            if (properties.getBrokers().size() == 1) {
-                brokerConfiguration = properties.getBrokers().values().iterator().next().getConfiguration();
-            } else {
-                problems.add(prefix + ".broker is required with more than one broker in inbox.brokers");
-            }
-        } else if (!properties.getBrokers().containsKey(broker)) {
-            problems.add(prefix + ".broker '" + broker + "' does not exist in inbox.brokers");
-        } else {
-            brokerConfiguration = properties.getBrokers().get(broker).getConfiguration();
-        }
         if (c.getDestination() == null) {
             problems.add(prefix + ".destination is required");
         }
         if (c.getFailed() == null) {
             problems.add(prefix + ".failed is required (ADR-0002)");
-        }
-        unknownConfiguration(prefix + ".configuration", c.getConfiguration(), problems);
-        Map<String, String> configuration = new LinkedHashMap<>();
-        if (brokerConfiguration != null) {
-            configuration.putAll(brokerConfiguration);
-        }
-        if (c.getConfiguration() != null) {
-            configuration.putAll(c.getConfiguration());
         }
 
         InboxProperties.Retry cr = c.getRetry() == null ? new InboxProperties.Retry() : c.getRetry();
@@ -161,17 +130,19 @@ final class InboxConfig {
         if (keyLanes < 1) {
             problems.add(prefix + ".key-lanes must be at least 1");
         }
-        int maxMessages = parse(prefix, configuration, "max-messages-per-poll", Integer::parseInt, 1, problems);
-        Duration pollWait = parse(prefix, configuration, "poll-wait", DurationStyle::detectAndParse,
-                Duration.ofSeconds(20), problems);
-        Duration maxProcessing = parse(prefix, configuration, "max-processing", DurationStyle::detectAndParse,
-                Duration.ofMinutes(15), problems);
-        Duration shutdownTimeout = parse(prefix, configuration, "shutdown-timeout", DurationStyle::detectAndParse,
-                Duration.ofSeconds(30), problems);
+        int maxMessages = first(c.getMaxMessagesPerPoll(), d.getMaxMessagesPerPoll(), 1);
+        if (maxMessages < 1) {
+            problems.add(prefix + ".max-messages-per-poll must be at least 1");
+        }
+        Duration pollWait = first(c.getPollWait(), d.getPollWait(), Duration.ofSeconds(20));
+        Duration maxProcessing = first(c.getMaxProcessing(), d.getMaxProcessing(), Duration.ofMinutes(15));
+        Duration shutdownTimeout = first(c.getShutdownTimeout(), d.getShutdownTimeout(), Duration.ofSeconds(30));
         if (problems.size() > before) {
             return null;
         }
-        return new Consumer(name, c.getDestination(), c.getDeadLetter(), c.getFailed(), concurrency,
+        Endpoint endpoint = new Endpoint(c.getDestination(), c.getSubscription(), null, c.getOptions());
+        return new Consumer(name, first(c.getEnabled(), true), first(c.getProvider(), d.getProvider()), endpoint,
+                c.getDestination(), c.getDeadLetter(), c.getFailed(), concurrency,
                 first(c.getOrdering(), d.getOrdering(), Ordering.RELAXED),
                 first(c.getEnvelope(), d.getEnvelope(), EnvelopeMode.AUTO), includeMessage, immediate, delayed,
                 delayedMaxSet, strategy, List.copyOf(queues), nonRetryable, skipImmediate, retryable, idempotency,
@@ -179,21 +150,20 @@ final class InboxConfig {
     }
 
     private static void forbiddenInDefaults(ConsumerOptions d, List<String> problems) {
-        String why = " belongs to one consumer and is not accepted in inbox.defaults";
-        if (d.getDestination() != null) {
-            problems.add("inbox.defaults.destination" + why);
-        }
-        if (d.getDeadLetter() != null) {
-            problems.add("inbox.defaults.dead-letter" + why);
-        }
-        if (d.getFailed() != null) {
-            problems.add("inbox.defaults.failed" + why);
-        }
-        if (d.getConfiguration() != null) {
-            problems.add("inbox.defaults.configuration is not accepted; use inbox.brokers.<name>.configuration");
-        }
+        String why = " belongs to one receiver and is not accepted in " + DEFAULTS;
+        forbidden(problems, why, "destination", d.getDestination(), "subscription", d.getSubscription(),
+                "dead-letter", d.getDeadLetter(), "failed", d.getFailed(), "enabled", d.getEnabled(),
+                "options", d.getOptions());
         if (d.getRetry() != null && d.getRetry().getDelayed() != null && d.getRetry().getDelayed().getQueues() != null) {
-            problems.add("inbox.defaults.retry.delayed.queues" + why);
+            problems.add(DEFAULTS + ".retry.delayed.queues" + why);
+        }
+    }
+
+    private static void forbidden(List<String> problems, String why, Object... namesAndValues) {
+        for (int i = 0; i < namesAndValues.length; i += 2) {
+            if (namesAndValues[i + 1] != null) {
+                problems.add(DEFAULTS + "." + namesAndValues[i] + why);
+            }
         }
     }
 
@@ -214,14 +184,6 @@ final class InboxConfig {
         if (o.getBatch() != null) {
             problems.add(prefix + ".batch" + later + " (F6)");
         }
-    }
-
-    private static void unknownConfiguration(String prefix, Map<String, String> configuration, List<String> problems) {
-        if (configuration == null) {
-            return;
-        }
-        configuration.keySet().stream().filter(k -> !CONFIGURATION_KEYS.contains(k)).forEach(k -> problems.add(
-                prefix + "." + k + " is unknown; accepted: " + String.join(", ", CONFIGURATION_KEYS.stream().sorted().toList())));
     }
 
     private static BackoffSpec spec(String prefix, Backoff library, Backoff defaults, Backoff consumer,
@@ -247,20 +209,6 @@ final class InboxConfig {
         } catch (IllegalArgumentException e) {
             problems.add(prefix + ": " + e.getMessage());
             return List.of();
-        }
-    }
-
-    private static <T> T parse(String prefix, Map<String, String> configuration, String key, Function<String, T> parser,
-                               T fallback, List<String> problems) {
-        String value = configuration.get(key);
-        if (value == null) {
-            return fallback;
-        }
-        try {
-            return parser.apply(value.trim());
-        } catch (RuntimeException e) {
-            problems.add(prefix + ".configuration." + key + ": invalid value '" + value + "'");
-            return fallback;
         }
     }
 

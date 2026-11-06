@@ -109,6 +109,15 @@ class MessagingAutoConfigurationTest {
     }
 
     @Test
+    void legacyInboxKeysFail() {
+        for (String key : java.util.List.of("inbox.consumers.x.destination", "inbox.defaults.key-lanes",
+                "inbox.enabled", "inbox.brokers.messaging.type")) {
+            runner.withPropertyValues(key + "=1").run(context -> assertThat(context).getFailure().rootCause()
+                    .as(key).hasMessageContaining("inbox.* was removed; use messaging.receivers"));
+        }
+    }
+
+    @Test
     void requiredCapabilitiesAreCheckedAtStartup() {
         runner.withPropertyValues("messaging.senders.pedidos.destination=" + QUEUE + "pedidos",
                         "messaging.senders.pedidos.options.require=ordered-delivery,lease-expired-on-ack")

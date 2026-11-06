@@ -38,12 +38,17 @@ public record MessagingProperties(Map<String, Provider> providers, Map<String, S
      * Liga {@code messaging.providers} e {@code messaging.senders}, cada raiz em modo estrito. As outras chaves de
      * {@code messaging.*} (receivers) não são deste binding.
      *
-     * @throws IllegalStateException com {@code messaging.destinations}, removido
+     * @throws IllegalStateException com {@code messaging.destinations} ou {@code inbox.*}, removidos
      */
     public static MessagingProperties bind(Binder binder) {
         if (binder.bind("messaging.destinations", Bindable.mapOf(String.class, Object.class)).isBound()) {
             throw new IllegalStateException("messaging.destinations foi removido; use messaging.senders e "
                     + "messaging.receivers, com o endereço em destination (ADR-0008)");
+        }
+        Map<String, Object> inbox = binder.bind("inbox", Bindable.mapOf(String.class, Object.class)).orElse(Map.of());
+        if (inbox.keySet().stream().anyMatch(Set.of("enabled", "defaults", "consumers", "brokers")::contains)) {
+            throw new IllegalStateException("inbox.* was removed; use messaging.receivers, messaging.receiver-defaults "
+                    + "and messaging.receivers-enabled (ADR-0008)");
         }
         BindHandler strict = new NoUnboundElementsBindHandler(BindHandler.DEFAULT);
         return new MessagingProperties(

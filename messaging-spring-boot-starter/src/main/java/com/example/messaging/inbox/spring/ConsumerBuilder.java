@@ -58,7 +58,7 @@ final class ConsumerBuilder {
     }
 
     private InboxConsumer build(InboxConfig.Consumer c, HandlerBinding.Bound handler, MessageReceiver probe) {
-        String prefix = "inbox.consumers." + c.name();
+        String prefix = InboxConfig.RECEIVERS + c.name();
         Capabilities caps = probe.capabilities();
         BackoffSpec delayed = c.delayed();
         if (!c.delayedMaxSet() && caps.delayedRedelivery()
