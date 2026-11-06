@@ -258,7 +258,7 @@ messaging:
   continua valendo.
 - A tag `destination` das métricas é o nome do receiver (nunca a URL); as
   cópias usam `<receiver>.dead-letter`, `<receiver>.failed` e
-  `<receiver>.retry.<segundos>s`.
+  `<receiver>.retry.<índice>`.
 
 ## Alternativas descartadas
 
