@@ -359,20 +359,29 @@ public final class JmsMessageReceiver implements MessageReceiver {
     }
 
     private void scheduleExpiry(Slot slot, long generation, Instant at) {
-        long delay = Math.max(0, Duration.between(Instant.now(), at).toMillis());
+        long delay = Math.max(0, Duration.between(Instant.now(), at).toNanos());
         try {
-            expirer.schedule(() -> Thread.startVirtualThread(() -> expire(slot, generation)), delay,
-                    TimeUnit.MILLISECONDS);
+            expirer.schedule(() -> Thread.startVirtualThread(() -> expire(slot, generation, at)), delay,
+                    TimeUnit.NANOSECONDS);
         } catch (RejectedExecutionException e) {
             // receiver fechado: o close devolve as mensagens
         }
     }
 
-    /** Devolve a mensagem ao broker se o prazo venceu; um prazo estendido tem a própria verificação. */
-    private void expire(Slot slot, long generation) {
+    /**
+     * Devolve a mensagem ao broker quando vence o prazo {@code at}; um prazo estendido tem o próprio
+     * timer. O agendador conta pelo relógio monotônico e pode acordar antes de {@code at} pelo
+     * {@link Instant#now()}: aí reagenda, senão a mensagem ficaria presa até a session fechar.
+     */
+    private void expire(Slot slot, long generation, Instant at) {
         slot.lock.lock();
         try {
-            if (slot.generation == generation && slot.pending != null && !Instant.now().isBefore(slot.expiresAt)) {
+            if (slot.generation != generation || slot.pending == null || !at.equals(slot.expiresAt)) {
+                return;
+            }
+            if (Instant.now().isBefore(at)) {
+                scheduleExpiry(slot, generation, at);
+            } else {
                 recycle(slot);
             }
         } finally {
