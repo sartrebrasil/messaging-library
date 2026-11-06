@@ -2,15 +2,21 @@ package com.example.messaging.spring;
 
 import com.example.messaging.MessageReceiver;
 import com.example.messaging.MessageSender;
-import com.example.messaging.aws.SnsMessageSender;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Sem rede: os clientes do SDK só conectam no primeiro uso. */
+/**
+ * Regras de {@code messaging.*} e ligação por nome, sobre o {@link InMemoryProviderFactory}; o
+ * comportamento de cada SDK é testado no adapter ({@code *AutoConfigurationTest}).
+ */
 class MessagingAutoConfigurationTest {
 
     private static final String AWS = "messaging.providers.aws.";
@@ -39,13 +45,10 @@ class MessagingAutoConfigurationTest {
 
                     MessageSender sender = destinations.sender("pedidos");
                     assertThat(destinations.sender("pedidos")).isSameAs(sender);
-                    assertThat(destinations.sender("eventos").capabilities().maxMessageBytes()).isEqualTo(1048576);
 
                     MessageReceiver first = destinations.receiver("pedidos");
                     MessageReceiver second = destinations.receiver("pedidos");
                     assertThat(first).isNotSameAs(second);
-                    // DLQ por cópia configurada a partir de dead-letter
-                    assertThat(first.capabilities().nativeDeadLetter()).isFalse();
                 });
     }
 
@@ -55,8 +58,7 @@ class MessagingAutoConfigurationTest {
                         "messaging.destinations.eventos.topic-arn=arn:aws:sns:us-east-1:000000000000:eventos")
                 .run(context -> {
                     MessagingDestinations destinations = context.getBean(MessagingDestinations.class);
-                    assertThat(destinations.sender("eventos").capabilities().maxMessageBytes())
-                            .isEqualTo(SnsMessageSender.DEFAULT_MAX_MESSAGE_BYTES);
+                    assertThat(destinations.sender("eventos")).isNotNull();
                     org.assertj.core.api.Assertions.assertThatThrownBy(() -> destinations.receiver("eventos"))
                             .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("não recebe");
                     org.assertj.core.api.Assertions.assertThatThrownBy(() -> destinations.sender("nao-existe"))
@@ -87,21 +89,6 @@ class MessagingAutoConfigurationTest {
     }
 
     @Test
-    void requiredCapabilitiesAreCheckedAtStartup() {
-        runner.withPropertyValues("messaging.destinations.pedidos.provider=aws",
-                        "messaging.destinations.pedidos.queue-url=" + QUEUE + "pedidos",
-                        "messaging.destinations.pedidos.require=ordered-delivery,lease-expired-on-ack")
-                .run(context -> assertThat(context).getFailure().rootCause()
-                        .hasMessageContaining("pedidos.require ORDERED_DELIVERY: o sender não suporta")
-                        .hasMessageContaining("pedidos.require LEASE_EXPIRED_ON_ACK: o receiver não suporta"));
-
-        runner.withPropertyValues("messaging.destinations.pedidos.provider=aws",
-                        "messaging.destinations.pedidos.queue-url=" + QUEUE + "pedidos.fifo",
-                        "messaging.destinations.pedidos.require=ordered-delivery,delayed-redelivery")
-                .run(context -> assertThat(context).hasNotFailed());
-    }
-
-    @Test
     void azureAndGcpRulesAreValidated() {
         runner.withPropertyValues(
                         "messaging.providers.azure.type=azure",
@@ -124,29 +111,11 @@ class MessagingAutoConfigurationTest {
     }
 
     @Test
-    void azureDeadLetterQueueIsReceiveOnly() {
+    void azureDeadLetterQueueRulesAreValidated() {
         ApplicationContextRunner azure = runner.withPropertyValues(
                 "messaging.providers.azure.type=azure",
                 "messaging.providers.azure.connection-string=Endpoint=sb://localhost;SharedAccessKeyName=k;"
                         + "SharedAccessKey=v;UseDevelopmentEmulator=true;");
-
-        azure.withPropertyValues(
-                        "messaging.destinations.pedidos-dlq.provider=azure",
-                        "messaging.destinations.pedidos-dlq.queue=pedidos",
-                        "messaging.destinations.pedidos-dlq.sessions=true",
-                        "messaging.destinations.pedidos-dlq.dead-letter-queue=true",
-                        "messaging.destinations.eventos-dlq.provider=azure",
-                        "messaging.destinations.eventos-dlq.topic=eventos",
-                        "messaging.destinations.eventos-dlq.subscription=faturamento",
-                        "messaging.destinations.eventos-dlq.dead-letter-queue=true")
-                .run(context -> {
-                    MessagingDestinations destinations = context.getBean(MessagingDestinations.class);
-                    // a DLQ não tem sessions: receiver comum, mesmo com sessions na entidade
-                    assertThat(destinations.receiver("pedidos-dlq").capabilities().orderedDelivery()).isFalse();
-                    assertThat(destinations.receiver("eventos-dlq").capabilities().nativeDeadLetter()).isTrue();
-                    org.assertj.core.api.Assertions.assertThatThrownBy(() -> destinations.sender("pedidos-dlq"))
-                            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("não envia");
-                });
 
         azure.withPropertyValues(
                         "messaging.destinations.sem-sub.provider=azure",
@@ -170,5 +139,34 @@ class MessagingAutoConfigurationTest {
                         "messaging.destinations.pedidos.queue-url=" + QUEUE + "pedidos",
                         "management.health.messaging.enabled=true")
                 .run(context -> assertThat(context).hasSingleBean(HealthIndicator.class));
+    }
+
+    @Test
+    void typeWithoutAdapterAsksForTheDependency() {
+        runner.withPropertyValues("messaging.providers.rmq.type=rabbitmq")
+                .run(context -> assertThat(context).getFailure().rootCause()
+                        .hasMessageContaining("messaging.providers.rmq: adicione a dependência messaging-rabbitmq"));
+    }
+
+    @Test
+    void twoAdaptersForOneTypeAreReported() {
+        List<String> problems = new ArrayList<>();
+        ProviderFactory other = new ProviderFactory() {
+            @Override
+            public Set<MessagingProperties.Type> types() {
+                return Set.of(MessagingProperties.Type.AWS);
+            }
+
+            @Override
+            public ProviderConnection connect(String name, MessagingProperties.Provider provider,
+                                              org.springframework.beans.factory.ListableBeanFactory beans) {
+                throw new AssertionError("não conecta");
+            }
+        };
+
+        assertThat(MessagingDestinations.byType(List.of(new InMemoryProviderFactory(), other), problems))
+                .containsOnlyKeys(MessagingProperties.Type.AWS, MessagingProperties.Type.AZURE,
+                        MessagingProperties.Type.GCP);
+        assertThat(problems).singleElement().asString().contains("dois adapters atendem o tipo AWS");
     }
 }
