@@ -158,5 +158,5 @@ Ainda abertas:
 |---|---|
 | Licença do LocalStack 4.14.0 para uso comercial | Decidido fixar a 4.14.0 (2026-10-04). Confirmar com o jurídico; se não cobrir, licença paga (Base) ou ElasticMQ só para SQS |
 | Peek em entidade com sessions por receiver comum | Não coberto pelo contrato (o `checkAccess` testado é o do receiver sem sessions); validar no emulator |
-| DLQ intermitente no Service Bus emulator | Bug do emulator, não do adapter; validar contra Service Bus real antes de tratar no teste |
+| DLQ intermitente no Service Bus emulator | Bug do emulator, não do adapter: no `complete` da mensagem lida da DLQ, o emulator 2.0.0 às vezes derruba o link (`amqp:link:detach-forced`, "InnerMessageReceiver was closed"). `deadLetterMovesMessageToDeadLetterQueue` fica pulado nos contratos do Service Bus (`deadLetterQueueAckWorks`) até passar contra o Service Bus real |
 | SQS 1 MiB no LocalStack escolhido | Validado na F2 (`acceptsMessageCloseToOneMebibyte`) |
