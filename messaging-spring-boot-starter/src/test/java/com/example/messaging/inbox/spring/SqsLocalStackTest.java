@@ -1,7 +1,12 @@
 package com.example.messaging.inbox.spring;
 
 import com.example.messaging.inbox.InboxHandler;
+import com.example.messaging.MessageReceiver;
+import com.example.messaging.OutgoingMessage;
+import com.example.messaging.ReceivedMessage;
 import com.example.messaging.spring.MessagingAutoConfiguration;
+import com.example.messaging.spring.MessagingDestinations;
+import com.example.messaging.spring.MessagingProperties.Endpoint;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -31,6 +36,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 import static com.example.messaging.inbox.spring.InboxAutoConfigurationTest.await;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** The starter over the real messaging-lib path: MessagingDestinations, the SQS adapter and LocalStack (as engine-tax). */
 @Testcontainers(disabledWithoutDocker = true)
@@ -93,6 +99,41 @@ class SqsLocalStackTest {
                     assertThat(copies.getFirst().messageAttributes().toString())
                             .contains("inbox_failure", "exception=tools.jackson.core.exc.StreamReadException", "inbox_attempts", "dead_letter", id);
                 });
+    }
+
+    @Test
+    void receiverByQueueName() {
+        String byName = queue("by-name");
+        messagingOnly().run(context -> {
+            MessagingDestinations destinations = context.getBean(MessagingDestinations.class);
+            destinations.sender("s", null, new Endpoint("by-name", null, null, null))
+                    .send(OutgoingMessage.ofText("pelo nome"));
+            try (MessageReceiver receiver = destinations.receiver("r", null, new Endpoint(byName, null, null, null),
+                    null)) {
+                ReceivedMessage message = receiver.receive(1, Duration.ofSeconds(5)).getFirst();
+                assertThat(message.bodyAsString()).isEqualTo("pelo nome");
+                receiver.ack(message);
+            }
+        });
+    }
+
+    @Test
+    void unknownQueueNameFailsOnCreation() {
+        messagingOnly().run(context -> assertThatThrownBy(() -> context.getBean(MessagingDestinations.class)
+                .receiver("r", null, new Endpoint("nao-existe", null, null, null), null))
+                .hasMessageContaining("messaging.receivers.r.destination: fila SQS 'nao-existe' não existe"));
+        messagingOnly().withPropertyValues("messaging.senders.s.destination=nao-existe")
+                .run(context -> assertThat(context).getFailure().rootCause()
+                        .hasMessageContaining("messaging.senders.s.destination: fila SQS 'nao-existe' não existe"));
+    }
+
+    private static ApplicationContextRunner messagingOnly() {
+        return new ApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(MessagingAutoConfiguration.class))
+                .withPropertyValues("messaging.providers.aws.type=aws", "messaging.providers.aws.region=us-east-1",
+                        "messaging.providers.aws.endpoint=http://" + LOCALSTACK.getHost() + ":"
+                                + LOCALSTACK.getMappedPort(4566),
+                        "messaging.providers.aws.access-key=test", "messaging.providers.aws.secret-key=test");
     }
 
     private static String queue(String name) {

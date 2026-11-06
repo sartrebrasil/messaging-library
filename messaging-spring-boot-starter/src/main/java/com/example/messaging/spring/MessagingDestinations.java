@@ -1,6 +1,7 @@
 package com.example.messaging.spring;
 
 import com.example.messaging.Capabilities;
+import com.example.messaging.DestinationNotFoundException;
 import com.example.messaging.MessageReceiver;
 import com.example.messaging.MessageSender;
 import com.example.messaging.spring.MessagingProperties.Destination;
@@ -100,9 +101,15 @@ public final class MessagingDestinations implements AutoCloseable {
             });
             if (problems.isEmpty()) {
                 connect(beans);
-                configured.forEach((name, r) -> senders.put(name, newSender(name, r)));
-                configured.forEach((name, r) -> checkSenderRequirements("messaging.senders." + name, r,
-                        senders.get(name), problems));
+                configured.forEach((name, r) -> {
+                    try {
+                        senders.put(name, newSender(name, r));
+                    } catch (DestinationNotFoundException e) {
+                        problems.add("messaging.senders." + name + ".destination: " + e.getMessage());
+                    }
+                });
+                senders.forEach((name, sender) -> checkSenderRequirements("messaging.senders." + name,
+                        configured.get(name), sender, problems));
             }
         } catch (RuntimeException e) {
             close();
@@ -154,7 +161,7 @@ public final class MessagingDestinations implements AutoCloseable {
      */
     public MessageReceiver receiver(String name, String provider, Endpoint endpoint, MessageSender deadLetter) {
         Resolved r = resolveOrThrow(RECEIVERS + name, provider, endpoint, true);
-        MessageReceiver receiver = newReceiver(name, r, deadLetter);
+        MessageReceiver receiver = notFound(RECEIVERS + name, () -> newReceiver(name, r, deadLetter));
         if (!receivers.containsKey(name)) {
             List<String> problems = new ArrayList<>();
             for (Requirement requirement : r.destination().require()) {
@@ -181,7 +188,16 @@ public final class MessagingDestinations implements AutoCloseable {
      */
     public MessageSender sender(String name, String provider, Endpoint endpoint) {
         return endpointSenders.computeIfAbsent(name,
-                n -> newSender(n, resolveOrThrow(RECEIVERS + n, provider, endpoint, false)));
+                n -> notFound(RECEIVERS + n, () -> newSender(n, resolveOrThrow(RECEIVERS + n, provider, endpoint, false))));
+    }
+
+    /** Endereço que o provedor não encontra (fila SQS por nome) é erro de configuração. */
+    private static <T> T notFound(String key, java.util.function.Supplier<T> create) {
+        try {
+            return create.get();
+        } catch (DestinationNotFoundException e) {
+            throw invalid(List.of(key + ".destination: " + e.getMessage()));
+        }
     }
 
     /** Usado pelo health check: um receiver por nome, reaproveitado entre checagens; senão o sender. */
