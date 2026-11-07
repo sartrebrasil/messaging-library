@@ -149,8 +149,11 @@ public final class InboxConsumer {
         long begin = System.nanoTime();
         try {
             deadLetterPass.runPass();
-        } catch (RuntimeException e) {
-            LOG.log(System.Logger.Level.ERROR, "Consumer " + settings.consumer() + ": dead-letter pass failed", e);
+        } catch (OutOfMemoryError e) {
+            throw e;
+        } catch (Throwable t) {
+            // anything escaping would cancel every later pass of scheduleWithFixedDelay, silently
+            LOG.log(System.Logger.Level.ERROR, "Consumer " + settings.consumer() + ": dead-letter pass failed", t);
         }
         Duration took = Duration.ofNanos(System.nanoTime() - begin);
         if (took.compareTo(settings.deadLetterInterval()) > 0) {

@@ -3,6 +3,7 @@ package com.example.messaging.inbox;
 import com.example.messaging.KeepAlive;
 import com.example.messaging.MessageReceiver;
 import com.example.messaging.ReceivedMessage;
+import com.example.messaging.inbox.retry.AttemptState;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -126,11 +127,17 @@ final class DeadLetterPass {
                 outcome = new Outcome.DeadLetter(retry.next(), retry.cause());
             }
             applied = applier.apply(receiver, message, outcome);
-        } catch (RuntimeException e) {
+        } catch (OutOfMemoryError e) {
+            throw e;
+        } catch (Throwable t) {
+            // Errors too (StackOverflowError, AssertionError): to failed, not back to the DLQ, where a queue that
+            // returns it to the head would stall every later pass on it (T-88/B20 in the Worker)
             LOG.log(System.Logger.Level.ERROR, "Consumer " + settings.consumer() + ": unexpected failure on message "
-                    + message.messageId() + " in a dead-letter pass; released", e);
-            outcome = Outcome.RELEASE;
-            applied = applier.release(receiver, message, Effect.RELEASED);
+                    + message.messageId() + " in a dead-letter pass; sent to failed", t);
+            outcome = new Outcome.Failed(Outcome.FailureReason.NON_RETRYABLE,
+                    AttemptState.from(message.attributes().get(AttemptState.ATTRIBUTE), 0), t,
+                    "unexpected failure in a dead-letter pass");
+            applied = applier.apply(receiver, message, outcome);
         } finally {
             lease.close();
         }

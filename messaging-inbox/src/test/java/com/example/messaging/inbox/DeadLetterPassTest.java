@@ -191,4 +191,18 @@ class DeadLetterPassTest {
 
         assertEquals(PassEnd.RECEIVE_FAILED, pass(m -> HandlerResult.ack(), broken, 100, null).runPass());
     }
+
+    /** An Error from the handler (StackOverflowError, AssertionError) does not escape the pass (review C1). */
+    @Test
+    void anErrorInTheHandlerGoesToFailedAndDoesNotEscape() {
+        park(OUTBOX, 0);
+
+        PassEnd end = pass(m -> {
+            throw new AssertionError("poison");
+        }).runPass();
+
+        assertEquals(PassEnd.EMPTY, end);
+        assertEquals(0, messaging.size(DLQ));
+        assertEquals(1, messaging.size(FAILED));
+    }
 }

@@ -475,6 +475,24 @@ class InboxConsumerTest {
         await(() -> messaging.size(DLQ) == 1);
     }
 
+    /** An Error in a pass must not cancel the schedule (review C1): the next pass still runs. */
+    @Test
+    void passesSurviveAnError() {
+        parkInDeadLetter("m-1");
+        var first = new AtomicBoolean(true);
+        start(passSettings(Duration.ofMillis(100), Duration.ofSeconds(2)), passPolicy(3), m -> {
+            if (first.getAndSet(false)) {
+                throw new AssertionError("poison");
+            }
+            handled.add(m);
+            return null;
+        }, withDeadLetterPass());
+        await(() -> messaging.size(FAILED) == 1);
+
+        parkInDeadLetter("m-2");
+        await(() -> handled.size() == 1);
+    }
+
     @Test
     void slowPassDoesNotOverlap() {
         var running = new AtomicInteger();
