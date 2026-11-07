@@ -77,6 +77,35 @@ class InboxConfigTest {
     }
 
     @Test
+    void deadLetterDefaults() {
+        var consumer = single(Map.of(C + "destination", "orders", C + "failed", "f", C + "dead-letter", "dlq"));
+
+        assertThat(consumer.deadLetterMaxAttempts()).isEqualTo(3);
+        assertThat(consumer.deadLetterInterval()).isEqualTo(Duration.ofMinutes(15));
+        assertThat(consumer.deadLetterMaxPerPass()).isEqualTo(100);
+    }
+
+    @Test
+    void deadLetterReceiverOverDefaults() {
+        var consumer = single(Map.of(D + "retry.dead-letter.interval", "5m", D + "retry.dead-letter.max-attempts", "1",
+                C + "destination", "orders", C + "failed", "f", C + "dead-letter", "dlq",
+                C + "retry.dead-letter.max-attempts", "0"));
+
+        assertThat(consumer.deadLetterMaxAttempts()).isEqualTo(0);
+        assertThat(consumer.deadLetterInterval()).isEqualTo(Duration.ofMinutes(5));
+    }
+
+    @Test
+    void invalidDeadLetterValues() {
+        assertThatThrownBy(() -> resolve(Map.of(C + "destination", "orders", C + "failed", "f",
+                C + "retry.dead-letter.max-attempts", "-1", C + "retry.dead-letter.interval", "0s",
+                C + "retry.dead-letter.max-per-pass", "0")))
+                .hasMessageContaining(C + "retry.dead-letter.max-attempts must be at least 0")
+                .hasMessageContaining(C + "retry.dead-letter.interval must be positive")
+                .hasMessageContaining(C + "retry.dead-letter.max-per-pass must be at least 1");
+    }
+
+    @Test
     void addressFieldsGoToTheEndpoint() {
         var consumer = single(Map.of(
                 C + "destination", "orders", C + "subscription", "billing", C + "failed", "orders-failed",
@@ -103,14 +132,14 @@ class InboxConfigTest {
     void everyProblemIsReportedAtOnce() {
         Map<String, String> values = new HashMap<>();
         values.put(D + "circuit-breaker.enabled", "true");
-        values.put(C + "retry.dead-letter.max-attempts", "3");
+        values.put(C + "retry.dead-letter.concurrency", "2");
         values.put(C + "retry.non-retryable[0]", "com.acme.Typo");
         values.put(C + "retry.immediate.jitter", "2");
 
         assertThatThrownBy(() -> resolve(values))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining(D + "circuit-breaker is not supported yet (F6)")
-                .hasMessageContaining(C + "retry.dead-letter (level 3) is not supported yet (F5)")
+                .hasMessageContaining(C + "retry.dead-letter.concurrency is not supported yet")
                 .hasMessageContaining(C + "destination is required")
                 .hasMessageContaining(C + "failed is required")
                 .hasMessageContaining("com.acme.Typo")

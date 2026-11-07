@@ -81,4 +81,17 @@ class SafeObserverTest {
 
         assertDoesNotThrow(() -> observer.delivered(null));
     }
+
+    @Test
+    void passEndedReachesTheDelegate() {
+        var ends = new java.util.ArrayList<PassEnd>();
+        new SafeObserver(new ConsumerObserver() {
+            @Override
+            public void passEnded(PassEnd end, int processed) {
+                ends.add(end);
+            }
+        }).passEnded(PassEnd.EMPTY, 0);
+
+        org.junit.jupiter.api.Assertions.assertEquals(java.util.List.of(PassEnd.EMPTY), ends);
+    }
 }

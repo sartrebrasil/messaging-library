@@ -151,6 +151,20 @@ class InboxAutoConfigurationTest {
     }
 
     @Test
+    void deadLetterPassEndToEnd() {
+        runner.withUserConfiguration(Functional.class)
+                .withPropertyValues(C + "retry.dead-letter.interval=200ms")
+                .run(context -> {
+                    InMemoryMessaging messaging = context.getBean(InMemoryMessaging.class);
+                    messaging.queueSender("orders-dlq").send(OutgoingMessage.ofText(ORDER)
+                            .withAttribute("inbox_attempts", "l2=5;l3=0"));
+
+                    await(() -> HANDLED.size() == 1 && messaging.size("orders-dlq") == 0);
+                    assertThat(Broker.REQUESTED).contains("receiver billing-orders.dead-letter");
+                });
+    }
+
+    @Test
     void copiesUseReceiverScopedNames() {
         runner.withUserConfiguration(Listener.class).run(context -> {
             context.getBean(InMemoryMessaging.class).queueSender("orders").send(OutgoingMessage.ofText(ORDER));

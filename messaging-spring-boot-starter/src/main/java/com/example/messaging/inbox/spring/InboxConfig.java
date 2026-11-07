@@ -51,7 +51,7 @@ final class InboxConfig {
                     List<Class<? extends Throwable>> skipImmediate, List<Class<? extends Throwable>> retryable,
                     boolean idempotency, Duration completedTtl, Duration reservationTtl,
                     int maxMessagesPerPoll, Duration pollWait, Duration maxProcessing, Duration shutdownTimeout,
-                    int keyLanes) {
+                    int keyLanes, int deadLetterMaxAttempts, Duration deadLetterInterval, int deadLetterMaxPerPass) {
     }
 
     private InboxConfig() {
@@ -141,12 +141,32 @@ final class InboxConfig {
             return null;
         }
         Endpoint endpoint = new Endpoint(c.getDestination(), c.getSubscription(), null, c.getOptions());
+        InboxProperties.DeadLetterRetry cl = cr.getDeadLetter() == null ? new InboxProperties.DeadLetterRetry()
+                : cr.getDeadLetter();
+        InboxProperties.DeadLetterRetry dl = dr.getDeadLetter() == null ? new InboxProperties.DeadLetterRetry()
+                : dr.getDeadLetter();
+        int deadLetterAttempts = first(cl.getMaxAttempts(), dl.getMaxAttempts(), 3);
+        Duration deadLetterInterval = first(cl.getInterval(), dl.getInterval(), Duration.ofMinutes(15));
+        int deadLetterMaxPerPass = first(cl.getMaxPerPass(), dl.getMaxPerPass(), 100);
+        if (deadLetterAttempts < 0) {
+            problems.add(prefix + ".retry.dead-letter.max-attempts must be at least 0");
+        }
+        if (deadLetterInterval.isNegative() || deadLetterInterval.isZero()) {
+            problems.add(prefix + ".retry.dead-letter.interval must be positive");
+        }
+        if (deadLetterMaxPerPass < 1) {
+            problems.add(prefix + ".retry.dead-letter.max-per-pass must be at least 1");
+        }
+        if (problems.size() > before) {
+            return null;
+        }
         return new Consumer(name, first(c.getEnabled(), true), first(c.getProvider(), d.getProvider()), endpoint,
                 c.getDestination(), c.getDeadLetter(), c.getFailed(), concurrency,
                 first(c.getOrdering(), d.getOrdering(), Ordering.RELAXED),
                 first(c.getEnvelope(), d.getEnvelope(), EnvelopeMode.AUTO), includeMessage, immediate, delayed,
                 delayedMaxSet, strategy, List.copyOf(queues), nonRetryable, skipImmediate, retryable, idempotency,
-                completedTtl, reservationTtl, maxMessages, pollWait, maxProcessing, shutdownTimeout, keyLanes);
+                completedTtl, reservationTtl, maxMessages, pollWait, maxProcessing, shutdownTimeout, keyLanes,
+                deadLetterAttempts, deadLetterInterval, deadLetterMaxPerPass);
     }
 
     private static void forbiddenInDefaults(ConsumerOptions d, List<String> problems) {
@@ -169,8 +189,9 @@ final class InboxConfig {
 
     private static void unsupported(String prefix, ConsumerOptions o, List<String> problems) {
         String later = " is not supported yet";
-        if (o.getRetry() != null && o.getRetry().getDeadLetter() != null) {
-            problems.add(prefix + ".retry.dead-letter (level 3)" + later + " (F5)");
+        if (o.getRetry() != null && o.getRetry().getDeadLetter() != null
+                && o.getRetry().getDeadLetter().getConcurrency() != null) {
+            problems.add(prefix + ".retry.dead-letter.concurrency" + later + " (passes run one message at a time)");
         }
         if (o.getStaleCheck() != null) {
             problems.add(prefix + ".stale-check" + later + " (F6)");

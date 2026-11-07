@@ -61,6 +61,11 @@ final class SafeObserver implements ConsumerObserver {
         run(() -> delegate.receiveFailed(failure));
     }
 
+    @Override
+    public void passEnded(PassEnd end, int processed) {
+        run(() -> delegate.passEnded(end, processed));
+    }
+
     private static void run(Runnable call) {
         try {
             call.run();

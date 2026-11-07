@@ -85,7 +85,11 @@ public class InboxAutoConfiguration {
         Function<InboxConfig.Consumer, ConsumerObserver> observers = MICROMETER
                 ? c -> MicrometerSupport.observer(c, beans, clock, () -> lifecycle[0].lastReceive(c.name()))
                 : c -> ConsumerObserver.NONE;
-        ConsumerBuilder builder = new ConsumerBuilder(lazy(destinations), deserializer, beans, observers, clock);
+        Function<InboxConfig.Consumer, ConsumerObserver> passObservers = MICROMETER
+                ? c -> MicrometerSupport.passObserver(c, beans, clock)
+                : c -> ConsumerObserver.NONE;
+        ConsumerBuilder builder = new ConsumerBuilder(lazy(destinations), deserializer, beans, observers, passObservers,
+                clock);
         lifecycle[0] = new InboxLifecycle(properties, beans, builder);
         return lifecycle[0];
     }

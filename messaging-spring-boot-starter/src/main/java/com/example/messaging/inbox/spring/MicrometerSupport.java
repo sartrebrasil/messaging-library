@@ -38,4 +38,15 @@ final class MicrometerSupport {
         }
         return new MicrometerConsumerObserver(c.name(), c.name(), meters, observations, clock);
     }
+
+    /** The level-3 passes of {@code c} (ADR-0002): its metrics under {@code <consumer>.dead-letter}, no liveness gauge. */
+    static ConsumerObserver passObserver(InboxConfig.Consumer c, ListableBeanFactory beans, Clock clock) {
+        MeterRegistry meters = beans.getBeanProvider(MeterRegistry.class).getIfAvailable();
+        ObservationRegistry observations = beans.getBeanProvider(ObservationRegistry.class).getIfAvailable();
+        if (meters == null && observations == null) {
+            return ConsumerObserver.NONE;
+        }
+        String name = c.name() + ".dead-letter";
+        return new MicrometerConsumerObserver(name, name, meters, observations, clock);
+    }
 }

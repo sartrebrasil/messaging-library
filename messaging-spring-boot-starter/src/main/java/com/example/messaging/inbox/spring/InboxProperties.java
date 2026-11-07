@@ -262,8 +262,8 @@ public class InboxProperties {
 
         private Backoff immediate;
         private Delayed delayed;
-        /** Level 3: not built yet (F5). */
-        private Map<String, Object> deadLetter;
+        /** Level 3: slow passes over the DLQ (ADR-0002). */
+        private DeadLetterRetry deadLetter;
         private List<String> nonRetryable;
         private List<String> skipImmediate;
         /** Not empty: allowlist mode (ADR-0014). */
@@ -287,11 +287,11 @@ public class InboxProperties {
             this.delayed = delayed;
         }
 
-        public Map<String, Object> getDeadLetter() {
+        public DeadLetterRetry getDeadLetter() {
             return deadLetter;
         }
 
-        public void setDeadLetter(Map<String, Object> deadLetter) {
+        public void setDeadLetter(DeadLetterRetry deadLetter) {
             this.deadLetter = deadLetter;
         }
 
@@ -325,6 +325,47 @@ public class InboxProperties {
 
         public void setIncludeExceptionMessage(Boolean includeExceptionMessage) {
             this.includeExceptionMessage = includeExceptionMessage;
+        }
+    }
+
+    /** {@code retry.dead-letter}: passes over the DLQ (ADR-0002); {@code concurrency} is not built yet. */
+    public static class DeadLetterRetry {
+
+        private Integer maxAttempts;
+        private Duration interval;
+        private Integer maxPerPass;
+        private Integer concurrency;
+
+        public Integer getMaxAttempts() {
+            return maxAttempts;
+        }
+
+        public void setMaxAttempts(Integer maxAttempts) {
+            this.maxAttempts = maxAttempts;
+        }
+
+        public Duration getInterval() {
+            return interval;
+        }
+
+        public void setInterval(Duration interval) {
+            this.interval = interval;
+        }
+
+        public Integer getMaxPerPass() {
+            return maxPerPass;
+        }
+
+        public void setMaxPerPass(Integer maxPerPass) {
+            this.maxPerPass = maxPerPass;
+        }
+
+        public Integer getConcurrency() {
+            return concurrency;
+        }
+
+        public void setConcurrency(Integer concurrency) {
+            this.concurrency = concurrency;
         }
     }
 

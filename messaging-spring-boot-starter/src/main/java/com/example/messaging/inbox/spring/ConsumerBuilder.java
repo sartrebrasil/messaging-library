@@ -38,14 +38,17 @@ final class ConsumerBuilder {
     private final PayloadDeserializer deserializer;
     private final ListableBeanFactory beans;
     private final Function<InboxConfig.Consumer, ConsumerObserver> observers;
+    private final Function<InboxConfig.Consumer, ConsumerObserver> passObservers;
     private final Clock clock;
 
     ConsumerBuilder(InboxDestinations destinations, PayloadDeserializer deserializer, ListableBeanFactory beans,
-                    Function<InboxConfig.Consumer, ConsumerObserver> observers, Clock clock) {
+                    Function<InboxConfig.Consumer, ConsumerObserver> observers,
+                    Function<InboxConfig.Consumer, ConsumerObserver> passObservers, Clock clock) {
         this.destinations = destinations;
         this.deserializer = deserializer;
         this.beans = beans;
         this.observers = observers;
+        this.passObservers = passObservers;
         this.clock = clock;
     }
 
@@ -93,12 +96,14 @@ final class ConsumerBuilder {
             delayed = new BackoffSpec(delayed.maxAttempts(), delayed.initial(), delayed.multiplier(),
                     caps.maxRedeliveryDelay(), delayed.jitter());
         }
-        RetryPolicy policy = new RetryPolicy(c.immediate(), delayed, c.deadLetter() != null, 3, c.nonRetryable(),
+        RetryPolicy policy = new RetryPolicy(c.immediate(), delayed, c.deadLetter() != null, c.deadLetterMaxAttempts(),
+                c.nonRetryable(),
                 c.skipImmediate(), c.retryable());
         // the destination of the settings is the metrics tag: the receiver name, never the address
         ConsumerSettings settings = new ConsumerSettings(c.name(), c.name(), c.concurrency(),
                 c.maxMessagesPerPoll(), c.pollWait(), c.maxProcessing(), c.shutdownTimeout(), c.ordering(),
-                c.strategy(), c.includeExceptionMessage(), c.keyLanes());
+                c.strategy(), c.includeExceptionMessage(), c.keyLanes(), c.deadLetterInterval(),
+                c.deadLetterMaxPerPass());
         InboxIdempotency idempotency = null;
         if (c.idempotency()) {
             Duration reservation = c.reservationTtl() != null ? c.reservationTtl()
@@ -123,10 +128,14 @@ final class ConsumerBuilder {
             queues.add(new RetryQueue(q.delay(),
                     destinations.sender(c.name() + ".retry." + i, c.provider(), copy(q.destination()))));
         }
+        // level 3 (ADR-0002): the passes read the DLQ under the name of its sender, so metrics and health group them
+        Supplier<MessageReceiver> deadLetterReceivers = c.deadLetter() == null ? null
+                : () -> destinations.receiver(c.name() + ".dead-letter", c.provider(), copy(c.deadLetter()), null);
         Destinations broker = new Destinations(receivers,
-                destinations.sender(c.name() + ".failed", c.provider(), copy(c.failed())), deadLetter, queues);
+                destinations.sender(c.name() + ".failed", c.provider(), copy(c.failed())), deadLetter, queues,
+                deadLetterReceivers);
         return new InboxConsumer(settings, pipeline, broker, stop, clock, () -> ThreadLocalRandom.current().nextDouble(),
-                observers.apply(c));
+                observers.apply(c), passObservers.apply(c));
     }
 
     /** dead-letter, failed and the retry queues: plain queues in the provider of the receiver (ADR-0008). */
