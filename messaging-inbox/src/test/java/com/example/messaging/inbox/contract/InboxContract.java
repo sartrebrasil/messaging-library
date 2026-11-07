@@ -322,6 +322,41 @@ public abstract class InboxContract {
         assertEquals(unstarted, back);
     }
 
+    /** Level 3 (ADR-0002): a pass over the DLQ reprocesses with the same handler. */
+    @Test
+    void deadLetterPassReprocesses() {
+        AtomicInteger calls = new AtomicInteger();
+        park("parked");
+        start(DelayedStrategy.AUTO, delayedPolicy(lease()), 1, m -> {
+            calls.incrementAndGet();
+            return HandlerResult.ack();
+        }, true);
+
+        await(() -> calls.get() == 1);
+        consumer.stop();
+        assertNothingFor(deadLetterReceiver(), lease().plus(receiveWait()));
+        assertEquals(1, calls.get());
+    }
+
+    /** A pass ends at its own copy: one execution per pass, and the next pass sees l3=1. */
+    @Test
+    void deadLetterPassEndsOnItsOwnCopy() {
+        List<Delivery> deliveries = new CopyOnWriteArrayList<>();
+        park("poison");
+        start(DelayedStrategy.AUTO, delayedPolicy(lease()), 1, m -> {
+            deliveries.add(m.message().delivery());
+            throw new Transient();
+        }, true);
+
+        await(() -> deliveries.size() == 1);
+        // the copy to the end of the DLQ is newer than the pass: the same pass must not run it again
+        sleep(lease().dividedBy(2));
+        assertEquals(1, deliveries.size(), "a pass ran its own copy");
+        await(() -> deliveries.size() == 2);
+        assertEquals(List.of(new Delivery(Delivery.Level.DEAD_LETTER, 1), new Delivery(Delivery.Level.DEAD_LETTER, 2)),
+                deliveries.subList(0, 2));
+    }
+
     @Test
     void nativeDeliveryLimitIsWhatTheBrokerDoes() {
         Integer limit = nativeDeliveryLimit();
@@ -374,8 +409,14 @@ public abstract class InboxContract {
 
     private void start(DelayedStrategy strategy, RetryPolicy policy, int maxPerPoll,
                        InboxResultHandler<String> handler) {
+        start(strategy, policy, maxPerPoll, handler, false);
+    }
+
+    /** @param passes level-3 passes over the DLQ every {@link #lease()} (ADR-0002) */
+    private void start(DelayedStrategy strategy, RetryPolicy policy, int maxPerPoll,
+                       InboxResultHandler<String> handler, boolean passes) {
         ConsumerSettings settings = new ConsumerSettings("contract", "inbox-main", 1, maxPerPoll, receiveWait(),
-                lease().multipliedBy(6), Duration.ofSeconds(5), Ordering.RELAXED, strategy, true);
+                lease().multipliedBy(6), Duration.ofSeconds(5), Ordering.RELAXED, strategy, true, 1, lease(), 100);
         StopSignal stop = new StopSignal();
         InboxResultHandler<String> mine = m -> run.equals(m.message().headers().get(RUN_ATTRIBUTE))
                 ? handler.handle(m) : HandlerResult.ack();
@@ -383,9 +424,24 @@ public abstract class InboxContract {
                 (m, t) -> m.payloadAsString(), String.class, mine, policy, stop, () -> 0.0);
         List<RetryQueue> bands = strategy == DelayedStrategy.RETRY_QUEUES ? retryQueues() : List.of();
         Destinations destinations = new Destinations(() -> new Recording(newReceiver()), failedSender(),
-                deadLetterSender(), bands);
+                deadLetterSender(), bands, passes ? this::deadLetterReceiver : null);
         consumer = new InboxConsumer(settings, pipeline, destinations, stop, Clock.systemUTC(), () -> 0.0);
         consumer.start();
+    }
+
+    /** A message already in the DLQ, its delayed level spent. */
+    private void park(String body) {
+        open(deadLetterSender()).send(OutgoingMessage.ofText(body).withAttribute(RUN_ATTRIBUTE, run)
+                .withAttribute("inbox_attempts", "l2=5;l3=0"));
+    }
+
+    private static void sleep(Duration d) {
+        try {
+            Thread.sleep(d.toMillis());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
     }
 
     private String send(String body) {
