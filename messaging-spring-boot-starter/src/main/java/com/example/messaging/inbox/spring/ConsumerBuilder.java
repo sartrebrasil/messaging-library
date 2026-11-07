@@ -31,6 +31,8 @@ import java.util.function.Supplier;
 /** Builds one {@link InboxConsumer} from its merged configuration, handler and the broker capabilities. */
 final class ConsumerBuilder {
 
+    private static final System.Logger LOG = System.getLogger(ConsumerBuilder.class.getName());
+
     /** Default margin of the reservation TTL over max-processing plus the hold delays. */
     static final Duration RESERVATION_MARGIN = Duration.ofMinutes(5);
 
@@ -129,13 +131,33 @@ final class ConsumerBuilder {
                     destinations.sender(c.name() + ".retry." + i, c.provider(), copy(q.destination()))));
         }
         // level 3 (ADR-0002): the passes read the DLQ under the name of its sender, so metrics and health group them
-        Supplier<MessageReceiver> deadLetterReceivers = c.deadLetter() == null ? null
-                : () -> destinations.receiver(c.name() + ".dead-letter", c.provider(), copy(c.deadLetter()), null);
+        Supplier<MessageReceiver> deadLetterReceivers = readableDeadLetter(c)
+                ? () -> destinations.receiver(c.name() + ".dead-letter", c.provider(), copy(c.deadLetter()), null)
+                : null;
         Destinations broker = new Destinations(receivers,
                 destinations.sender(c.name() + ".failed", c.provider(), copy(c.failed())), deadLetter, queues,
                 deadLetterReceivers);
         return new InboxConsumer(settings, pipeline, broker, stop, clock, () -> ThreadLocalRandom.current().nextDouble(),
                 observers.apply(c), passObservers.apply(c));
+    }
+
+    /**
+     * Level 3 reads the DLQ through the same address it sends to. Where that address cannot be read (on Pub/Sub the DLQ
+     * is a topic, and a topic is not a subscription), level 3 is turned off with a warning instead of failing every
+     * pass, or the startup of applications that configured the DLQ only as a parking queue.
+     */
+    private boolean readableDeadLetter(InboxConfig.Consumer c) {
+        if (c.deadLetter() == null || c.deadLetterMaxAttempts() == 0) {
+            return false;
+        }
+        List<String> problems = destinations.validate(InboxConfig.RECEIVERS + c.name() + ".dead-letter", c.provider(),
+                copy(c.deadLetter()), true);
+        if (!problems.isEmpty()) {
+            LOG.log(System.Logger.Level.WARNING, "Consumer {0}: level 3 is off, the dead-letter destination cannot be "
+                    + "read ({1}); set retry.dead-letter.max-attempts: 0 to silence this", c.name(), problems);
+            return false;
+        }
+        return true;
     }
 
     /** dead-letter, failed and the retry queues: plain queues in the provider of the receiver (ADR-0008). */

@@ -164,6 +164,18 @@ class InboxAutoConfigurationTest {
                 });
     }
 
+    /** A DLQ that cannot be read (Pub/Sub topic without a subscription) turns level 3 off instead of failing (review I1). */
+    @Test
+    void unreadableDeadLetterTurnsLevel3Off() {
+        runner.withUserConfiguration(Functional.class)
+                .withPropertyValues(C + "dead-letter=send-only-dlq", C + "retry.dead-letter.interval=100ms")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    Thread.sleep(400);
+                    assertThat(Broker.REQUESTED).doesNotContain("receiver billing-orders.dead-letter");
+                });
+    }
+
     @Test
     void copiesUseReceiverScopedNames() {
         runner.withUserConfiguration(Listener.class).run(context -> {
@@ -295,7 +307,7 @@ class InboxAutoConfigurationTest {
 
         static InMemoryMessaging messaging() {
             InMemoryMessaging messaging = new InMemoryMessaging();
-            for (String q : List.of("orders", "orders-failed", "orders-dlq", "q-fast", "q-slow")) {
+            for (String q : List.of("orders", "orders-failed", "orders-dlq", "q-fast", "q-slow", "send-only-dlq")) {
                 messaging.createQueue(q, QueueOptions.defaults());
             }
             return messaging;
@@ -324,6 +336,9 @@ class InboxAutoConfigurationTest {
 
                 @Override
                 public List<String> validate(String key, String provider, Endpoint endpoint, boolean receive) {
+                    if (receive && "send-only-dlq".equals(endpoint.destination())) {
+                        return List.of(key + ".destination: cannot be read");
+                    }
                     return "bad".equals(endpoint.destination()) ? List.of(key + ".destination: bad address") : List.of();
                 }
             };
