@@ -84,6 +84,15 @@ public final class Pipeline<T> {
         return process(message, destination, holdAttempts, ConsumerObserver.NONE).outcome();
     }
 
+    /** Envelope id (the idempotency key, ADR-0004), or the broker {@code messageId} when the envelope cannot be read. */
+    public String idOf(ReceivedMessage message, String destination) {
+        try {
+            return reader.read(message, destination).id();
+        } catch (RuntimeException e) {
+            return message.messageId();
+        }
+    }
+
     /** The outcome and the read message ({@code null} when the envelope could not be read). */
     public record Execution(Outcome outcome, InboxMessage message) {
     }

@@ -18,7 +18,14 @@ import java.util.function.Supplier;
 public record Destinations(Supplier<MessageReceiver> receivers,
                            MessageSender failed,
                            MessageSender deadLetter,
-                           List<RetryQueue> retryQueues) {
+                           List<RetryQueue> retryQueues,
+                           Supplier<MessageReceiver> deadLetterReceivers) {
+
+    /** Without level-3 passes: no receiver on the DLQ. */
+    public Destinations(Supplier<MessageReceiver> receivers, MessageSender failed, MessageSender deadLetter,
+                        List<RetryQueue> retryQueues) {
+        this(receivers, failed, deadLetter, retryQueues, null);
+    }
 
     public Destinations {
         Objects.requireNonNull(receivers, "receivers");
