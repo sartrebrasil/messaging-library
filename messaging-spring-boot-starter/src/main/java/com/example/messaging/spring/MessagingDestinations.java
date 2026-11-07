@@ -27,7 +27,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Predicate;
 
 /**
@@ -81,7 +80,8 @@ public final class MessagingDestinations implements AutoCloseable {
     /** Receivers já criados por endereço: o que o health check usa. */
     private final Map<String, Resolved> receivers = new ConcurrentHashMap<>();
     private final Map<String, MessageReceiver> healthReceivers = new HashMap<>();
-    private final List<MessageReceiver> created = new CopyOnWriteArrayList<>();
+    /** Receivers handed out and not closed yet: closed at shutdown. One leaves when its user closes it. */
+    private final Set<MessageReceiver> created = ConcurrentHashMap.newKeySet();
 
     MessagingDestinations(MessagingProperties properties, ListableBeanFactory beans, MeterRegistry meters,
                           ObservationRegistry observations) {
@@ -177,8 +177,75 @@ public final class MessagingDestinations implements AutoCloseable {
             }
             receivers.put(name, r);
         }
-        created.add(receiver);
-        return receiver;
+        MessageReceiver handed = new Forgetting(receiver);
+        created.add(handed);
+        return handed;
+    }
+
+    /** Receivers handed out and not closed yet. */
+    int openReceivers() {
+        return created.size();
+    }
+
+    /** Leaves {@link #created} when closed: a level-3 pass opens and closes one per pass. */
+    private final class Forgetting implements MessageReceiver {
+        private final MessageReceiver delegate;
+
+        Forgetting(MessageReceiver delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public java.util.List<com.example.messaging.ReceivedMessage> receive(int maxMessages, java.time.Duration maxWait) {
+            return delegate.receive(maxMessages, maxWait);
+        }
+
+        @Override
+        public void ack(com.example.messaging.ReceivedMessage message) {
+            delegate.ack(message);
+        }
+
+        @Override
+        public com.example.messaging.AckResult ackAll(java.util.List<com.example.messaging.ReceivedMessage> messages) {
+            return delegate.ackAll(messages);
+        }
+
+        @Override
+        public void nack(com.example.messaging.ReceivedMessage message, java.time.Duration redeliverAfter) {
+            delegate.nack(message, redeliverAfter);
+        }
+
+        @Override
+        public void extendLease(com.example.messaging.ReceivedMessage message, java.time.Duration lease) {
+            delegate.extendLease(message, lease);
+        }
+
+        @Override
+        public com.example.messaging.KeepAlive keepAlive(com.example.messaging.ReceivedMessage message,
+                                                        java.time.Duration maxTotal) {
+            return delegate.keepAlive(message, maxTotal);
+        }
+
+        @Override
+        public void deadLetter(com.example.messaging.ReceivedMessage message, String reason) {
+            delegate.deadLetter(message, reason);
+        }
+
+        @Override
+        public void checkAccess() {
+            delegate.checkAccess();
+        }
+
+        @Override
+        public Capabilities capabilities() {
+            return delegate.capabilities();
+        }
+
+        @Override
+        public void close() {
+            created.remove(this);
+            delegate.close();
+        }
     }
 
     /**
@@ -334,7 +401,7 @@ public final class MessagingDestinations implements AutoCloseable {
     /** Fecha receivers que sobraram, senders e os clientes criados pelo starter. */
     @Override
     public void close() {
-        created.forEach(MessageReceiver::close);
+        List.copyOf(created).forEach(MessageReceiver::close);
         healthReceivers.values().forEach(MessageReceiver::close);
         senders.values().forEach(MessageSender::close);
         endpointSenders.values().forEach(MessageSender::close);

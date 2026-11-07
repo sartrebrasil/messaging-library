@@ -67,6 +67,18 @@ class MessagingAutoConfigurationTest {
                         .capabilities().maxMessageBytes()).isEqualTo(SnsMessageSender.DEFAULT_MAX_MESSAGE_BYTES));
     }
 
+    /** A receiver closed by its user (one per level-3 pass) is not kept until shutdown (review I2). */
+    @Test
+    void closedReceiversAreForgotten() {
+        runner.run(context -> {
+            MessagingDestinations destinations = context.getBean(MessagingDestinations.class);
+            for (int i = 0; i < 3; i++) {
+                destinations.receiver("r.dead-letter", "aws", queue(QUEUE + "dlq"), null).close();
+            }
+            assertThat(destinations.openReceivers()).isZero();
+        });
+    }
+
     @Test
     void receiverByEndpointIsInHealth() {
         runner.run(context -> {
