@@ -138,6 +138,44 @@ class PipelineTest {
     }
 
     @Test
+    void deadLetterPassRetryableGoesBackWithL3Plus1() {
+        Outcome outcome = pipeline(m -> {
+            throw new IllegalStateException("down");
+        }).process(received(OUTBOX, Map.of("inbox_attempts", "l2=5;l3=0"), 1), "q", 0, ConsumerObserver.NONE,
+                PassMode.DEAD_LETTER).outcome();
+
+        assertEquals(1, assertInstanceOf(Outcome.DeadLetter.class, outcome).next().deadLetter());
+    }
+
+    @Test
+    void deadLetterPassExhaustedGoesToFailed() {
+        Outcome outcome = pipeline(m -> {
+            throw new IllegalStateException("down");
+        }).process(received(OUTBOX, Map.of("inbox_attempts", "l2=5;l3=3"), 1), "q", 0, ConsumerObserver.NONE,
+                PassMode.DEAD_LETTER).outcome();
+
+        assertEquals(Outcome.FailureReason.RETRIES_EXHAUSTED, assertInstanceOf(Outcome.Failed.class, outcome).reason());
+    }
+
+    @Test
+    void deadLetterPassIgnoresDeliveryCount() {
+        Outcome outcome = pipeline(m -> {
+            throw new RateLimited();
+        }).process(received(OUTBOX, Map.of("inbox_attempts", "l2=0;l3=0"), 9), "q", 0, ConsumerObserver.NONE,
+                PassMode.DEAD_LETTER).outcome();
+
+        assertEquals(1, assertInstanceOf(Outcome.DeadLetter.class, outcome).next().deadLetter());
+    }
+
+    @Test
+    void deadLetterPassDeliveryLevel() {
+        pipeline(m -> null).process(received(OUTBOX, Map.of("inbox_attempts", "l2=5;l3=0"), 1), "q", 0,
+                ConsumerObserver.NONE, PassMode.DEAD_LETTER);
+
+        assertEquals(new Delivery(Delivery.Level.DEAD_LETTER, 1), deliveries.getFirst());
+    }
+
+    @Test
     void unreadablePayloadFailsWithoutCallingTheHandler() {
         PayloadDeserializer broken = (m, type) -> {
             throw new IllegalStateException("bad json");
