@@ -440,6 +440,22 @@ configuração padrão de cada broker:
   e o segundo `nack` com atraso falhava na validação dos atributos; o `JmsCodec` passou a tratá-las como
   propriedades do broker.
 
+## Revisão de 2026-11-07: nível 3 implementado (F5, parte 1)
+
+- `DeadLetterPass` no core, dono de uma thread com `scheduleWithFixedDelay(interval)`: passadas nunca se
+  sobrepõem, a primeira começa um `interval` depois do `start`, e uma passada mais longa que o `interval` gera
+  `WARN`. O `InboxConsumer` cria a passada quando há DLQ e `dead-letter.max-attempts > 0`, e a para antes dos
+  workers no `stop`.
+- O modo passada é parâmetro de `Pipeline.process` (`PassMode.DEAD_LETTER`), nunca estado: o pipeline é o mesmo
+  dos workers da fila principal. Na passada, só `l3` decide; o `deliveryCount` na DLQ não conta no nível 2.
+- `dead-letter.concurrency` fixo em 1 (a chave é recusada no startup). A condição "passada só com o circuit breaker
+  fechado" fica para a F6.
+- Uma passada **por instância**, sem coordenação: com N pods, até N × `max-per-pass` mensagens por intervalo e N
+  leitores na DLQ. Risco aceito.
+- Sem `enqueuedAt` e sem idempotência (RabbitMQ sem `timestamp`), a chave repetida não pega a própria cópia (que tem
+  `messageId` novo): o teto da passada é o `max-per-pass`.
+- Métricas da passada com `consumer=<receiver>.dead-letter` e o contador `inbox.dead.letter.passes{consumer,end}`.
+
 ## Alternativas descartadas
 
 - `RetryTemplate` do Spring Framework 7: o core não depende de Spring, e a

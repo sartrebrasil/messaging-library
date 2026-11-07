@@ -65,6 +65,17 @@ class ObservabilityTest {
     }
 
     @Test
+    void passMetrics() {
+        runner.withUserConfiguration(Rejecting.class).withPropertyValues(C + "retry.dead-letter.interval=200ms")
+                .run(context -> {
+                    PrometheusMeterRegistry registry = context.getBean(PrometheusMeterRegistry.class);
+                    await(() -> registry.scrape().contains("inbox_dead_letter_passes_total"));
+                    assertThat(registry.scrape()).contains(
+                            "inbox_dead_letter_passes_total{consumer=\"billing-orders.dead-letter\",end=\"empty\"}");
+                });
+    }
+
+    @Test
     void theHandlerRunsInsideTheTraceOfTheOutboxBody() {
         SEEN.clear();
         runner.withUserConfiguration(Tracing.class).run(context -> {

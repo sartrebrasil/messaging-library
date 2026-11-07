@@ -139,6 +139,14 @@ final class MicrometerConsumerObserver implements ConsumerObserver {
     }
 
     @Override
+    public void passEnded(com.example.messaging.inbox.PassEnd end, int processed) {
+        if (meters != null) {
+            Counter.builder("inbox.dead.letter.passes").description("level-3 passes over the DLQ, by how they ended")
+                    .tags("consumer", consumer, "end", end.name().toLowerCase()).register(meters).increment();
+        }
+    }
+
+    @Override
     public void receiveFailed(RuntimeException failure) {
         if (meters != null) {
             effectFailed("receive");

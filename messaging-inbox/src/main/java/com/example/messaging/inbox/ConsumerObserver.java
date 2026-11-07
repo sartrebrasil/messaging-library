@@ -38,6 +38,10 @@ public interface ConsumerObserver {
     default void delivered(Report report) {
     }
 
+    /** A level-3 pass over the DLQ ended (ADR-0002), after {@code processed} messages. */
+    default void passEnded(PassEnd end, int processed) {
+    }
+
     /** A {@code receive} failed; the worker backs off. */
     default void receiveFailed(RuntimeException failure) {
     }

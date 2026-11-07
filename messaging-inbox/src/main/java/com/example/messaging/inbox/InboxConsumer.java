@@ -42,6 +42,9 @@ public final class InboxConsumer {
     private final List<MessageReceiver> receivers = new ArrayList<>();
     private boolean started;
     private boolean stopped;
+    /** Level 3 (ADR-0002); {@code null} without a dead-letter destination or with no passes. */
+    private final DeadLetterPass deadLetterPass;
+    private java.util.concurrent.ScheduledExecutorService passScheduler;
 
     /**
      * @param stop the same signal given to the {@link Pipeline} as its sleeper
@@ -55,6 +58,12 @@ public final class InboxConsumer {
     /** @param observer metrics and tracing hook; its failures never affect messages */
     public InboxConsumer(ConsumerSettings settings, Pipeline<?> pipeline, Destinations destinations, StopSignal stop,
                          Clock clock, DoubleSupplier random, ConsumerObserver observer) {
+        this(settings, pipeline, destinations, stop, clock, random, observer, ConsumerObserver.NONE);
+    }
+
+    /** @param passObserver the same hook for the level-3 passes, usually tagged {@code <consumer>.dead-letter} */
+    public InboxConsumer(ConsumerSettings settings, Pipeline<?> pipeline, Destinations destinations, StopSignal stop,
+                         Clock clock, DoubleSupplier random, ConsumerObserver observer, ConsumerObserver passObserver) {
         this.observer = new SafeObserver(Objects.requireNonNull(observer, "observer"));
         this.settings = Objects.requireNonNull(settings, "settings");
         this.pipeline = Objects.requireNonNull(pipeline, "pipeline");
@@ -93,6 +102,11 @@ public final class InboxConsumer {
                     + leaseBudget + "), or a slow delivery loses its key to a redelivery (ADR-0004)");
         }
         this.applier = new OutcomeApplier(settings, strategy, destinations, clock);
+        this.deadLetterPass = destinations.deadLetter() != null && destinations.deadLetterReceivers() != null
+                && policy.deadLetterMaxAttempts() > 0
+                ? new DeadLetterPass(settings, pipeline, applier, destinations, stop, clock,
+                new SafeObserver(Objects.requireNonNull(passObserver, "passObserver")), settings.deadLetterMaxPerPass())
+                : null;
         this.lastReceive = new AtomicReference<>(clock.instant());
         if (settings.keyLanes() > 1 && settings.maxMessagesPerPoll() == 1) {
             LOG.log(System.Logger.Level.WARNING, "Consumer {0}: key-lanes {1} with max-messages-per-poll 1 has "
@@ -121,6 +135,31 @@ public final class InboxConsumer {
             threads.add(thread);
             thread.start();
         }
+        if (deadLetterPass != null) {
+            long interval = settings.deadLetterInterval().toMillis();
+            passScheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(
+                    Thread.ofPlatform().name("inbox-" + settings.consumer() + "-dead-letter").factory());
+            // fixed delay: a pass never overlaps the next one, which starts an interval after it ends
+            passScheduler.scheduleWithFixedDelay(this::runPass, interval, interval,
+                    java.util.concurrent.TimeUnit.MILLISECONDS);
+        }
+    }
+
+    private void runPass() {
+        long begin = System.nanoTime();
+        try {
+            deadLetterPass.runPass();
+        } catch (OutOfMemoryError e) {
+            throw e;
+        } catch (Throwable t) {
+            // anything escaping would cancel every later pass of scheduleWithFixedDelay, silently
+            LOG.log(System.Logger.Level.ERROR, "Consumer " + settings.consumer() + ": dead-letter pass failed", t);
+        }
+        Duration took = Duration.ofNanos(System.nanoTime() - begin);
+        if (took.compareTo(settings.deadLetterInterval()) > 0) {
+            LOG.log(System.Logger.Level.WARNING, "Consumer {0}: dead-letter pass took {1}, above the interval {2}",
+                    settings.consumer(), took, settings.deadLetterInterval());
+        }
     }
 
     /** Idempotent; safe before {@link #start()}. */
@@ -136,6 +175,7 @@ public final class InboxConsumer {
         }
         stop.stop();
         long deadline = System.nanoTime() + settings.shutdownTimeout().toNanos();
+        stopPass(deadline);
         for (Thread thread : threads) {
             try {
                 thread.join(Duration.ofNanos(Math.max(0, deadline - System.nanoTime())));
@@ -151,6 +191,25 @@ public final class InboxConsumer {
                         threads.get(i).getName(), settings.shutdownTimeout());
                 receivers.get(i).close();
             }
+        }
+    }
+
+    /** The pass sees the stop signal between messages; a running handler is not interrupted before the timeout. */
+    private void stopPass(long deadline) {
+        if (passScheduler == null) {
+            return;
+        }
+        passScheduler.shutdown();
+        try {
+            if (!passScheduler.awaitTermination(Math.max(0, deadline - System.nanoTime()),
+                    java.util.concurrent.TimeUnit.NANOSECONDS)) {
+                LOG.log(System.Logger.Level.WARNING, "Consumer {0}: dead-letter pass still running after {1}; "
+                        + "interrupting it", settings.consumer(), settings.shutdownTimeout());
+                passScheduler.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            passScheduler.shutdownNow();
+            Thread.currentThread().interrupt();
         }
     }
 

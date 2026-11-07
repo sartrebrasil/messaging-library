@@ -303,6 +303,11 @@ messaging:
 void on(Order order) { ... }
 ```
 
+Com `dead-letter`, o nível 3 vem ligado: a cada `retry.dead-letter.interval` (15 min) cada instância relê a DLQ e
+reprocessa até `max-per-pass` (100) mensagens com o mesmo handler, sem o nível 2; quem falha volta para o fim da DLQ
+até `max-attempts` (3) passadas, depois vai para `failed`. `max-attempts: 0` deixa a DLQ só como estacionamento. As
+métricas da passada usam `consumer=<receiver>.dead-letter`, mais o contador `inbox_dead_letter_passes_total{end}`.
+
 Chave desconhecida em `providers`, `senders`, `receivers` ou `receiver-defaults` derruba o startup,
 assim como as chaves removidas `messaging.destinations` e `inbox.*` (ADR-0008 da messaging-inbox).
 

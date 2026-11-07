@@ -31,6 +31,8 @@ import java.util.function.Supplier;
 /** Builds one {@link InboxConsumer} from its merged configuration, handler and the broker capabilities. */
 final class ConsumerBuilder {
 
+    private static final System.Logger LOG = System.getLogger(ConsumerBuilder.class.getName());
+
     /** Default margin of the reservation TTL over max-processing plus the hold delays. */
     static final Duration RESERVATION_MARGIN = Duration.ofMinutes(5);
 
@@ -38,14 +40,17 @@ final class ConsumerBuilder {
     private final PayloadDeserializer deserializer;
     private final ListableBeanFactory beans;
     private final Function<InboxConfig.Consumer, ConsumerObserver> observers;
+    private final Function<InboxConfig.Consumer, ConsumerObserver> passObservers;
     private final Clock clock;
 
     ConsumerBuilder(InboxDestinations destinations, PayloadDeserializer deserializer, ListableBeanFactory beans,
-                    Function<InboxConfig.Consumer, ConsumerObserver> observers, Clock clock) {
+                    Function<InboxConfig.Consumer, ConsumerObserver> observers,
+                    Function<InboxConfig.Consumer, ConsumerObserver> passObservers, Clock clock) {
         this.destinations = destinations;
         this.deserializer = deserializer;
         this.beans = beans;
         this.observers = observers;
+        this.passObservers = passObservers;
         this.clock = clock;
     }
 
@@ -93,12 +98,14 @@ final class ConsumerBuilder {
             delayed = new BackoffSpec(delayed.maxAttempts(), delayed.initial(), delayed.multiplier(),
                     caps.maxRedeliveryDelay(), delayed.jitter());
         }
-        RetryPolicy policy = new RetryPolicy(c.immediate(), delayed, c.deadLetter() != null, 3, c.nonRetryable(),
+        RetryPolicy policy = new RetryPolicy(c.immediate(), delayed, c.deadLetter() != null, c.deadLetterMaxAttempts(),
+                c.nonRetryable(),
                 c.skipImmediate(), c.retryable());
         // the destination of the settings is the metrics tag: the receiver name, never the address
         ConsumerSettings settings = new ConsumerSettings(c.name(), c.name(), c.concurrency(),
                 c.maxMessagesPerPoll(), c.pollWait(), c.maxProcessing(), c.shutdownTimeout(), c.ordering(),
-                c.strategy(), c.includeExceptionMessage(), c.keyLanes());
+                c.strategy(), c.includeExceptionMessage(), c.keyLanes(), c.deadLetterInterval(),
+                c.deadLetterMaxPerPass());
         InboxIdempotency idempotency = null;
         if (c.idempotency()) {
             Duration reservation = c.reservationTtl() != null ? c.reservationTtl()
@@ -123,10 +130,34 @@ final class ConsumerBuilder {
             queues.add(new RetryQueue(q.delay(),
                     destinations.sender(c.name() + ".retry." + i, c.provider(), copy(q.destination()))));
         }
+        // level 3 (ADR-0002): the passes read the DLQ under the name of its sender, so metrics and health group them
+        Supplier<MessageReceiver> deadLetterReceivers = readableDeadLetter(c)
+                ? () -> destinations.receiver(c.name() + ".dead-letter", c.provider(), copy(c.deadLetter()), null)
+                : null;
         Destinations broker = new Destinations(receivers,
-                destinations.sender(c.name() + ".failed", c.provider(), copy(c.failed())), deadLetter, queues);
+                destinations.sender(c.name() + ".failed", c.provider(), copy(c.failed())), deadLetter, queues,
+                deadLetterReceivers);
         return new InboxConsumer(settings, pipeline, broker, stop, clock, () -> ThreadLocalRandom.current().nextDouble(),
-                observers.apply(c));
+                observers.apply(c), passObservers.apply(c));
+    }
+
+    /**
+     * Level 3 reads the DLQ through the same address it sends to. Where that address cannot be read (on Pub/Sub the DLQ
+     * is a topic, and a topic is not a subscription), level 3 is turned off with a warning instead of failing every
+     * pass, or the startup of applications that configured the DLQ only as a parking queue.
+     */
+    private boolean readableDeadLetter(InboxConfig.Consumer c) {
+        if (c.deadLetter() == null || c.deadLetterMaxAttempts() == 0) {
+            return false;
+        }
+        List<String> problems = destinations.validate(InboxConfig.RECEIVERS + c.name() + ".dead-letter", c.provider(),
+                copy(c.deadLetter()), true);
+        if (!problems.isEmpty()) {
+            LOG.log(System.Logger.Level.WARNING, "Consumer {0}: level 3 is off, the dead-letter destination cannot be "
+                    + "read ({1}); set retry.dead-letter.max-attempts: 0 to silence this", c.name(), problems);
+            return false;
+        }
+        return true;
     }
 
     /** dead-letter, failed and the retry queues: plain queues in the provider of the receiver (ADR-0008). */

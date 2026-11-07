@@ -84,6 +84,15 @@ public final class Pipeline<T> {
         return process(message, destination, holdAttempts, ConsumerObserver.NONE).outcome();
     }
 
+    /** Envelope id (the idempotency key, ADR-0004), or the broker {@code messageId} when the envelope cannot be read. */
+    public String idOf(ReceivedMessage message, String destination) {
+        try {
+            return reader.read(message, destination).id();
+        } catch (RuntimeException e) {
+            return message.messageId();
+        }
+    }
+
     /** The outcome and the read message ({@code null} when the envelope could not be read). */
     public record Execution(Outcome outcome, InboxMessage message) {
     }
@@ -91,12 +100,24 @@ public final class Pipeline<T> {
     /** {@link #handle} with an observer around the execution (ADR-0007). */
     public Execution process(ReceivedMessage message, String destination, int holdAttempts,
                              ConsumerObserver observer) {
+        return process(message, destination, holdAttempts, observer, PassMode.MAIN);
+    }
+
+    /**
+     * @param mode {@link PassMode#DEAD_LETTER} in a level-3 pass: decided by {@code l3} only; the delivery count on the
+     *             DLQ and {@code holdAttempts} do not count on the delayed level, which a pass does not have
+     */
+    public Execution process(ReceivedMessage message, String destination, int holdAttempts,
+                             ConsumerObserver observer, PassMode mode) {
+        boolean pass = mode == PassMode.DEAD_LETTER;
         AttemptState read = AttemptState.from(message.attributes().get(AttemptState.ATTRIBUTE),
-                message.deliveryCount().orElse(0));
-        AttemptState state = new AttemptState(read.delayed() + holdAttempts, read.deadLetter(), read.redrive());
+                pass ? 0 : message.deliveryCount().orElse(0));
+        AttemptState state = pass ? read
+                : new AttemptState(read.delayed() + holdAttempts, read.deadLetter(), read.redrive());
+        Delivery delivery = pass ? new Delivery(Delivery.Level.DEAD_LETTER, state.deadLetter() + 1) : Delivery.of(state);
         TypedMessage<T> typed;
         try {
-            InboxMessage inbox = reader.read(message, destination).withDelivery(Delivery.of(state));
+            InboxMessage inbox = reader.read(message, destination).withDelivery(delivery);
             typed = typed(inbox);
         } catch (PayloadDeserializationException e) {
             LOG.log(System.Logger.Level.WARNING, "Consumer {0}: message {1} cannot be read, sent to failed: {2}",
@@ -105,18 +126,19 @@ public final class Pipeline<T> {
         }
         InboxMessage inbox = typed.message();
         Outcome outcome = observer.execution(inbox, () -> guard == null
-                ? run(typed, state, observer)
-                : guard.apply(inbox, state, () -> run(typed, state, observer), e -> storeFailure(e, state)));
+                ? run(typed, state, observer, pass)
+                : guard.apply(inbox, state, () -> run(typed, state, observer, pass), e -> storeFailure(e, state, pass)));
         return new Execution(outcome, inbox);
     }
 
     /** A store failure is a retryable failure that skips the immediate level: delayed level, then DLQ. */
-    private Outcome storeFailure(RuntimeException e, AttemptState state) {
-        return toOutcome(resolver.resolve(new ImmediateRetrier.Result(null, e, 1, Classification.SKIP_IMMEDIATE),
-                state), null, state, null);
+    private Outcome storeFailure(RuntimeException e, AttemptState state, boolean pass) {
+        var result = new ImmediateRetrier.Result(null, e, 1, Classification.SKIP_IMMEDIATE);
+        return toOutcome(pass ? resolver.resolveDeadLetterPass(result, state) : resolver.resolve(result, state), null,
+                state, null);
     }
 
-    private Outcome run(TypedMessage<T> typed, AttemptState state, ConsumerObserver observer) {
+    private Outcome run(TypedMessage<T> typed, AttemptState state, ConsumerObserver observer, boolean pass) {
         List<Throwable> failures = new ArrayList<>();
         ImmediateRetrier.Result result;
         try {
@@ -134,7 +156,8 @@ public final class Pipeline<T> {
         for (int i = 0; i < result.executions() - 1; i++) {
             observer.immediateRetry(typed.message(), failures.get(i));
         }
-        return toOutcome(resolver.resolve(result, state), result.result(), state, typed.message().id());
+        RetryDecision decision = pass ? resolver.resolveDeadLetterPass(result, state) : resolver.resolve(result, state);
+        return toOutcome(decision, result.result(), state, typed.message().id());
     }
 
     private Outcome toOutcome(RetryDecision decision, HandlerResult handlerResult, AttemptState state, String id) {
