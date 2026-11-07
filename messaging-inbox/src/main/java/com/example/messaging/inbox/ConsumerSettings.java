@@ -27,7 +27,17 @@ public record ConsumerSettings(String consumer,
                                Ordering ordering,
                                DelayedStrategy strategy,
                                boolean includeExceptionMessage,
-                               int keyLanes) {
+                               int keyLanes,
+                               Duration deadLetterInterval,
+                               int deadLetterMaxPerPass) {
+
+    /** Level-3 passes (ADR-0002) with the defaults: every 15 min, up to 100 messages. */
+    public ConsumerSettings(String consumer, String destination, int concurrency, int maxMessagesPerPoll,
+                            Duration pollWait, Duration maxProcessing, Duration shutdownTimeout, Ordering ordering,
+                            DelayedStrategy strategy, boolean includeExceptionMessage, int keyLanes) {
+        this(consumer, destination, concurrency, maxMessagesPerPoll, pollWait, maxProcessing, shutdownTimeout,
+                ordering, strategy, includeExceptionMessage, keyLanes, Duration.ofMinutes(15), 100);
+    }
 
     public ConsumerSettings {
         Objects.requireNonNull(consumer, "consumer");
@@ -45,6 +55,10 @@ public record ConsumerSettings(String consumer,
         }
         if (pollWait.isNegative() || shutdownTimeout.isNegative()) {
             throw new IllegalArgumentException("negative pollWait or shutdownTimeout");
+        }
+        Objects.requireNonNull(deadLetterInterval, "deadLetterInterval");
+        if (deadLetterInterval.isNegative() || deadLetterInterval.isZero() || deadLetterMaxPerPass < 1) {
+            throw new IllegalArgumentException("deadLetterInterval must be positive and deadLetterMaxPerPass at least 1");
         }
         if (pollWait.compareTo(shutdownTimeout) > 0) {
             pollWait = shutdownTimeout;

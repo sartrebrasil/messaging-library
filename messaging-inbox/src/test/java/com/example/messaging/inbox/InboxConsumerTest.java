@@ -415,6 +415,86 @@ class InboxConsumerTest {
         assertEquals(0, messaging.size(DLQ));
     }
 
+    private static ConsumerSettings passSettings(Duration interval, Duration shutdownTimeout) {
+        return new ConsumerSettings("billing", MAIN, 1, 1, Duration.ofMillis(50), Duration.ofSeconds(5),
+                shutdownTimeout, Ordering.RELAXED, DelayedStrategy.AUTO, true, 1, interval, 100);
+    }
+
+    private Destinations withDeadLetterPass() {
+        return new Destinations(() -> messaging.receiver(MAIN), messaging.queueSender(FAILED),
+                messaging.queueSender(DLQ), List.of(), () -> messaging.receiver(DLQ));
+    }
+
+    private void parkInDeadLetter(String id) {
+        messaging.queueSender(DLQ).send(OutgoingMessage.ofText("{\"messageId\":\"" + id
+                + "\",\"eventType\":\"E\",\"payload\":\"hi\"}").withAttribute("inbox_attempts", "l2=5;l3=0"));
+    }
+
+    private static RetryPolicy passPolicy(int deadLetterAttempts) {
+        return new RetryPolicy(BackoffSpec.none(), new BackoffSpec(1, Duration.ofMillis(20), 1.0, Duration.ofMillis(20), 0),
+                true, deadLetterAttempts, List.of(IllegalArgumentException.class), List.of(), List.of());
+    }
+
+    @Test
+    void deadLetterPassRunsOnItsInterval() {
+        parkInDeadLetter("m-1");
+        start(passSettings(Duration.ofMillis(200), Duration.ofSeconds(2)), passPolicy(3), ok(), withDeadLetterPass());
+
+        await(() -> messaging.size(DLQ) == 0);
+        assertEquals(1, handled.size());
+        assertEquals(Delivery.Level.DEAD_LETTER, handled.getFirst().message().delivery().level());
+    }
+
+    @Test
+    void noPassWithoutDeadLetterAttempts() throws InterruptedException {
+        parkInDeadLetter("m-1");
+        start(passSettings(Duration.ofMillis(100), Duration.ofSeconds(2)), passPolicy(0), ok(), withDeadLetterPass());
+
+        Thread.sleep(500);
+        assertEquals(1, messaging.size(DLQ));
+        assertTrue(Thread.getAllStackTraces().keySet().stream()
+                .noneMatch(t -> t.getName().equals("inbox-billing-dead-letter")));
+    }
+
+    @Test
+    void stopDuringAPassDoesNotHang() {
+        var blocked = new java.util.concurrent.CountDownLatch(1);
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        parkInDeadLetter("m-1");
+        InboxConsumer consumer = start(passSettings(Duration.ofMillis(100), Duration.ofSeconds(1)), passPolicy(3), m -> {
+            entered.countDown();
+            blocked.await();
+            return null;
+        }, withDeadLetterPass());
+        await(() -> entered.getCount() == 0);
+
+        long begin = System.nanoTime();
+        consumer.stop();
+
+        assertTrue(Duration.ofNanos(System.nanoTime() - begin).compareTo(Duration.ofSeconds(3)) < 0);
+        await(() -> messaging.size(DLQ) == 1);
+    }
+
+    @Test
+    void slowPassDoesNotOverlap() {
+        var running = new AtomicInteger();
+        var overlapped = new AtomicBoolean();
+        parkInDeadLetter("m-1");
+        parkInDeadLetter("m-2");
+        start(passSettings(Duration.ofMillis(100), Duration.ofSeconds(2)), passPolicy(3), m -> {
+            if (running.incrementAndGet() > 1) {
+                overlapped.set(true);
+            }
+            Thread.sleep(300);
+            running.decrementAndGet();
+            handled.add(m);
+            return null;
+        }, withDeadLetterPass());
+
+        await(() -> handled.size() == 2);
+        assertFalse(overlapped.get());
+    }
+
     @Test
     void startupRejectsAReservationTtlBelowMaxProcessing() {
         var idempotency = new com.example.messaging.inbox.InboxIdempotency(
