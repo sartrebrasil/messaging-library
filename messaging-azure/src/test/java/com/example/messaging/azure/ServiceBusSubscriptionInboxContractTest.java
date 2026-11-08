@@ -28,4 +28,10 @@ class ServiceBusSubscriptionInboxContractTest extends ServiceBusInboxContractTes
     protected boolean delayCopies() {
         return false;
     }
+
+    /** a topic with a subscription: the redrive goes from failed to the DLQ instead */
+    @Override
+    protected boolean mainIsSendable() {
+        return false;
+    }
 }
