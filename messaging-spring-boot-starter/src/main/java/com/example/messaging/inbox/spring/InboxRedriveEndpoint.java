@@ -50,8 +50,8 @@ public class InboxRedriveEndpoint {
         routes.get().forEach((name, r) -> {
             Map<String, String> sources = new LinkedHashMap<>();
             sources.put(name(Source.FAILED), r.unavailable().getOrDefault(Source.FAILED, AVAILABLE));
-            sources.put(name(Source.DEAD_LETTER), r.deadLetterReceivers() == null ? "not configured"
-                    : r.unavailable().getOrDefault(Source.DEAD_LETTER, AVAILABLE));
+            sources.put(name(Source.DEAD_LETTER), r.unavailable().getOrDefault(Source.DEAD_LETTER,
+                    r.deadLetterReceivers() == null ? "not configured" : AVAILABLE));
             List<String> targets = new ArrayList<>();
             if (r.main() != null) {
                 targets.add(name(Target.MAIN));

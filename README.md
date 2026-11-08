@@ -320,10 +320,11 @@ RedriveReport report = redrive.redrive(new RedriveRequest("billing-orders", Sour
 
 O fluxo: um `dryRun` sem filtro mostra os grupos (`byException`, `byFingerprint`) sem mover nada; o redrive seguinte
 filtra pelo fingerprint do bug corrigido. Combinações: `failed` → principal, `failed` → DLQ e DLQ → principal. Num
-receiver de tópico com subscription o destino principal é recusado (chegaria a todas as subscriptions), e no Pub/Sub
-a origem não pode ser lida. A métrica é `inbox_redrive_total{consumer,source,target,result}`.
+receiver de tópico com subscription o destino principal é recusado (chegaria a todas as subscriptions), assim como no
+Pub/Sub, que só envia a tópicos. A métrica é `inbox_redrive_total{consumer,source,target,result}`.
 
-Com o Actuator, o endpoint `inboxredrive` faz o mesmo por HTTP. Ele vem **desligado** e só responde com as duas chaves:
+Com o Actuator, o endpoint `inboxredrive` faz o mesmo por HTTP. Ele vem **desligado** e só responde com as duas chaves
+(`management.endpoints.access.default` não o abre):
 
 ```yaml
 management:

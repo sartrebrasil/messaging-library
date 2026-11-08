@@ -4,6 +4,7 @@ import com.example.messaging.Capabilities;
 import com.example.messaging.MessageReceiver;
 import com.example.messaging.MessageSender;
 import com.example.messaging.spring.MessagingProperties.Endpoint;
+import com.example.messaging.spring.MessagingProperties.Kind;
 import com.example.messaging.inbox.ConsumerObserver;
 import com.example.messaging.inbox.ConsumerSettings;
 import com.example.messaging.inbox.Destinations;
@@ -169,8 +170,12 @@ final class ConsumerBuilder {
             deadLetterReceivers = () -> destinations.receiver(c.name() + ".dead-letter", c.provider(),
                     copy(c.deadLetter()), null);
         }
+        // a queue only: not a topic with a subscription (it would reach every one), nor Pub/Sub, where the receive
+        // destination is a subscription and the provider sends only to topics
+        Endpoint mainQueue = new Endpoint(c.endpoint().destination(), null, Kind.QUEUE, null);
         MessageSender main = c.endpoint().subscription() == null
-                ? destinations.sender(c.name() + ".redrive", c.provider(), copy(c.endpoint().destination()))
+                && destinations.validate(prefix + ".redrive", c.provider(), mainQueue, false).isEmpty()
+                ? destinations.sender(c.name() + ".redrive", c.provider(), mainQueue)
                 : null;
         return new RedriveRoutes(() -> destinations.receiver(c.name() + ".failed", c.provider(), copy(c.failed()), null),
                 destinations.sender(c.name() + ".failed", c.provider(), copy(c.failed())), deadLetterReceivers,

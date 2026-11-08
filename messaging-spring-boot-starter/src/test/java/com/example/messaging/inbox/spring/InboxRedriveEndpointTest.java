@@ -61,6 +61,11 @@ class InboxRedriveEndpointTest {
                 .run(context -> assertThat(context).doesNotHaveBean(InboxRedriveEndpoint.class));
         runner.withPropertyValues(ACCESS, EXPOSURE)
                 .run(context -> assertThat(context).hasSingleBean(InboxRedriveEndpoint.class));
+        // the global default does not open it: only its own key (review I5)
+        runner.withPropertyValues("management.endpoints.access.default=unrestricted", EXPOSURE)
+                .run(context -> assertThat(context).doesNotHaveBean(InboxRedriveEndpoint.class));
+        runner.withPropertyValues("management.endpoint.inboxredrive.access=read-only", EXPOSURE)
+                .run(context -> assertThat(context).doesNotHaveBean(InboxRedriveEndpoint.class));
     }
 
     @Test

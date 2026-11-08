@@ -7,6 +7,7 @@ import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 
 import java.util.Map;
@@ -22,6 +23,8 @@ public class InboxRedriveEndpointAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     @ConditionalOnAvailableEndpoint
+    // its own key only: management.endpoints.access.default must not open a write endpoint that moves messages
+    @ConditionalOnProperty(name = "management.endpoint.inboxredrive.access", havingValue = "unrestricted")
     InboxRedriveEndpoint inboxRedriveEndpoint(InboxRedrive redrive, ObjectProvider<InboxLifecycle> lifecycle) {
         return new InboxRedriveEndpoint(redrive, () -> {
             InboxLifecycle l = lifecycle.getIfAvailable();

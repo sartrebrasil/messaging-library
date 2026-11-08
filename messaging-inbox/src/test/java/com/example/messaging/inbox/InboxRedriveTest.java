@@ -410,4 +410,125 @@ class InboxRedriveTest {
         assertEquals(1, first.get(5, TimeUnit.SECONDS).moved());
         assertEquals(0, redrive.redrive(failedToMain(Filter.NONE)).moved());
     }
+
+    /** Sends to {@code delegate}, recording each copy and when it went out. */
+    private static final class Capturing implements MessageSender {
+        final MessageSender delegate;
+        final List<OutgoingMessage> sent = new java.util.concurrent.CopyOnWriteArrayList<>();
+        final List<Long> at = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+        Capturing(MessageSender delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public SendResult send(OutgoingMessage message) {
+            sent.add(message);
+            at.add(System.nanoTime());
+            return delegate.send(message);
+        }
+
+        @Override
+        public void checkAccess() {
+        }
+
+        @Override
+        public Capabilities capabilities() {
+            return delegate.capabilities();
+        }
+
+        @Override
+        public void close() {
+        }
+    }
+
+    /**
+     * Service Bus duplicate detection compares MessageId = deduplicationId: a copy with the source id would be dropped
+     * by an entity that already saw it (the original publish, the failed copy). Review C1.
+     */
+    @Test
+    void copiesGetADeduplicationIdOfTheirOwn() {
+        Capturing main = new Capturing(messaging.queueSender(MAIN));
+        Capturing failed = new Capturing(messaging.queueSender(FAILED));
+        fail("m-1", new IllegalStateException("down"));
+        fail("m-2", new UnsupportedOperationException("nope"));
+        settle();
+        List<String> sources = new java.util.ArrayList<>();
+        MessageReceiver recording = new InboxConsumerTest.Delegating(messaging.receiver(FAILED)) {
+            @Override
+            public List<ReceivedMessage> receive(int maxMessages, Duration maxWait) {
+                List<ReceivedMessage> got = super.receive(maxMessages, maxWait);
+                got.forEach(m -> sources.add(m.messageId()));
+                return got;
+            }
+        };
+        RedriveRoutes routes = new RedriveRoutes(() -> recording, failed, null, null, main, Map.of());
+
+        redrive(routes).redrive(failedToMain(exception("java.lang.IllegalStateException")));
+
+        assertEquals(1, main.sent.size());
+        assertEquals(1, failed.sent.size());
+        assertFalse(sources.contains(main.sent.getFirst().deduplicationId()), main.sent.toString());
+        assertFalse(sources.contains(failed.sent.getFirst().deduplicationId()), failed.sent.toString());
+        assertNotNull(main.sent.getFirst().deduplicationId());
+    }
+
+    /** A message that cannot be copied (empty body from outside the lib) is an error, not the end of the run (I1). */
+    @Test
+    void anUncopiableMessageIsAnErrorAndTheRunGoesOn() {
+        fail("m-1", new IllegalStateException("down"));
+        settle();
+        MessageReceiver emptyBody = new InboxConsumerTest.Delegating(messaging.receiver(FAILED)) {
+            @Override
+            public List<ReceivedMessage> receive(int maxMessages, Duration maxWait) {
+                return super.receive(maxMessages, maxWait).stream().map(m -> new ReceivedMessage(m.messageId(),
+                        new byte[0], m.attributes(), m.contentType(), m.orderingKey(), m.deliveryCount(),
+                        m.enqueuedAt(), m.receivedAt(), m.leaseExpiresAt(), m.traceparent(), m.deadLetter(),
+                        m.handle())).toList();
+            }
+        };
+        RedriveRoutes routes = new RedriveRoutes(() -> emptyBody, messaging.queueSender(FAILED), null, null,
+                messaging.queueSender(MAIN), Map.of());
+
+        RedriveReport report = redrive(routes).redrive(failedToMain(Filter.NONE));
+
+        assertEquals(1, report.errors());
+        assertEquals(PassEnd.REPEATED_KEY, report.end());
+        assertEquals(1, messaging.size(FAILED));
+    }
+
+    /** Time spent skipping is not credit for a burst of moves (I4). */
+    @Test
+    void skippingDoesNotLetMovesBurst() {
+        fail("m-1", new IllegalStateException("down"));
+        fail("m-2", new IllegalStateException("down"));
+        fail("m-3", new UnsupportedOperationException("nope"));
+        fail("m-4", new UnsupportedOperationException("nope"));
+        settle();
+        MessageReceiver slow = new InboxConsumerTest.Delegating(messaging.receiver(FAILED)) {
+            @Override
+            public List<ReceivedMessage> receive(int maxMessages, Duration maxWait) {
+                settleFor(300);
+                return super.receive(maxMessages, maxWait);
+            }
+        };
+        Capturing main = new Capturing(messaging.queueSender(MAIN));
+        RedriveRoutes routes = new RedriveRoutes(() -> slow, messaging.queueSender(FAILED), null, null, main,
+                Map.of());
+
+        redrive(routes).redrive(new RedriveRequest("billing", Source.FAILED, Target.MAIN, 100,
+                exception("java.lang.UnsupportedOperationException"), 2, false));
+
+        assertEquals(2, main.sent.size());
+        long gap = Duration.ofNanos(main.at.get(1) - main.at.get(0)).toMillis();
+        assertTrue(gap >= 450, "second move after " + gap + " ms, maxPerSecond=2");
+    }
+
+    private static void settleFor(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
 }

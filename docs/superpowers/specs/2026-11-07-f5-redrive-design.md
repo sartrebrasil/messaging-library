@@ -73,7 +73,8 @@ por vez e para, devolvendo com `nack(0)` a mensagem que encerrou, quando: `enque
    - Passa → espera o ritmo de `maxPerSecond` (só as movidas contam), envia a cópia ao destino, depois `ack`
      (`moved`). Cópia: `OutgoingMessage.copyOf` (corpo, `contentType`, `orderingKey`, `traceparent`, atributos que
      a cópia aceita), **sem** `inbox_failure`, com `inbox_attempts=l2=0;l3=0;redrive=<redriveId>`,
-     `deduplicationId` = `messageId` de origem.
+     `deduplicationId` = `<redriveId>:<messageId de origem>` (revisão final: com o id de origem, a duplicate
+     detection do Service Bus descartaria a cópia).
    - Falha ao copiar (destino ou fim da origem) → `nack(0)` da original, `errors++`, segue.
 3. Relatório com `end`; log `INFO` de auditoria (id, receiver, origem, destino, filtro, `dryRun`, contagens, `end`;
    sem payload).

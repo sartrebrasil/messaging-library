@@ -3,6 +3,7 @@ package com.example.messaging.inbox.spring;
 import com.example.messaging.inbox.DefaultInboxRedrive;
 import com.example.messaging.inbox.InboxConsumer;
 import com.example.messaging.inbox.RedriveRoutes;
+import com.example.messaging.inbox.redrive.Source;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
@@ -141,7 +142,17 @@ public final class InboxLifecycle implements SmartLifecycle, SmartInitializingSi
         }
         if (redrive == null) {
             Map<String, RedriveRoutes> routes = new LinkedHashMap<>();
-            configured.forEach(c -> routes.put(c.name(), builder.routes(c)));
+            for (InboxConfig.Consumer c : configured) {
+                try {
+                    routes.put(c.name(), builder.routes(c));
+                } catch (RuntimeException e) {
+                    // one receiver with an address the provider does not find must not take down the others
+                    LOG.log(System.Logger.Level.WARNING, "Receiver " + c.name() + ": redrive unavailable", e);
+                    String reason = "redrive routes could not be built: " + e.getMessage();
+                    routes.put(c.name(), new RedriveRoutes(null, null, null, null, null,
+                            Map.of(Source.FAILED, reason, Source.DEAD_LETTER, reason)));
+                }
+            }
             redrive = new DefaultInboxRedrive(routes, Clock.systemUTC());
         }
         return redrive;

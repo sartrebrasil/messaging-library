@@ -112,6 +112,7 @@ public final class DefaultInboxRedrive implements InboxRedrive {
         Instant runStart = clock.instant();
         long start = System.nanoTime();
         long interval = 1_000_000_000L / request.maxPerSecond();
+        long nextMove = start;
         Map<String, Integer> byException = new TreeMap<>();
         Map<String, Integer> byFingerprint = new TreeMap<>();
         int moved = 0;
@@ -132,14 +133,13 @@ public final class DefaultInboxRedrive implements InboxRedrive {
                 byFingerprint.merge(failure.map(FailureAttribute::fingerprint).orElse(NONE), 1, Integer::sum);
                 boolean move = !request.dryRun() && passes(request.filter(), message, failure);
                 if (move) {
-                    // the k-th moved message waits until start + (k - 1) / maxPerSecond
-                    long due = start + moved * interval;
-                    for (long wait = due - System.nanoTime(); wait > 0; wait = due - System.nanoTime()) {
+                    // at most maxPerSecond: time spent skipping is no credit for a burst
+                    for (long wait = nextMove - System.nanoTime(); wait > 0; wait = nextMove - System.nanoTime()) {
                         LockSupport.parkNanos(wait);
                     }
+                    nextMove = System.nanoTime() + interval;
                 }
-                OutgoingMessage copy = move ? moved(message, redriveId) : unchanged(message);
-                if (copy(receiver, message, move ? target : sourceSender, copy, redriveId)) {
+                if (copy(receiver, message, move ? target : sourceSender, move, redriveId)) {
                     if (move) {
                         moved++;
                     } else {
@@ -192,20 +192,32 @@ public final class DefaultInboxRedrive implements InboxRedrive {
 
     /** Attempts reset, no {@code inbox_failure}, no dead-letter origin. */
     private static OutgoingMessage moved(ReceivedMessage message, String redriveId) {
-        return Copies.build(message, AttemptState.redriven(redriveId), null).message();
+        return Copies.build(message, AttemptState.redriven(redriveId), null).message()
+                .withDeduplicationId(deduplicationId(message, redriveId));
     }
 
     /** Back to the end of the source as it was. */
-    private static OutgoingMessage unchanged(ReceivedMessage message) {
+    private static OutgoingMessage unchanged(ReceivedMessage message, String redriveId) {
         return OutgoingMessage.copyOf(message).withDeadLetter(message.deadLetter())
-                .withDeduplicationId(Copies.deduplicationId(message.messageId()));
+                .withDeduplicationId(deduplicationId(message, redriveId));
     }
 
-    /** Sends then acks; on a failed send the message goes back to the source and {@code false} is returned. */
-    private static boolean copy(MessageReceiver receiver, ReceivedMessage message, MessageSender sender,
-                                OutgoingMessage copy, String redriveId) {
+    /**
+     * New for the entity, stable within the run: with the source id, Service Bus duplicate detection (MessageId =
+     * deduplicationId) would drop a copy the main queue or the source already saw, and the ack would lose it.
+     */
+    private static String deduplicationId(ReceivedMessage message, String redriveId) {
+        return Copies.deduplicationId(redriveId + ":" + message.messageId());
+    }
+
+    /**
+     * Builds the copy, sends it, then acks; when the copy cannot be built (a message from outside the lib that breaks
+     * the sending rules) or sent, the message goes back to the source and {@code false} is returned.
+     */
+    private static boolean copy(MessageReceiver receiver, ReceivedMessage message, MessageSender sender, boolean move,
+                                String redriveId) {
         try {
-            sender.send(copy);
+            sender.send(move ? moved(message, redriveId) : unchanged(message, redriveId));
         } catch (RuntimeException e) {
             LOG.log(System.Logger.Level.WARNING, "Redrive " + redriveId + ": copy of message " + message.messageId()
                     + " failed; it stays in the source", e);
