@@ -13,7 +13,15 @@ import com.example.messaging.inbox.InboxMessage;
 import com.example.messaging.inbox.TypedMessage;
 import com.example.messaging.memory.InMemoryMessaging;
 import com.example.messaging.memory.InMemoryMessaging.QueueOptions;
+import com.example.messaging.inbox.redrive.Filter;
+import com.example.messaging.inbox.redrive.InboxRedrive;
+import com.example.messaging.inbox.redrive.RedriveReport;
+import com.example.messaging.inbox.redrive.RedriveRequest;
+import com.example.messaging.inbox.redrive.Source;
+import com.example.messaging.inbox.redrive.Target;
 import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
@@ -162,6 +170,37 @@ class InboxAutoConfigurationTest {
                     await(() -> HANDLED.size() == 1 && messaging.size("orders-dlq") == 0);
                     assertThat(Broker.REQUESTED).contains("receiver billing-orders.dead-letter");
                 });
+    }
+
+    @Test
+    void redriveEndToEnd() {
+        runner.withUserConfiguration(Functional.class).run(context -> {
+            InMemoryMessaging messaging = context.getBean(InMemoryMessaging.class);
+            messaging.queueSender("orders-failed").send(OutgoingMessage.ofText(ORDER)
+                    .withAttribute("inbox_attempts", "l2=5;l3=3")
+                    .withAttribute("inbox_failure", com.example.messaging.inbox.retry.FailureAttribute.next(null,
+                            "billing-orders", "orders", new IllegalStateException("down"), java.time.Instant.now())
+                            .format()));
+            Thread.sleep(5);
+
+            RedriveReport report = context.getBean(InboxRedrive.class).redrive(new RedriveRequest("billing-orders",
+                    Source.FAILED, Target.MAIN, 10, Filter.NONE, 100, false));
+
+            assertThat(report.moved()).isEqualTo(1);
+            await(() -> HANDLED.size() == 1);
+            assertThat(messaging.size("orders-failed")).isZero();
+            assertThat(Broker.REQUESTED).contains("receiver billing-orders.failed", "sender billing-orders.redrive");
+        });
+    }
+
+    /** A redrive to a topic would reach every subscription: refused before reading (review focus 2). */
+    @Test
+    void redriveMainIsRefusedOnASubscription() {
+        runner.withUserConfiguration(Functional.class).withPropertyValues(C + "subscription=billing")
+                .run(context -> assertThatThrownBy(() -> context.getBean(InboxRedrive.class).redrive(
+                        new RedriveRequest("billing-orders", Source.FAILED, Target.MAIN, 10, Filter.NONE, 100,
+                                false)))
+                        .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("subscription"));
     }
 
     /** A DLQ that cannot be read (Pub/Sub topic without a subscription) turns level 3 off instead of failing (review I1). */

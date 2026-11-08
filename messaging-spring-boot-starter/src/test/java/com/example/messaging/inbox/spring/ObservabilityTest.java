@@ -15,6 +15,11 @@ import io.micrometer.tracing.otel.bridge.OtelTracer;
 import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator;
 import io.opentelemetry.context.propagation.ContextPropagators;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
+import com.example.messaging.inbox.redrive.Filter;
+import com.example.messaging.inbox.redrive.InboxRedrive;
+import com.example.messaging.inbox.redrive.RedriveRequest;
+import com.example.messaging.inbox.redrive.Source;
+import com.example.messaging.inbox.redrive.Target;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -73,6 +78,21 @@ class ObservabilityTest {
                     assertThat(registry.scrape()).contains(
                             "inbox_dead_letter_passes_total{consumer=\"billing-orders.dead-letter\",end=\"empty\"}");
                 });
+    }
+
+    @Test
+    void redriveMetrics() {
+        runner.withUserConfiguration(Rejecting.class).run(context -> {
+            InMemoryMessaging messaging = context.getBean(InMemoryMessaging.class);
+            messaging.queueSender("orders-failed").send(OutgoingMessage.ofText(InboxAutoConfigurationTest.ORDER));
+            Thread.sleep(5);
+
+            context.getBean(InboxRedrive.class).redrive(new RedriveRequest("billing-orders", Source.FAILED,
+                    Target.MAIN, 10, Filter.NONE, 100, false));
+
+            assertThat(context.getBean(PrometheusMeterRegistry.class).scrape()).contains(
+                    "inbox_redrive_total{consumer=\"billing-orders\",result=\"moved\",source=\"failed\",target=\"main\"} 1.0");
+        });
     }
 
     @Test
