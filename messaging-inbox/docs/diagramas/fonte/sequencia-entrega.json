@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "messaging-inbox: uma entrega, passo a passo",
+    "output": "messaging-inbox/docs/diagramas/sequencia-entrega.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/sartrebrasil/messaging-library.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "c30152dd9fb410767e28b4efeeb9664d7a97d694"
+    }
+  },
+  "participants": [
+    { "id": "receiver", "type": "messagebus", "label": "MessageReceiver", "sublabel": "adapter do broker",
+      "sources": [{ "path": "messaging-core/src/main/java/com/example/messaging/MessageReceiver.java", "line": 24, "end_line": 79 }] },
+    { "id": "worker", "type": "backend", "label": "Worker", "sublabel": "loop + OutcomeApplier",
+      "sources": [
+        { "path": "messaging-inbox/src/main/java/com/example/messaging/inbox/Worker.java", "line": 72, "end_line": 130 },
+        { "path": "messaging-inbox/src/main/java/com/example/messaging/inbox/OutcomeApplier.java", "line": 48, "end_line": 150 }
+      ] },
+    { "id": "pipeline", "type": "backend", "label": "Pipeline", "sublabel": "envelope + nível 1",
+      "sources": [{ "path": "messaging-inbox/src/main/java/com/example/messaging/inbox/Pipeline.java", "line": 18, "end_line": 111 }] },
+    { "id": "store", "type": "database", "label": "IdempotencyStore", "sublabel": "opcional",
+      "sources": [{ "path": "messaging-inbox/src/main/java/com/example/messaging/inbox/IdempotencyGuard.java", "line": 20, "end_line": 70 }] },
+    { "id": "handler", "type": "frontend", "label": "Seu handler", "sublabel": "@MessageListener",
+      "sources": [{ "path": "messaging-spring-boot-starter/src/main/java/com/example/messaging/inbox/spring/MessageListener.java", "line": 9, "end_line": 27 }] },
+    { "id": "senders", "type": "messagebus", "label": "Senders", "sublabel": "DLQ, failed, retry",
+      "sources": [{ "path": "messaging-inbox/src/main/java/com/example/messaging/inbox/Copies.java", "line": 23, "end_line": 80 }] }
+  ],
+  "segments": [
+    { "from": 150, "to": 236, "label": "Receive" },
+    { "from": 240, "to": 500, "label": "Pipeline" },
+    { "from": 504, "to": 600, "label": "Efeito no broker" }
+  ],
+  "messages": [
+    { "id": "receive", "from": "worker", "to": "receiver", "y": 165, "label": "receive(max-messages, poll-wait)", "variant": "emphasis" },
+    { "id": "messages", "from": "receiver", "to": "worker", "y": 193, "label": "mensagens", "variant": "return" },
+    { "id": "keepalive", "from": "worker", "to": "receiver", "y": 221, "label": "keepAlive(max-processing)" },
+    { "id": "process", "from": "worker", "to": "pipeline", "y": 255, "label": "process", "variant": "emphasis", "note": "envelope: cloudevents, outbox ou raw; desserializa o payload" },
+    { "id": "reserve", "from": "pipeline", "to": "store", "y": 315, "label": "reserve(id)" },
+    { "id": "reserved", "from": "store", "to": "pipeline", "y": 343, "label": "ok, duplicate ou in_progress", "variant": "return" },
+    { "id": "handle", "from": "pipeline", "to": "handler", "y": 375, "label": "handle(T)", "variant": "emphasis", "note": "nível 1: repete em memória com backoff" },
+    { "id": "result", "from": "handler", "to": "pipeline", "y": 431, "label": "retorno, HandlerResult ou exceção", "variant": "return" },
+    { "id": "complete", "from": "pipeline", "to": "store", "y": 459, "label": "complete ou release" },
+    { "id": "outcome", "from": "pipeline", "to": "worker", "y": 487, "label": "Outcome", "variant": "return" },
+    { "id": "copy", "from": "worker", "to": "senders", "y": 519, "label": "cópia (se não for Ack)", "variant": "dashed" },
+    { "id": "ack", "from": "worker", "to": "receiver", "y": 547, "label": "ack ou nack(delay)", "variant": "emphasis", "note": "cópia sempre antes do ack: duplicata, nunca perda" }
+  ],
+  "activations": [
+    { "participant": "worker", "from": 160, "to": 560, "type": "backend" },
+    { "participant": "pipeline", "from": 250, "to": 492, "type": "backend" },
+    { "participant": "store", "from": 310, "to": 464, "type": "database" },
+    { "participant": "handler", "from": 370, "to": 436, "type": "frontend" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Lease", "items": ["keepAlive renova o lease enquanto o handler roda", "Fecha depois do efeito no broker"] },
+    { "dot": "emerald", "title": "Idempotência", "items": ["Só com idempotency.enabled e um bean IdempotencyStore", "Chave = id do envelope, escopo = receiver"] },
+    { "dot": "rose", "title": "Falha no efeito", "items": ["Cópia que falha vira nack(0): a mensagem volta", "ack com lease vencido só gera aviso"] }
+  ]
+}

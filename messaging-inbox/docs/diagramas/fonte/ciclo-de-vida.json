@@ -1,0 +1,279 @@
+{
+  "schema_version": 3,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "messaging-inbox: ciclo de vida de uma mensagem",
+    "output": "messaging-inbox/docs/diagramas/ciclo-de-vida.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/sartrebrasil/messaging-library.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "c30152dd9fb410767e28b4efeeb9664d7a97d694"
+    }
+  },
+  "mainPath": [
+    "received",
+    "checked",
+    "handling",
+    "acked"
+  ],
+  "states": [
+    {
+      "id": "received",
+      "type": "start",
+      "label": "Recebida",
+      "sublabel": "receive + keepAlive",
+      "step": "01",
+      "sources": [
+        {
+          "path": "messaging-inbox/src/main/java/com/example/messaging/inbox/Worker.java",
+          "line": 72,
+          "end_line": 130
+        }
+      ]
+    },
+    {
+      "id": "checked",
+      "type": "decision",
+      "label": "Envelope e idempotência",
+      "sublabel": "lê, desserializa, reserve",
+      "step": "02",
+      "sources": [
+        {
+          "path": "messaging-inbox/src/main/java/com/example/messaging/inbox/EnvelopeReader.java",
+          "line": 26,
+          "end_line": 60
+        },
+        {
+          "path": "messaging-inbox/src/main/java/com/example/messaging/inbox/IdempotencyGuard.java",
+          "line": 20,
+          "end_line": 70
+        }
+      ]
+    },
+    {
+      "id": "handling",
+      "type": "active",
+      "label": "Handler",
+      "sublabel": "seu código + nível 1",
+      "step": "03",
+      "sources": [
+        {
+          "path": "messaging-inbox/src/main/java/com/example/messaging/inbox/Pipeline.java",
+          "line": 18,
+          "end_line": 111
+        }
+      ],
+      "tag": "3x em memória"
+    },
+    {
+      "id": "acked",
+      "type": "success",
+      "label": "Confirmada",
+      "sublabel": "complete + ack",
+      "tag": "outcome=success",
+      "step": "04",
+      "sources": [
+        {
+          "path": "messaging-inbox/src/main/java/com/example/messaging/inbox/OutcomeApplier.java",
+          "line": 48,
+          "end_line": 52
+        }
+      ]
+    },
+    {
+      "id": "duplicate",
+      "type": "neutral",
+      "label": "Ack sem handler",
+      "sublabel": "duplicata ou discard",
+      "tag": "duplicate · discarded"
+    },
+    {
+      "id": "delayed",
+      "type": "waiting",
+      "label": "Nível 2",
+      "sublabel": "broker-delay, hold, retry-queues",
+      "tag": "5x, 30s..15m",
+      "sources": [
+        {
+          "path": "messaging-inbox/src/main/java/com/example/messaging/inbox/DelayedStrategy.java",
+          "line": 1,
+          "end_line": 60
+        }
+      ]
+    },
+    {
+      "id": "dlq",
+      "type": "waiting",
+      "label": "DLQ (nível 3)",
+      "sublabel": "relê a DLQ, sem nível 2",
+      "tag": "3 passadas",
+      "sources": [
+        {
+          "path": "messaging-inbox/src/main/java/com/example/messaging/inbox/DeadLetterPass.java",
+          "line": 17,
+          "end_line": 120
+        }
+      ]
+    },
+    {
+      "id": "failed",
+      "type": "failure",
+      "label": "failed",
+      "sublabel": "falha definitiva",
+      "tag": "inbox_failure",
+      "sources": [
+        {
+          "path": "messaging-inbox/src/main/java/com/example/messaging/inbox/Copies.java",
+          "line": 23,
+          "end_line": 80
+        }
+      ]
+    },
+    {
+      "id": "released",
+      "type": "neutral",
+      "label": "Devolvida",
+      "sublabel": "shutdown ou erro no broker",
+      "tag": "outcome=released"
+    }
+  ],
+  "transitions": [
+    {
+      "id": "received-checked",
+      "from": "received",
+      "to": "checked",
+      "label": "lê"
+    },
+    {
+      "id": "checked-handling",
+      "from": "checked",
+      "to": "handling",
+      "label": "ok"
+    },
+    {
+      "id": "handling-acked",
+      "from": "handling",
+      "to": "acked",
+      "label": "sucesso",
+      "variant": "emphasis"
+    },
+    {
+      "id": "checked-duplicate",
+      "from": "checked",
+      "to": "duplicate",
+      "label": "repetida"
+    },
+    {
+      "id": "checked-failed",
+      "from": "checked",
+      "to": "failed",
+      "label": "inválida",
+      "variant": "security"
+    },
+    {
+      "id": "handling-delayed",
+      "from": "handling",
+      "to": "delayed",
+      "label": "esgotou"
+    },
+    {
+      "id": "delayed-received",
+      "from": "delayed",
+      "to": "received",
+      "label": "reentrega",
+      "variant": "dashed"
+    },
+    {
+      "id": "delayed-dlq",
+      "from": "delayed",
+      "to": "dlq",
+      "label": "com DLQ"
+    },
+    {
+      "id": "delayed-failed",
+      "from": "delayed",
+      "to": "failed",
+      "label": "sem DLQ",
+      "variant": "security"
+    },
+    {
+      "id": "dlq-received",
+      "from": "dlq",
+      "to": "checked",
+      "label": "passada",
+      "variant": "dashed"
+    },
+    {
+      "id": "dlq-failed",
+      "from": "dlq",
+      "to": "failed",
+      "label": "esgotou",
+      "variant": "security"
+    },
+    {
+      "id": "handling-failed",
+      "from": "handling",
+      "to": "failed",
+      "label": "non-retryable",
+      "variant": "security"
+    },
+    {
+      "id": "handling-released",
+      "from": "handling",
+      "to": "released",
+      "label": "release"
+    },
+    {
+      "id": "released-received",
+      "from": "released",
+      "to": "received",
+      "label": "nack(0)",
+      "variant": "dashed"
+    },
+    {
+      "id": "failed-received",
+      "from": "failed",
+      "to": "received",
+      "label": "redrive",
+      "variant": "dashed"
+    },
+    {
+      "id": "handling-duplicate",
+      "from": "handling",
+      "to": "duplicate",
+      "label": "discard"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Ordem dos níveis",
+      "items": [
+        "Nível 1: em memória, no mesmo worker",
+        "Nível 2: com atraso, estratégia escolhida pelas capabilities",
+        "Nível 3: passada lenta na DLQ comum, só com dead-letter",
+        "RetryAfter e skip-immediate pulam o nível 1"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Fim definitivo",
+      "items": [
+        "failed é obrigatória em todo receiver",
+        "Cópias levam o corpo original e inbox_failure",
+        "Cópia sempre antes do ack: duplicata, nunca perda"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Volta ao início",
+      "items": [
+        "Reentrega do nível 2 e release voltam à fila principal",
+        "Passada do nível 3 reprocessa na própria DLQ; quem falha volta ao fim dela",
+        "Redrive (API ou Actuator) zera as tentativas"
+      ]
+    }
+  ]
+}

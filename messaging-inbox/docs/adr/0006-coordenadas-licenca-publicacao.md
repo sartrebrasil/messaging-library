@@ -6,6 +6,7 @@
 - Revisão: 2026-10-07 (incorpora a acme-messaging; módulo `inbox-resilience4j`)
 - Revisão: 2026-10-07 (`hold` e nível 3 no core; BOMs por módulo)
 - Revisão: 2026-11-05 (coordenadas e módulos da messaging-library)
+- Revisão: 2026-11-06 (`messaging-inbox-spring-boot-starter` incorporado ao `messaging-spring-boot-starter`; ADR-0008 da messaging-lib)
 
 ## Revisão de 2026-11-05: coordenadas na messaging-library
 

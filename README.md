@@ -9,9 +9,9 @@ explícito em `Capabilities`.
 > Versão 0.x: a API ainda pode mudar entre versões menores.
 > Plano e decisões em [`docs/plan.md`](docs/plan.md) e [`docs/adr/`](docs/adr/).
 
-Não é um framework de consumo: não tem listener, pool de threads, retry por política nem
-idempotência. A lib entrega `receive`, `ack`, `nack`, lease e dead letter; o loop de consumo é de
-quem usa (a inbox-library, por exemplo).
+O core não é um framework de consumo: não tem listener, pool de threads, retry por política nem
+idempotência. Ele entrega `receive`, `ack`, `nack`, lease e dead letter; o loop de consumo é do módulo
+`messaging-inbox` (ou de quem usa o core direto).
 
 ## Módulos
 
@@ -25,7 +25,7 @@ quem usa (a inbox-library, por exemplo).
 | `messaging-jms` | ActiveMQ Classic e Artemis por Jakarta Messaging (`JmsDialect`): fila e tópico, com lease controlado pela lib (ADR-0009). Exige o cliente do broker na aplicação: `org.apache.activemq:activemq-client` ou `artemis-jakarta-client`. |
 | `messaging-rabbitmq` | RabbitMQ (AMQP 0-9-1, `amqp-client` sem Netty): fila e exchange, receive por `basicGet`, lease controlado pela lib (ADR-0009). |
 | `messaging-spring-boot-starter` | Providers, senders e receivers por properties (`messaging.*`), métricas, `traceparent` e health; os receivers (`messaging.receivers`) sobem quando `messaging-inbox` e Jackson 3 estão na aplicação. Liga cada provedor cujo adapter está no classpath; os adapters não dependem de Spring. Spring Boot 4. |
-| `messaging-inbox` | Consumo sobre `MessageReceiver`: envelope (CloudEvents, outbox, raw), retry em três níveis e loop de polling. Somente JDK. Plano e ADRs em `messaging-inbox/docs`. Em desenvolvimento. |
+| `messaging-inbox` | Consumo sobre `MessageReceiver`: loop de polling, envelope (CloudEvents, outbox, raw), retry em três níveis, DLQ e `failed`, idempotência e redrive. Somente JDK. Guia em [`messaging-inbox/README.md`](messaging-inbox/README.md). Em desenvolvimento. |
 | `messaging-bom` | Alinha as versões dos módulos acima. |
 
 Cada adapter traz só o SDK do seu provedor.
@@ -162,28 +162,6 @@ existe em quorum queue; em classic queue, fica vazio a partir da segunda entrega
 usa `mandatory`, então fila inexistente lança `DestinationNotFoundException`. O sender de exchange
 não usa `mandatory`: exchange sem fila ligada descarta, como um tópico sem subscriptions.
 
-## DLQ nativa e o orçamento da inbox
-
-A inbox decide a cópia para `failed` ou DLQ comum depois de um número de entregas que depende da estratégia do
-nível 2 (padrões: nível 1 com 3 tentativas, nível 2 com 5): `broker-delay` usa 6 entregas no broker (mais as de lease
-vencido ou `stop`), `hold` e `retry-queues` usam 1 no original. Se a DLQ nativa do broker agir antes, a mensagem sai
-sem a cópia com `inbox_failure`. Valores medidos pelo `InboxContract` (F3) com a configuração padrão de cada broker:
-
-| Broker | Limite nativo padrão (medido pelo contrato da inbox) | Depois do limite | Atraso do nível 2 |
-|---|---|---|---|
-| SQS | nenhum: só com redrive policy (`maxReceiveCount`) | DLQ da redrive policy | `broker-delay` (visibility) |
-| Service Bus (fila e subscription) | 10 entregas (`MaxDeliveryCount`) | DLQ nativa da entidade | `broker-delay` por cópia (`RESCHEDULE`, só fila); `hold`/`retry-queues` na subscription |
-| Pub/Sub | nenhum: só com dead-letter policy | tópico de dead letter | `broker-delay` (ack deadline); sem dead-letter policy, em memória como o `hold` (veja abaixo) |
-| ActiveMQ Classic | nenhum com este adapter (30 `nack` sem sair) | — | `broker-delay` por cópia (`SCHEDULED`) |
-| Artemis | 10 entregas (`max-delivery-attempts`) | endereço `DLQ` | `broker-delay` por cópia (`SCHEDULED`) |
-| RabbitMQ 4 (quorum) | 21 entregas (`delivery-limit` 20 conta devoluções) | descartada, ou DLX se configurado | `hold` ou `retry-queues` |
-
-- Com `broker-delay` sem cópia (atraso no próprio `nack`, como no SQS), o limite nativo precisa ficar acima de 6;
-  no SQS isso é o `maxReceiveCount` da redrive policy.
-- No Pub/Sub sem dead-letter policy o `deliveryAttempt` não vem, e o broker não conta o nível 2. O `broker-delay`
-  faz então as tentativas do nível 2 em memória, como o `hold` (a mensagem fica com o consumer, sob `keepAlive`), e
-  avisa uma vez por worker no log. Com a dead-letter policy, ou com `retry-queues`, o nível 2 volta ao broker.
-
 ## Mensagem
 
 | Regra | Valor |
@@ -282,82 +260,12 @@ startup. No Artemis, a `broker-url` ganha `consumerWindowSize=0` quando não def
 destinations.sender("pedidos").send(message);            // mesma instância sempre
 ```
 
-Receivers configurados com a messaging-inbox:
-
-```yaml
-messaging:
-  receivers-enabled: ${RECEIVERS_ENABLED:true}   # false: nenhum receiver sobe
-  receiver-defaults:
-    concurrency: 4
-    poll-wait: 20s
-  receivers:
-    billing-orders:
-      enabled: true              # false: validado no startup, não inicia
-      destination: https://sqs.sa-east-1.amazonaws.com/123/orders
-      dead-letter: orders-dlq    # endereços no provider do receiver
-      failed: orders-failed
-```
-
-```java
-@MessageListener(receiver = "billing-orders")
-void on(Order order) { ... }
-```
-
-Com `dead-letter`, o nível 3 vem ligado: a cada `retry.dead-letter.interval` (15 min) cada instância relê a DLQ e
-reprocessa até `max-per-pass` (100) mensagens com o mesmo handler, sem o nível 2; quem falha volta para o fim da DLQ
-até `max-attempts` (3) passadas, depois vai para `failed`. `max-attempts: 0` deixa a DLQ só como estacionamento. As
-métricas da passada usam `consumer=<receiver>.dead-letter`, mais o contador `inbox_dead_letter_passes_total{end}`.
-
-#### Redrive
-
-Depois de corrigir um bug, o bean `InboxRedrive` devolve mensagens da `failed` (ou da DLQ) à fila principal com as
-tentativas zeradas, filtrando por exceção, fingerprint, motivo ou data, num ritmo limitado (ADR-0012 da inbox):
-
-```java
-RedriveReport report = redrive.redrive(new RedriveRequest("billing-orders", Source.FAILED, Target.MAIN,
-        1_000, new Filter(null, "3f2a9c1e", null, null, null), 50, false));
-```
-
-O fluxo: um `dryRun` sem filtro mostra os grupos (`byException`, `byFingerprint`) sem mover nada; o redrive seguinte
-filtra pelo fingerprint do bug corrigido. Combinações: `failed` → principal, `failed` → DLQ e DLQ → principal. Num
-receiver de tópico com subscription o destino principal é recusado (chegaria a todas as subscriptions), assim como no
-Pub/Sub, que só envia a tópicos. A métrica é `inbox_redrive_total{consumer,source,target,result}`.
-
-Com o Actuator, o endpoint `inboxredrive` faz o mesmo por HTTP. Ele vem **desligado** e só responde com as duas chaves
-(`management.endpoints.access.default` não o abre):
-
-```yaml
-management:
-  endpoint.inboxredrive.access: unrestricted
-  endpoints.web.exposure.include: health,inboxredrive
-```
-
-- `GET /actuator/inboxredrive`: receivers, origens disponíveis (ou o motivo) e destinos.
-- `POST /actuator/inboxredrive/billing-orders` com `{"source":"failed","target":"main","limit":1000,"dryRun":true}`
-  (e, opcionais, `maxPerSecond` (100), `exception`, `fingerprint`, `reason`, `enqueuedBefore`, `enqueuedAfter` em
-  ISO-8601): devolve o relatório quando a execução termina. `400` pedido inválido, `404` receiver inexistente, `409`
-  execução em curso.
-
-Proteger o endpoint é da aplicação, por exemplo com Spring Security:
-
-```java
-@Bean
-SecurityFilterChain actuator(HttpSecurity http) throws Exception {
-    return http.securityMatcher(EndpointRequest.to("inboxredrive"))
-            .authorizeHttpRequests(a -> a.anyRequest().hasRole("OPERATOR"))
-            .httpBasic(Customizer.withDefaults())
-            .build();
-}
-```
+Receivers (`messaging.receivers`) são consumidos pela messaging-inbox: retry em três níveis, DLQ e `failed`,
+idempotência, redrive e métricas. Guia completo, com exemplos de configuração e diagramas, em
+[`messaging-inbox/README.md`](messaging-inbox/README.md).
 
 Chave desconhecida em `providers`, `senders`, `receivers` ou `receiver-defaults` derruba o startup,
 assim como as chaves removidas `messaging.destinations` e `inbox.*` (ADR-0008 da messaging-inbox).
-
-No shutdown, cada receiver espera o `poll-wait` do `receive` em curso e até `shutdown-timeout` pelos handlers em
-andamento. Mantenha `spring.lifecycle.timeout-per-shutdown-phase` (padrão 30 s) acima de `shutdown-timeout +
-poll-wait`; senão o Spring segue o shutdown com workers ainda rodando, e as mensagens deles voltam ao broker só
-quando o lease vencer. Com os padrões (`shutdown-timeout` 30 s, `poll-wait` 20 s), suba a fase para pelo menos 50 s,
-ou baixe os dois, como o engine-tax (`poll-wait` 10 s, `shutdown-timeout` 15 s).
 
 No ActiveMQ, o starter abre uma conexão por provider no startup e a fecha no shutdown. A lib não
 recria a conexão: a reconexão vem da URL. Com `broker-url`, o `JmsDialect` cuida disso:
@@ -407,8 +315,8 @@ duplicate detection e ordering são configuração do destino (Terraform), não 
 | Java | 21 | |
 | Spring Boot | 4.1.1 | Testes de auto-configuração verdes |
 | AWS SDK v2 | 2.44.7 | Verde no LocalStack 4.14.0 (última imagem sem `LOCALSTACK_AUTH_TOKEN`) |
-| `azure-messaging-servicebus` | 7.18.0 | Pendente: Service Bus emulator 2.0.0 (`MaxDeliveryCount` até 10) |
-| Google `libraries-bom` | 26.90.0 (`google-cloud-pubsub` 1.157.0) | Pendente: `google-cloud-cli:587.0.0-emulators` |
+| `azure-messaging-servicebus` | 7.18.0 | Verde no Service Bus emulator 2.0.0 (`MaxDeliveryCount` até 10; teste da DLQ nativa pulado por bug do emulator) |
+| Google `libraries-bom` | 26.90.0 (`google-cloud-pubsub` 1.157.0) | Verde no `google-cloud-cli:587.0.0-emulators` |
 | `activemq-client` | 6.2.5 | Verde no `apache/activemq-classic:6.2.0` com `schedulerSupport` |
 | `artemis-jakarta-client` | 2.40.0 | Verde no `apache/activemq-artemis:2.40.0` sem auto-create |
 | `amqp-client` | 5.35.0 (sem Netty) | Verde no `rabbitmq:4.1-management-alpine` (4.1.8) |

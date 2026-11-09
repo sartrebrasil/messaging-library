@@ -6,6 +6,7 @@
 - Revisão: 2026-10-07 (SPI do adapter síncrono; circuit breaker sai do core, ADR-0010)
 - Revisão: 2026-10-07 (`Outcome.Release`; `hold` e passada do nível 3 no core)
 - Revisão: 2026-11-05 (incorporada na messaging-library: dois módulos, sem Kafka, sem SPI de adapter)
+- Revisão: 2026-11-06 (`messaging-inbox-spring-boot-starter` incorporado ao `messaging-spring-boot-starter`; ADR-0008 da messaging-lib)
 
 ## Revisão de 2026-11-05: incorporação na messaging-library
 

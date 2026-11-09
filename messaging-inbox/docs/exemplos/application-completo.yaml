@@ -1,0 +1,117 @@
+# Exemplo completo de configuração da messaging-inbox (Spring Boot).
+# Todas as chaves aceitas hoje aparecem aqui, com o valor padrão quando existe.
+# O teste DocumentedConfigTest (messaging-spring-boot-starter) carrega este arquivo:
+# se uma chave daqui deixar de existir, o build quebra.
+
+messaging:
+  # false: nenhum receiver sobe (útil para desligar o consumo por ambiente). Padrão: true.
+  receivers-enabled: ${RECEIVERS_ENABLED:true}
+
+  # Conexões. O nome (aws, rabbit, azure) é usado em "provider" dos receivers.
+  providers:
+    aws:
+      type: aws
+      region: sa-east-1
+      # endpoint: http://localhost:4566     # LocalStack
+    rabbit:
+      type: rabbitmq
+      broker-url: amqp://rabbit:5672/vhost
+      user: ${RABBIT_USER}
+      password: ${RABBIT_PASSWORD}
+    azure:
+      type: azure
+      connection-string: ${SERVICEBUS_CONNECTION_STRING}
+
+  # Valem para todos os receivers; cada receiver pode sobrescrever chave por chave.
+  # NÃO aceita: destination, subscription, dead-letter, failed, enabled, options, retry.delayed.queues.
+  receiver-defaults:
+    concurrency: 1                 # workers (platform threads) por receiver
+    max-messages-per-poll: 1       # mensagens por receive
+    poll-wait: 20s                 # espera máxima de cada receive (long poll)
+    max-processing: 15m            # orçamento do keepAlive por mensagem
+    shutdown-timeout: 30s          # espera pelos handlers em andamento no shutdown
+    key-lanes: 1                   # >1: processa um receive em paralelo por orderingKey
+    ordering: relaxed              # relaxed | strict
+    envelope: auto                 # auto | cloudevents | outbox | raw
+    idempotency:
+      enabled: false               # true exige um bean IdempotencyStore
+      ttl: P7D                     # quanto tempo um id concluído é lembrado
+      # reservation-ttl: 20m       # padrão: max-processing + esperas do hold + 5 min
+    retry:
+      immediate:                   # nível 1: em memória, no mesmo worker
+        max-attempts: 3            # tentativas além da primeira execução
+        initial: 100ms
+        multiplier: 2
+        max: 2s
+        jitter: 0.2
+      delayed:                     # nível 2: com atraso
+        max-attempts: 5
+        initial: 30s
+        multiplier: 2
+        # max: 15m                 # padrão 15m, limitado ao máximo do broker (Pub/Sub: 600 s).
+                                   # Configurado aqui, deixa de ser limitado e o startup falha no Pub/Sub.
+        jitter: 0.2
+        strategy: auto             # auto | broker-delay | retry-queues | hold
+      dead-letter:                 # nível 3: passadas lentas na DLQ (só com dead-letter configurada)
+        max-attempts: 3            # 0: a DLQ vira só estacionamento
+        interval: 15m
+        max-per-pass: 100
+      # Substitui a lista padrão (PayloadDeserializationException, IllegalArgumentException); não soma.
+      non-retryable:
+        - com.example.messaging.inbox.PayloadDeserializationException
+        - java.lang.IllegalArgumentException
+      skip-immediate: []           # exceções que pulam o nível 1
+      retryable: []                # não vazia: só estas são retentadas (allowlist)
+      include-exception-message: true   # mensagem da exceção no atributo dead_letter das cópias
+
+  receivers:
+    # SQS com DLQ comum (nível 3 ligado) e idempotência.
+    billing-orders:
+      enabled: true                # false: validado no startup, não inicia
+      provider: aws                # opcional quando só existe um provider
+      destination: https://sqs.sa-east-1.amazonaws.com/123456789012/orders   # ou só o nome da fila
+      dead-letter: orders-dlq      # DLQ comum (não a redrive policy nativa)
+      failed: orders-failed        # obrigatória: falha definitiva
+      concurrency: 4
+      max-messages-per-poll: 10
+      poll-wait: 10s
+      shutdown-timeout: 15s
+      key-lanes: 10                # até 10 orderingKeys em paralelo dentro de um receive
+      idempotency:
+        enabled: true
+      retry:
+        non-retryable:
+          - com.example.messaging.inbox.PayloadDeserializationException
+          - java.lang.IllegalArgumentException
+          - java.lang.UnsupportedOperationException
+
+    # RabbitMQ não tem nack com atraso: o nível 2 usa filas de espera com TTL fixo.
+    invoices:
+      provider: rabbit
+      destination: faturamento     # fila ligada ao exchange
+      failed: faturamento-failed
+      envelope: outbox
+      retry:
+        delayed:
+          strategy: retry-queues
+          max-attempts: 4
+          queues:                  # a menor faixa com delay >= atraso calculado
+            - { delay: 30s, destination: faturamento-retry-30s }
+            - { delay: 5m,  destination: faturamento-retry-5m }
+            - { delay: 15m, destination: faturamento-retry-15m }
+
+    # Service Bus com sessions: ordem por orderingKey; o nível 2 segura em memória (hold).
+    payments:
+      provider: azure
+      destination: pagamentos
+      failed: pagamentos-failed
+      ordering: strict
+      options:
+        sessions: true
+        max-message-bytes: 262144
+        require: [ordered-delivery]
+      retry:
+        delayed:
+          strategy: hold
+          max-attempts: 3
+          max: 2m

@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "messaging-inbox: componentes em runtime",
+    "output": "messaging-inbox/docs/diagramas/arquitetura.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/sartrebrasil/messaging-library.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "c30152dd9fb410767e28b4efeeb9664d7a97d694"
+    }
+  },
+  "components": [
+    { "id": "broker", "type": "external", "label": "Broker", "sublabel": "fila, DLQ, failed", "pos": [40, 220], "size": [150, 64], "tag": "SQS · SB · Pub/Sub · AMQ · Rabbit" },
+    { "id": "adapter", "type": "messagebus", "label": "Adapter", "sublabel": "MessageReceiver/Sender", "pos": [290, 220], "size": [150, 64], "tag": "messaging-aws, -azure...",
+      "sources": [
+        { "path": "messaging-core/src/main/java/com/example/messaging/MessageReceiver.java", "line": 24, "end_line": 79 },
+        { "path": "messaging-aws/src/main/java/com/example/messaging/aws/SqsMessageReceiver.java", "line": 49, "end_line": 90 }
+      ] },
+    { "id": "worker", "type": "backend", "label": "Worker", "sublabel": "loop + OutcomeApplier", "pos": [540, 220], "size": [150, 64], "tag": "concurrency x key-lanes",
+      "sources": [
+        { "path": "messaging-inbox/src/main/java/com/example/messaging/inbox/Worker.java", "line": 72, "end_line": 130 },
+        { "path": "messaging-inbox/src/main/java/com/example/messaging/inbox/OutcomeApplier.java", "line": 48, "end_line": 150 }
+      ] },
+    { "id": "pipeline", "type": "backend", "label": "Pipeline", "sublabel": "envelope, retry nível 1", "pos": [790, 220], "size": [150, 64],
+      "sources": [
+        { "path": "messaging-inbox/src/main/java/com/example/messaging/inbox/Pipeline.java", "line": 18, "end_line": 111 },
+        { "path": "messaging-inbox/src/main/java/com/example/messaging/inbox/EnvelopeReader.java", "line": 26, "end_line": 60 }
+      ] },
+    { "id": "handler", "type": "frontend", "label": "Seu handler", "sublabel": "@MessageListener", "pos": [1040, 220], "size": [150, 64], "tag": "ou bean InboxHandler",
+      "sources": [
+        { "path": "messaging-spring-boot-starter/src/main/java/com/example/messaging/inbox/spring/MessageListener.java", "line": 9, "end_line": 27 },
+        { "path": "messaging-spring-boot-starter/src/main/java/com/example/messaging/inbox/spring/HandlerBinding.java", "line": 28, "end_line": 48 }
+      ] },
+    { "id": "destinations", "type": "cloud", "label": "MessagingDestinations", "sublabel": "providers do starter", "pos": [290, 60], "size": [150, 64],
+      "sources": [
+        { "path": "messaging-spring-boot-starter/src/main/java/com/example/messaging/spring/MessagingDestinations.java", "line": 48, "end_line": 170 }
+      ] },
+    { "id": "starter", "type": "cloud", "label": "InboxAutoConfiguration", "sublabel": "valida e sobe no startup", "pos": [540, 60], "size": [150, 64], "tag": "InboxLifecycle",
+      "sources": [
+        { "path": "messaging-spring-boot-starter/src/main/java/com/example/messaging/inbox/spring/InboxAutoConfiguration.java", "line": 39, "end_line": 105 },
+        { "path": "messaging-spring-boot-starter/src/main/java/com/example/messaging/inbox/spring/InboxLifecycle.java", "line": 31, "end_line": 100 }
+      ] },
+    { "id": "store", "type": "database", "label": "IdempotencyStore", "sublabel": "JDBC, Redis, Mongo", "pos": [790, 380], "size": [150, 64], "tag": "opcional",
+      "sources": [
+        { "path": "messaging-inbox/src/main/java/com/example/messaging/inbox/IdempotencyGuard.java", "line": 20, "end_line": 70 },
+        { "path": "messaging-spring-boot-starter/src/main/java/com/example/messaging/inbox/spring/IdempotencySupport.java", "line": 11, "end_line": 32 }
+      ] },
+    { "id": "redrive", "type": "backend", "label": "Nível 3 + Redrive", "sublabel": "DeadLetterPass, InboxRedrive", "pos": [290, 380], "size": [150, 64],
+      "sources": [
+        { "path": "messaging-inbox/src/main/java/com/example/messaging/inbox/DeadLetterPass.java", "line": 17, "end_line": 120 },
+        { "path": "messaging-inbox/src/main/java/com/example/messaging/inbox/DefaultInboxRedrive.java", "line": 34, "end_line": 80 }
+      ] },
+    { "id": "operator", "type": "security", "label": "Operador", "sublabel": "API Java ou Actuator", "pos": [290, 540], "size": [150, 64], "tag": "desligado por padrão",
+      "sources": [
+        { "path": "messaging-spring-boot-starter/src/main/java/com/example/messaging/inbox/spring/InboxRedriveEndpoint.java", "line": 33, "end_line": 80 },
+        { "path": "messaging-spring-boot-starter/src/main/java/com/example/messaging/inbox/spring/InboxRedriveEndpointAutoConfiguration.java", "line": 17, "end_line": 27 }
+      ] }
+  ],
+  "connections": [
+    { "id": "broker-adapter", "from": "broker", "to": "adapter", "label": "SDK" },
+    { "id": "adapter-worker", "from": "adapter", "to": "worker", "label": "receive", "variant": "emphasis" },
+    { "id": "worker-adapter", "from": "worker", "to": "adapter", "label": "ack · cópias" },
+    { "id": "worker-pipeline", "from": "worker", "to": "pipeline", "label": "process", "variant": "emphasis" },
+    { "id": "pipeline-handler", "from": "pipeline", "to": "handler", "label": "handle(T)", "variant": "emphasis" },
+    { "id": "pipeline-store", "from": "pipeline", "to": "store", "label": "reserve · complete" },
+    { "id": "starter-destinations", "from": "starter", "to": "destinations", "label": "receivers" },
+    { "id": "destinations-adapter", "from": "destinations", "to": "adapter", "label": "cria" },
+    { "id": "starter-worker", "from": "starter", "to": "worker", "label": "start · stop" },
+    { "id": "starter-handler", "from": "starter", "to": "handler", "label": "liga por nome", "variant": "dashed" },
+    { "id": "redrive-adapter", "from": "redrive", "to": "adapter", "label": "lê DLQ/failed", "variant": "dashed" },
+    { "id": "operator-redrive", "from": "operator", "to": "redrive", "label": "redrive", "variant": "security" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Caminho principal", "items": ["Worker chama receive e abre keepAlive por mensagem", "Pipeline lê o envelope, desserializa e chama o handler", "Worker aplica o Outcome: ack, nack ou cópia antes do ack"] },
+    { "dot": "emerald", "title": "Startup", "items": ["messaging.receivers é validado inteiro; erro derruba o boot", "Um InboxConsumer por receiver, parado antes dos adapters"] },
+    { "dot": "amber", "title": "Observabilidade", "items": ["Métricas inbox_* e span inbox.consume (Micrometer)", "Gauge inbox_last_receive_age_seconds para liveness"] }
+  ]
+}
