@@ -4,6 +4,7 @@ import com.example.messaging.MessageReceiver;
 import com.example.messaging.MessageSender;
 import com.example.messaging.inbox.ConsumerObserver;
 import com.example.messaging.inbox.PayloadDeserializer;
+import com.example.messaging.inbox.redrive.InboxRedrive;
 import com.example.messaging.spring.MessagingAutoConfiguration;
 import com.example.messaging.spring.MessagingDestinations;
 import com.example.messaging.spring.MessagingProperties.Endpoint;
@@ -92,6 +93,14 @@ public class InboxAutoConfiguration {
                 clock);
         lifecycle[0] = new InboxLifecycle(properties, beans, builder);
         return lifecycle[0];
+    }
+
+    /** Redrive of {@code failed} and the DLQ (ADR-0012), with {@code inbox.redrive} when Micrometer is there. */
+    @Bean
+    @ConditionalOnMissingBean
+    InboxRedrive inboxRedrive(InboxLifecycle lifecycle, ConfigurableListableBeanFactory beans) {
+        InboxRedrive redrive = request -> lifecycle.redrive().redrive(request);
+        return MICROMETER ? MicrometerSupport.metered(redrive, beans) : redrive;
     }
 
     /** Destinations are looked up on first use, so a consumer-less application needs none. */

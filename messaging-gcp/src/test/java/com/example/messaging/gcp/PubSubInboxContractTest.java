@@ -90,4 +90,10 @@ class PubSubInboxContractTest extends InboxContract {
     protected Duration settle() {
         return Duration.ofSeconds(40);
     }
+
+    /** failed is a topic in production: the redrive cannot read it (ADR-0012) */
+    @Override
+    protected boolean redriveSourceReadable() {
+        return false;
+    }
 }

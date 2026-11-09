@@ -6,7 +6,16 @@ import com.example.messaging.MessageReceiver;
 import com.example.messaging.MessageSender;
 import com.example.messaging.OutgoingMessage;
 import com.example.messaging.ReceivedMessage;
+import com.example.messaging.DeadLetterInfo;
 import com.example.messaging.inbox.ConsumerSettings;
+import com.example.messaging.inbox.DefaultInboxRedrive;
+import com.example.messaging.inbox.RedriveRoutes;
+import com.example.messaging.inbox.redrive.Filter;
+import com.example.messaging.inbox.redrive.RedriveReport;
+import com.example.messaging.inbox.redrive.RedriveRequest;
+import com.example.messaging.inbox.redrive.Source;
+import com.example.messaging.inbox.redrive.Target;
+import com.example.messaging.inbox.retry.FailureAttribute;
 import com.example.messaging.inbox.DelayedStrategy;
 import com.example.messaging.inbox.Delivery;
 import com.example.messaging.inbox.Destinations;
@@ -124,6 +133,16 @@ public abstract class InboxContract {
     /** Teto das esperas. */
     protected Duration settle() {
         return Duration.ofSeconds(15);
+    }
+
+    /** {@code failed} can be read back (Pub/Sub: a topic, no subscription): the redrive cases need it. */
+    protected boolean redriveSourceReadable() {
+        return true;
+    }
+
+    /** The main destination takes a send (a topic with a subscription does not: it would reach every one). */
+    protected boolean mainIsSendable() {
+        return true;
     }
 
     @BeforeEach
@@ -357,6 +376,82 @@ public abstract class InboxContract {
                 deliveries.subList(0, 2));
     }
 
+    /** Redrive (ADR-0012): a message in failed goes back with its attempts reset and is processed. */
+    @Test
+    void redriveFailedToMain() {
+        assumeTrue(redriveSourceReadable(), "failed cannot be read back");
+        inFailed(OutgoingMessage.ofText("redriven"));
+        AtomicInteger calls = new AtomicInteger();
+        start(DelayedStrategy.AUTO, immediatePolicy(), 1, m -> {
+            calls.incrementAndGet();
+            return HandlerResult.ack();
+        });
+
+        RedriveReport report = redrive().redrive(new RedriveRequest("contract", Source.FAILED, redriveTarget(), 10,
+                Filter.NONE, 10, false));
+
+        assertEquals(1, report.moved(), report.toString());
+        assertEquals(java.util.Map.of("java.lang.IllegalStateException", 1), report.byException());
+        if (mainIsSendable()) {
+            await(() -> calls.get() == 1);
+        } else {
+            ReceivedMessage moved = copies(deadLetterReceiver(), 1).getFirst();
+            assertEquals("l2=0;l3=0;redrive=" + report.redriveId(), moved.attributes().get("inbox_attempts"));
+            assertNull(moved.attributes().get(FailureAttribute.NAME));
+        }
+        consumer.stop();
+        assertNothingFor(failedReceiver(), receiveWait());
+    }
+
+    /** A dry run groups and moves nothing: the message is still in failed, as it was. */
+    @Test
+    void redriveDryRunLeavesTheSource() {
+        assumeTrue(redriveSourceReadable(), "failed cannot be read back");
+        // an outbox envelope: without enqueuedAt (RabbitMQ) the run ends at the repeated id of its own copy
+        inFailed(OutgoingMessage.ofText("{\"messageId\":\"" + run + "\",\"eventType\":\"E\",\"payload\":\"x\"}"));
+
+        RedriveReport report = redrive().redrive(new RedriveRequest("contract", Source.FAILED, redriveTarget(), 10,
+                Filter.NONE, 10, true));
+
+        assertEquals(0, report.moved(), report.toString());
+        assertEquals(1, report.skipped(), report.toString());
+        ReceivedMessage kept = copies(failedReceiver(), 1).getFirst();
+        assertEquals("retries_exhausted", kept.deadLetter().reason());
+        assertTrue(kept.attributes().get(FailureAttribute.NAME).contains("exception=java.lang.IllegalStateException"));
+        assertNothingFor(newReceiver(), receiveWait());
+    }
+
+    /** End to end: a real failure sends the message to failed; after the fix a redrive brings it back. */
+    @Test
+    void redriveAfterARealFailure() {
+        assumeTrue(redriveSourceReadable(), "failed cannot be read back");
+        java.util.concurrent.atomic.AtomicBoolean fixed = new java.util.concurrent.atomic.AtomicBoolean();
+        AtomicInteger calls = new AtomicInteger();
+        // on a subscription the redrive goes to the DLQ and a level-3 pass runs the fixed handler
+        start(DelayedStrategy.AUTO, immediatePolicy(), 1, m -> {
+            calls.incrementAndGet();
+            if (!fixed.get()) {
+                throw new IllegalArgumentException("bug");
+            }
+            return HandlerResult.ack();
+        }, !mainIsSendable());
+        send("e2e");
+        await(() -> calls.get() == 1);
+        // the copy reaches failed, and the run starts after its enqueuedAt (broker clock)
+        sleep(Duration.ofSeconds(1));
+        fixed.set(true);
+
+        RedriveReport report = redrive().redrive(new RedriveRequest("contract", Source.FAILED, redriveTarget(), 10,
+                new Filter("java.lang.IllegalArgumentException", null, "java.lang.IllegalArgumentException", null,
+                        null), 10, false));
+
+        assertEquals(1, report.moved(), report.toString());
+        await(() -> calls.get() == 2);
+        consumer.stop();
+        assertNothingFor(failedReceiver(), receiveWait());
+        assertNothingFor(deadLetterReceiver(), receiveWait());
+    }
+
     @Test
     void nativeDeliveryLimitIsWhatTheBrokerDoes() {
         Integer limit = nativeDeliveryLimit();
@@ -427,6 +522,28 @@ public abstract class InboxContract {
                 deadLetterSender(), bands, passes ? this::deadLetterReceiver : null);
         consumer = new InboxConsumer(settings, pipeline, destinations, stop, Clock.systemUTC(), () -> 0.0);
         consumer.start();
+    }
+
+    /** A message in failed as the inbox leaves it: inbox_failure, spent attempts, the dead-letter reason. */
+    private void inFailed(OutgoingMessage message) {
+        open(failedSender()).send(message.withAttribute(RUN_ATTRIBUTE, run)
+                .withAttribute("inbox_attempts", "l2=5;l3=3")
+                .withAttribute(FailureAttribute.NAME, FailureAttribute.next(null, "contract", "inbox-main",
+                        new IllegalStateException("down"), java.time.Instant.now()).format())
+                .withDeadLetter(new DeadLetterInfo(null, "retries_exhausted")));
+        // the run starts after its enqueuedAt, which is the broker's clock
+        sleep(Duration.ofSeconds(1));
+    }
+
+    private DefaultInboxRedrive redrive() {
+        RedriveRoutes routes = new RedriveRoutes(this::failedReceiver, open(failedSender()),
+                this::deadLetterReceiver, open(deadLetterSender()), mainIsSendable() ? open(newSender()) : null,
+                java.util.Map.of());
+        return new DefaultInboxRedrive(java.util.Map.of("contract", routes), Clock.systemUTC());
+    }
+
+    private Target redriveTarget() {
+        return mainIsSendable() ? Target.MAIN : Target.DEAD_LETTER;
     }
 
     /** A message already in the DLQ, its delayed level spent. */

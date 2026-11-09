@@ -308,6 +308,48 @@ reprocessa até `max-per-pass` (100) mensagens com o mesmo handler, sem o nível
 até `max-attempts` (3) passadas, depois vai para `failed`. `max-attempts: 0` deixa a DLQ só como estacionamento. As
 métricas da passada usam `consumer=<receiver>.dead-letter`, mais o contador `inbox_dead_letter_passes_total{end}`.
 
+#### Redrive
+
+Depois de corrigir um bug, o bean `InboxRedrive` devolve mensagens da `failed` (ou da DLQ) à fila principal com as
+tentativas zeradas, filtrando por exceção, fingerprint, motivo ou data, num ritmo limitado (ADR-0012 da inbox):
+
+```java
+RedriveReport report = redrive.redrive(new RedriveRequest("billing-orders", Source.FAILED, Target.MAIN,
+        1_000, new Filter(null, "3f2a9c1e", null, null, null), 50, false));
+```
+
+O fluxo: um `dryRun` sem filtro mostra os grupos (`byException`, `byFingerprint`) sem mover nada; o redrive seguinte
+filtra pelo fingerprint do bug corrigido. Combinações: `failed` → principal, `failed` → DLQ e DLQ → principal. Num
+receiver de tópico com subscription o destino principal é recusado (chegaria a todas as subscriptions), assim como no
+Pub/Sub, que só envia a tópicos. A métrica é `inbox_redrive_total{consumer,source,target,result}`.
+
+Com o Actuator, o endpoint `inboxredrive` faz o mesmo por HTTP. Ele vem **desligado** e só responde com as duas chaves
+(`management.endpoints.access.default` não o abre):
+
+```yaml
+management:
+  endpoint.inboxredrive.access: unrestricted
+  endpoints.web.exposure.include: health,inboxredrive
+```
+
+- `GET /actuator/inboxredrive`: receivers, origens disponíveis (ou o motivo) e destinos.
+- `POST /actuator/inboxredrive/billing-orders` com `{"source":"failed","target":"main","limit":1000,"dryRun":true}`
+  (e, opcionais, `maxPerSecond` (100), `exception`, `fingerprint`, `reason`, `enqueuedBefore`, `enqueuedAfter` em
+  ISO-8601): devolve o relatório quando a execução termina. `400` pedido inválido, `404` receiver inexistente, `409`
+  execução em curso.
+
+Proteger o endpoint é da aplicação, por exemplo com Spring Security:
+
+```java
+@Bean
+SecurityFilterChain actuator(HttpSecurity http) throws Exception {
+    return http.securityMatcher(EndpointRequest.to("inboxredrive"))
+            .authorizeHttpRequests(a -> a.anyRequest().hasRole("OPERATOR"))
+            .httpBasic(Customizer.withDefaults())
+            .build();
+}
+```
+
 Chave desconhecida em `providers`, `senders`, `receivers` ou `receiver-defaults` derruba o startup,
 assim como as chaves removidas `messaging.destinations` e `inbox.*` (ADR-0008 da messaging-inbox).
 

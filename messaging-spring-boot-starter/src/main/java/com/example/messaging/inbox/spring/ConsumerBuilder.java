@@ -4,6 +4,7 @@ import com.example.messaging.Capabilities;
 import com.example.messaging.MessageReceiver;
 import com.example.messaging.MessageSender;
 import com.example.messaging.spring.MessagingProperties.Endpoint;
+import com.example.messaging.spring.MessagingProperties.Kind;
 import com.example.messaging.inbox.ConsumerObserver;
 import com.example.messaging.inbox.ConsumerSettings;
 import com.example.messaging.inbox.Destinations;
@@ -12,7 +13,9 @@ import com.example.messaging.inbox.InboxConsumer;
 import com.example.messaging.inbox.InboxIdempotency;
 import com.example.messaging.inbox.Pipeline;
 import com.example.messaging.inbox.PayloadDeserializer;
+import com.example.messaging.inbox.RedriveRoutes;
 import com.example.messaging.inbox.RetryQueue;
+import com.example.messaging.inbox.redrive.Source;
 import com.example.messaging.inbox.StopSignal;
 import com.example.messaging.inbox.DelayedStrategy;
 import com.example.messaging.inbox.retry.BackoffSpec;
@@ -22,7 +25,9 @@ import org.springframework.beans.factory.ListableBeanFactory;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
@@ -139,6 +144,42 @@ final class ConsumerBuilder {
                 deadLetterReceivers);
         return new InboxConsumer(settings, pipeline, broker, stop, clock, () -> ThreadLocalRandom.current().nextDouble(),
                 observers.apply(c), passObservers.apply(c));
+    }
+
+    /**
+     * Where a redrive of {@code c} reads and writes (ADR-0012): {@code failed} and the DLQ under the names of their
+     * senders, the main destination as {@code <receiver>.redrive} only when it is a queue. Senders are created on first
+     * use, receivers per run; a source that cannot be read (Pub/Sub: a topic) is unavailable with the reason.
+     */
+    RedriveRoutes routes(InboxConfig.Consumer c) {
+        String prefix = InboxConfig.RECEIVERS + c.name();
+        Map<Source, String> unavailable = new EnumMap<>(Source.class);
+        List<String> failedProblems = destinations.validate(prefix + ".failed", c.provider(), copy(c.failed()), true);
+        if (!failedProblems.isEmpty()) {
+            unavailable.put(Source.FAILED, String.join("; ", failedProblems));
+        }
+        Supplier<MessageReceiver> deadLetterReceivers = null;
+        MessageSender deadLetter = null;
+        if (c.deadLetter() != null) {
+            deadLetter = destinations.sender(c.name() + ".dead-letter", c.provider(), copy(c.deadLetter()));
+            List<String> problems = destinations.validate(prefix + ".dead-letter", c.provider(), copy(c.deadLetter()),
+                    true);
+            if (!problems.isEmpty()) {
+                unavailable.put(Source.DEAD_LETTER, String.join("; ", problems));
+            }
+            deadLetterReceivers = () -> destinations.receiver(c.name() + ".dead-letter", c.provider(),
+                    copy(c.deadLetter()), null);
+        }
+        // a queue only: not a topic with a subscription (it would reach every one), nor Pub/Sub, where the receive
+        // destination is a subscription and the provider sends only to topics
+        Endpoint mainQueue = new Endpoint(c.endpoint().destination(), null, Kind.QUEUE, null);
+        MessageSender main = c.endpoint().subscription() == null
+                && destinations.validate(prefix + ".redrive", c.provider(), mainQueue, false).isEmpty()
+                ? destinations.sender(c.name() + ".redrive", c.provider(), mainQueue)
+                : null;
+        return new RedriveRoutes(() -> destinations.receiver(c.name() + ".failed", c.provider(), copy(c.failed()), null),
+                destinations.sender(c.name() + ".failed", c.provider(), copy(c.failed())), deadLetterReceivers,
+                deadLetter, main, unavailable);
     }
 
     /**

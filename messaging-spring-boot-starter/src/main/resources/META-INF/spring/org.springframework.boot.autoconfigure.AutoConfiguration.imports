@@ -1,3 +1,4 @@
 com.example.messaging.spring.MessagingAutoConfiguration
 com.example.messaging.spring.MessagingHealthAutoConfiguration
 com.example.messaging.inbox.spring.InboxAutoConfiguration
+com.example.messaging.inbox.spring.InboxRedriveEndpointAutoConfiguration

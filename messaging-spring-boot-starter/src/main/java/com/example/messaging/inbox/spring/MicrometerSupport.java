@@ -1,6 +1,7 @@
 package com.example.messaging.inbox.spring;
 
 import com.example.messaging.inbox.ConsumerObserver;
+import com.example.messaging.inbox.redrive.InboxRedrive;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.observation.ObservationRegistry;
@@ -48,5 +49,10 @@ final class MicrometerSupport {
         }
         String name = c.name() + ".dead-letter";
         return new MicrometerConsumerObserver(name, name, meters, observations, clock);
+    }
+
+    static InboxRedrive metered(InboxRedrive redrive, ListableBeanFactory beans) {
+        MeterRegistry meters = beans.getBeanProvider(MeterRegistry.class).getIfAvailable();
+        return meters == null ? redrive : new MeteredInboxRedrive(redrive, meters);
     }
 }

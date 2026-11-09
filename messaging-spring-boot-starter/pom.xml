@@ -104,6 +104,13 @@
       <artifactId>idempotency-core</artifactId>
       <optional>true</optional>
     </dependency>
+    <!-- Endpoint inboxredrive: só com o Actuator na aplicação -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-actuator-autoconfigure</artifactId>
+      <version>${spring-boot.version}</version>
+      <optional>true</optional>
+    </dependency>
     <!-- Health indicator: só com o módulo de health do Boot 4 na aplicação -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
@@ -172,4 +179,16 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <!-- the Actuator binds the request body of an endpoint operation by parameter name -->
+          <parameters>true</parameters>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
 </project>

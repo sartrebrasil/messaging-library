@@ -8,9 +8,6 @@ import com.example.messaging.inbox.retry.AttemptState;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
 
 /**
  * Level 3 (ADR-0002): a slow pass over the DLQ with the same handler, level 1 and no level 2. One message at a time; the
@@ -46,38 +43,16 @@ final class DeadLetterPass {
     PassEnd runPass() {
         Instant passStart = clock.instant();
         long start = System.nanoTime();
-        Set<String> seen = new HashSet<>();
         int processed = 0;
         int acked = 0;
         int requeued = 0;
         int failed = 0;
         PassEnd end;
         try (MessageReceiver receiver = destinations.deadLetterReceivers().get()) {
-            while (true) {
-                if (stop.stopping()) {
-                    end = PassEnd.STOPPING;
-                    break;
-                }
-                List<ReceivedMessage> received;
-                try {
-                    received = receiver.receive(1, settings.pollWait());
-                } catch (RuntimeException e) {
-                    LOG.log(System.Logger.Level.WARNING, "Consumer " + settings.consumer()
-                            + ": receive from the dead-letter destination failed; pass ended", e);
-                    end = PassEnd.RECEIVE_FAILED;
-                    break;
-                }
-                if (received.isEmpty()) {
-                    end = PassEnd.EMPTY;
-                    break;
-                }
-                ReceivedMessage message = received.getFirst();
-                end = endingAt(message, passStart, seen, processed);
-                if (end != null) {
-                    giveBack(receiver, message);
-                    break;
-                }
-                Effect effect = process(receiver, message);
+            PassReader reader = new PassReader(receiver, passStart, maxPerPass,
+                    m -> pipeline.idOf(m, settings.destination()), stop, settings.pollWait(), settings.consumer());
+            for (var next = reader.next(); next.isPresent(); next = reader.next()) {
+                Effect effect = process(receiver, next.get());
                 processed++;
                 switch (effect) {
                     case ACKED -> acked++;
@@ -86,6 +61,7 @@ final class DeadLetterPass {
                     default -> { }
                 }
             }
+            end = reader.end();
         } catch (RuntimeException e) {
             LOG.log(System.Logger.Level.WARNING, "Consumer " + settings.consumer()
                     + ": dead-letter destination unavailable; pass ended", e);
@@ -97,17 +73,6 @@ final class DeadLetterPass {
                 requeued, failed);
         observer.passEnded(end, processed);
         return end;
-    }
-
-    /** {@code null} when the pass goes on with {@code message}. */
-    private PassEnd endingAt(ReceivedMessage message, Instant passStart, Set<String> seen, int processed) {
-        if (message.enqueuedAt() != null && !message.enqueuedAt().isBefore(passStart)) {
-            return PassEnd.NEWER_THAN_PASS;
-        }
-        if (!seen.add(pipeline.idOf(message, settings.destination()))) {
-            return PassEnd.REPEATED_KEY;
-        }
-        return processed >= maxPerPass ? PassEnd.MAX_PER_PASS : null;
     }
 
     private Effect process(MessageReceiver receiver, ReceivedMessage message) {
@@ -153,16 +118,6 @@ final class DeadLetterPass {
             LOG.log(System.Logger.Level.WARNING, "Consumer " + settings.consumer() + ": keepAlive of message "
                     + message.messageId() + " failed in a dead-letter pass; processing without lease renewal", e);
             return NO_LEASE;
-        }
-    }
-
-    private void giveBack(MessageReceiver receiver, ReceivedMessage message) {
-        try {
-            receiver.nack(message, Duration.ZERO);
-        } catch (RuntimeException e) {
-            LOG.log(System.Logger.Level.WARNING, "Consumer " + settings.consumer() + ": nack of message "
-                    + message.messageId() + " failed at the end of a dead-letter pass; it comes back when the lease "
-                    + "expires", e);
         }
     }
 

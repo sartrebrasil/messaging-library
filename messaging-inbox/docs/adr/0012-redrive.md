@@ -5,6 +5,9 @@
 - Revisão: 2026-10-07 (fingerprint, limite de taxa e `inbox_redrive`; vindos da acme-messaging)
 - Revisão: 2026-10-07 (mensagens puladas voltam para o fim da origem; marca de redrive em
   `inbox_attempts`)
+- Revisão: 2026-11-07 (implementação: síncrono, `PassReader` compartilhado com o nível 3, `end` no relatório,
+  destino principal recusado em tópico com subscription, origem ilegível indisponível, `reason` por prefixo,
+  respostas 400/404/409)
 
 ## Contexto
 
@@ -32,7 +35,7 @@ public record RedriveRequest(String consumer,
                              int maxPerSecond,       // padrão 100
                              boolean dryRun) {}
 
-public record RedriveReport(String redriveId, int moved, int skipped, int errors,
+public record RedriveReport(String redriveId, PassEnd end, int moved, int skipped, int errors,
                             Map<String, Integer> byException,
                             Map<String, Integer> byFingerprint) {}
 ```
@@ -68,7 +71,8 @@ até `limit`:
    `dead_letter`, e com `inbox_attempts` = `l2=0;l3=0;redrive=<redriveId>`: as
    tentativas recomeçam do zero. A marca de redrive acompanha a mensagem em
    todas as cópias seguintes (ADR-0002), aparece no log do consumer e faz a
-   mensagem não expirar (ADR-0015). `deduplicationId` = `messageId` de origem.
+   mensagem não expirar (ADR-0015). `deduplicationId` = hash de `<redriveId>:<messageId de origem>` (revisão
+   de 2026-11-07; ver "Implementação").
 4. Para quando chega uma mensagem com `enqueuedAt >= runStart` (uma pulada
    desta execução) ou cuja chave de idempotência já apareceu nesta execução
    (proteção para provedor sem `enqueuedAt`), quando a origem volta vazia ou
@@ -91,7 +95,7 @@ até `limit`:
 | Interface | Detalhe |
 |---|---|
 | API Java | Bean `InboxRedrive` no starter |
-| Actuator | `POST /actuator/inboxredrive/{consumer}` com o `RedriveRequest` em JSON; `GET` lista consumers com DLQ e `failed` configuradas |
+| Actuator | `POST /actuator/inboxredrive/{consumer}` com o `RedriveRequest` em JSON; `GET` lista os receivers com as origens (disponível, ou o motivo) e os destinos |
 
 - O endpoint é de escrita e vem **desligado**. Para ligar, é preciso
   `management.endpoint.inboxredrive.access=unrestricted` e expor o endpoint
@@ -99,6 +103,41 @@ até `limit`:
 - Cada execução gera um `redriveId` (UUID) e um log de auditoria com o id,
   consumer, origem, destino, filtro e contagens, sem payload. Métrica
   `inbox_redrive_total` (ADR-0007), sem o id.
+
+### Implementação (revisão de 2026-11-07)
+
+- Síncrono: a chamada (e o `POST`) volta quando a execução termina. 10.000 mensagens a 100/s levam cerca de 100 s;
+  se um proxy cortar a resposta, a execução segue no servidor e o log de auditoria registra o resultado.
+- O laço de leitura é o `PassReader`, o mesmo do nível 3 (ADR-0002): as condições de fim são as mesmas, e o relatório
+  diz qual encerrou a execução (`end`: `empty`, `newer_than_pass`, `repeated_key`, `max_per_pass`,
+  `receive_failed`).
+- Filtro: `exception` e `fingerprint` iguais aos do `inbox_failure` (`none` sem o atributo); `reason` é prefixo do
+  motivo do `dead_letter` (`rejected`, `java.lang.IllegalArgumentException`); `enqueuedBefore`/`enqueuedAfter` sobre
+  `enqueuedAt`, e mensagem sem `enqueuedAt` não passa num filtro de data.
+- `maxPerSecond`: o core exige ≥ 1; o endpoint usa 100 quando omitido. `limit` (1..10.000) conta as lidas, movidas
+  ou não.
+- Destino principal só quando o receiver é uma fila. Num tópico com subscription, enviar ao tópico chegaria a todas
+  as subscriptions: o pedido é recusado, e o caminho é `failed` → DLQ (o nível 3 reprocessa).
+- No Pub/Sub o destino do receiver é uma subscription e o provedor só envia a tópicos: o destino principal é recusado.
+  `failed` e a DLQ são tópicos; ler um deles exige uma subscription com o mesmo nome, e sem ela a execução termina com
+  `receive_failed`.
+- `deduplicationId` próprio da execução (`<redriveId>:<messageId>`, em hash quando passa do limite), não o
+  `messageId` de origem: no Service Bus o `MessageId` é o `deduplicationId`, e a duplicate detection da fila principal
+  (que já viu a publicação original) ou da origem (que já tem a mensagem) descartaria a cópia em silêncio, e o `ack`
+  a perderia. Dentro da execução o id é estável.
+- Ritmo: entre duas movidas passam ao menos `1/maxPerSecond`; o tempo gasto pulando não vira crédito para uma rajada.
+- Mensagem que não pode ser copiada (vinda de fora da lib com corpo vazio, por exemplo) conta em `errors` e volta à
+  origem; a execução segue.
+- Receiver cujas rotas não podem ser montadas (endereço que o provedor não encontra) fica indisponível com o motivo,
+  sem afetar os outros.
+- O endpoint só abre com a própria chave `management.endpoint.inboxredrive.access=unrestricted`:
+  `management.endpoints.access.default` não basta.
+- Erros: pedido inválido `IllegalArgumentException` (400), receiver inexistente `NoSuchElementException` (404),
+  execução em curso no mesmo receiver e origem `IllegalStateException` (409).
+- Uma execução por instância: duas instâncias podem redrivar a mesma origem ao mesmo tempo. Leem com lease, então não
+  movem a mesma mensagem duas vezes, mas o ritmo efetivo é a soma.
+- No SQS standard, sem ordem, uma pulada pode voltar antes das que ainda não foram lidas e encerrar a execução mais
+  cedo (`newer_than_pass`); o operador repete.
 
 ### Ordem
 

@@ -1,11 +1,15 @@
 package com.example.messaging.inbox.spring;
 
+import com.example.messaging.inbox.DefaultInboxRedrive;
 import com.example.messaging.inbox.InboxConsumer;
+import com.example.messaging.inbox.RedriveRoutes;
+import com.example.messaging.inbox.redrive.Source;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.context.SmartLifecycle;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -33,6 +37,8 @@ public final class InboxLifecycle implements SmartLifecycle, SmartInitializingSi
     private final ConsumerBuilder builder;
     private final Map<String, AtomicReference<InboxConsumer>> current = new LinkedHashMap<>();
     private List<InboxConfig.Consumer> configs = List.of();
+    private List<InboxConfig.Consumer> configured; // null until the context has every singleton
+    private DefaultInboxRedrive redrive;
     private Map<String, HandlerBinding.Bound> handlers = Map.of();
     private volatile boolean running;
 
@@ -51,6 +57,7 @@ public final class InboxLifecycle implements SmartLifecycle, SmartInitializingSi
             throw new IllegalStateException("Invalid messaging.receivers configuration:\n - "
                     + String.join("\n - ", problems));
         }
+        configured = all;
         configs = all.stream().filter(InboxConfig.Consumer::enabled).toList();
         handlers = HandlerBinding.bind(names(all), names(configs), beans);
         configs.forEach(c -> current.put(c.name(), new AtomicReference<>()));
@@ -123,6 +130,32 @@ public final class InboxLifecycle implements SmartLifecycle, SmartInitializingSi
     @Override
     public boolean isRunning() {
         return running;
+    }
+
+    /**
+     * The redrive of every configured receiver, on or off (ADR-0012), built on first use: its senders are created then,
+     * not at startup.
+     */
+    synchronized DefaultInboxRedrive redrive() {
+        if (configured == null) {
+            throw new IllegalStateException("the redrive is available once the application context is refreshed");
+        }
+        if (redrive == null) {
+            Map<String, RedriveRoutes> routes = new LinkedHashMap<>();
+            for (InboxConfig.Consumer c : configured) {
+                try {
+                    routes.put(c.name(), builder.routes(c));
+                } catch (RuntimeException e) {
+                    // one receiver with an address the provider does not find must not take down the others
+                    LOG.log(System.Logger.Level.WARNING, "Receiver " + c.name() + ": redrive unavailable", e);
+                    String reason = "redrive routes could not be built: " + e.getMessage();
+                    routes.put(c.name(), new RedriveRoutes(null, null, null, null, null,
+                            Map.of(Source.FAILED, reason, Source.DEAD_LETTER, reason)));
+                }
+            }
+            redrive = new DefaultInboxRedrive(routes, Clock.systemUTC());
+        }
+        return redrive;
     }
 
     /** End of the last receive of {@code consumer}, for the liveness gauge; {@code null} before the first start. */
