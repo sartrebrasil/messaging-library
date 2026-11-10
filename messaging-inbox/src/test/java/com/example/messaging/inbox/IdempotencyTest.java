@@ -142,6 +142,27 @@ class IdempotencyTest {
         assertTrue(store.find(KEY).isEmpty(), "the reservation is released");
     }
 
+    /** The reservation expired and another instance took the key: the handler already ran, so ack, never touch the new owner's record. */
+    @Test
+    void aLostReservationStillAcksAndLeavesTheNewOwnersRecordAlone() {
+        IdempotencyStore takenOver = new Delegating(store) {
+            @Override
+            public boolean complete(IdempotencyKeyId id, String owner, String type, byte[] payload, Instant expiresAt) {
+                store.release(id, owner);
+                store.reserve(IdempotencyRecord.inProgress(id, "other", fingerprint("a"), NOW, NOW.plusSeconds(60)));
+                return super.complete(id, owner, type, payload, expiresAt);
+            }
+        };
+
+        Outcome outcome = pipeline(takenOver, m -> null).handle(outbox("a"), "q", 0);
+
+        assertEquals(new Outcome.Ack(Outcome.AckReason.SUCCESS), outcome);
+        assertEquals(1, calls.get());
+        IdempotencyRecord current = store.find(KEY).orElseThrow();
+        assertEquals(IdempotencyStatus.IN_PROGRESS, current.status());
+        assertTrue(current.ownedBy("other"));
+    }
+
     @Test
     void concurrentDeliveriesRunTheHandlerOnce() throws Exception {
         var shared = new InMemoryIdempotencyStore();
