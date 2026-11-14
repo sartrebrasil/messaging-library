@@ -10,6 +10,8 @@ import com.example.messaging.spring.ClientBeans;
 import com.example.messaging.spring.MessagingProperties;
 import com.example.messaging.spring.ProviderConnection;
 import org.springframework.beans.factory.ListableBeanFactory;
+import software.amazon.awssdk.awscore.client.builder.AwsClientBuilder;
+import software.amazon.awssdk.awscore.client.builder.AwsSyncClientBuilder;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
@@ -17,9 +19,7 @@ import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.http.apache.ApacheHttpClient;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.sns.SnsClient;
-import software.amazon.awssdk.services.sns.SnsClientBuilder;
 import software.amazon.awssdk.services.sqs.SqsClient;
-import software.amazon.awssdk.services.sqs.SqsClientBuilder;
 import software.amazon.awssdk.services.sqs.model.QueueDoesNotExistException;
 
 import java.time.Duration;
@@ -65,19 +65,8 @@ public final class AwsProviderConnection implements ProviderConnection {
         }
     }
 
-    private static SqsClientBuilder configure(SqsClientBuilder builder, MessagingProperties.Provider provider) {
-        builder.credentialsProvider(credentials(provider))
-                .httpClientBuilder(ApacheHttpClient.builder().socketTimeout(Duration.ofSeconds(30)));
-        if (provider.region() != null) {
-            builder.region(Region.of(provider.region()));
-        }
-        if (provider.endpoint() != null) {
-            builder.endpointOverride(provider.endpoint());
-        }
-        return builder;
-    }
-
-    private static SnsClientBuilder configure(SnsClientBuilder builder, MessagingProperties.Provider provider) {
+    private static <B extends AwsClientBuilder<B, C> & AwsSyncClientBuilder<B, C>, C> B configure(
+            B builder, MessagingProperties.Provider provider) {
         builder.credentialsProvider(credentials(provider))
                 .httpClientBuilder(ApacheHttpClient.builder().socketTimeout(Duration.ofSeconds(30)));
         if (provider.region() != null) {
