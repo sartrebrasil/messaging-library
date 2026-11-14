@@ -1,6 +1,6 @@
 # ADR-0010: Configuração tipada dos providers no starter
 
-- Status: proposto
+- Status: aceito
 - Data: 2026-11-14
 - Relacionada: [ADR-0008](0008-spring-boot-e-observabilidade.md), [ADR-0009](0009-activemq-e-rabbitmq.md)
 
@@ -43,13 +43,16 @@ Duas mudanças, sem alterar o formato do YAML:
 - Um bean de cliente nativo (`SqsClient`, `SnsClient`, `ServiceBusClientBuilder`, `ConnectionFactory`) só substitui
   o cliente criado pelo starter quando o provider **não** define os campos de conexão: `region`, `endpoint`,
   `access-key` e `secret-key` no AWS; `connection-string` no Azure; `broker-url` no JMS e no RabbitMQ.
-- No **AWS**, provider com esses campos **e** bean do mesmo tipo derruba o startup: "defina as properties ou o bean,
-  não os dois". Hoje o bean vence e as properties são ignoradas em silêncio.
+- No **AWS**, provider com esses campos **e** os dois beans (`SqsClient` e `SnsClient`) derruba o startup: "defina as
+  properties ou os beans, não os dois". Hoje o bean vence e as properties são ignoradas em silêncio. Com um bean só,
+  as properties ainda configuram o outro cliente (o `SnsClient` precisa de região), então não há perda e o startup
+  segue.
 - No Azure, JMS e RabbitMQ, `connection-string` e `broker-url` continuam vencendo o bean, sem falhar. O Boot cria
   `ConnectionFactory`s que não são da lib; falhar ali derrubaria quem configura `broker-url` de propósito.
-- Com mais de um provider do mesmo tipo, o bean só vale se a aplicação o declarar com o nome do provider; um bean
-  sem nome correspondente não é compartilhado. (O bean com o nome do provider é o mecanismo escolhido; a alternativa
-  descartada abaixo é o customizer.)
+- Com mais de um provider do mesmo tipo, o bean só vale se a aplicação o declarar com o nome do provider (`aws`)
+  ou `<provider><Tipo>` (`awsSnsClient`: um provider AWS tem dois clientes, e dois beans não têm o mesmo nome); um
+  bean sem nome correspondente não é compartilhado. (O bean com o nome do provider é o mecanismo escolhido; a
+  alternativa descartada abaixo é o customizer.)
 - O GCP continua sem escape hatch: as credenciais já são a cadeia padrão do SDK.
 
 ### 2. Um tipo de properties por provider
