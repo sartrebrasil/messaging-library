@@ -349,7 +349,7 @@ public final class MessagingDestinations implements AutoCloseable {
         // as classes de cada provedor só são carregadas aqui, depois da checagem do adapter em validateProviders
         properties.providers().forEach((name, provider) -> connections.put(name, switch (provider.type()) {
             case AWS -> new AwsProviderConnection(name, provider, beans, onlyOfItsType(provider));
-            case AZURE -> new AzureProviderConnection(name, provider, beans);
+            case AZURE -> new AzureProviderConnection(name, provider, beans, onlyOfItsType(provider));
             case GCP -> new GcpProviderConnection(name, provider);
             case ACTIVEMQ_CLASSIC, ARTEMIS -> new JmsProviderConnection(name, provider, beans);
             case RABBITMQ -> new RabbitProviderConnection(name, provider, beans);

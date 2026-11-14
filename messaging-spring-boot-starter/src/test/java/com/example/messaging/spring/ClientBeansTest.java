@@ -1,5 +1,6 @@
 package com.example.messaging.spring;
 
+import com.azure.messaging.servicebus.ServiceBusClientBuilder;
 import com.example.messaging.spring.MessagingProperties.Endpoint;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -109,5 +110,31 @@ class ClientBeansTest {
                     destinations.close();
                     assertThat(calls).doesNotContain("close");
                 });
+    }
+
+    private static final String AZURE = "Endpoint=sb://localhost;SharedAccessKeyName=k;SharedAccessKey=v;"
+            + "UseDevelopmentEmulator=true;";
+
+    @Test
+    void azureUnnamedBeanIsIgnoredWithTwoProviders() {
+        runner.withPropertyValues("messaging.providers.a1.type=azure", "messaging.providers.a2.type=azure")
+                .withBean(ServiceBusClientBuilder.class, ServiceBusClientBuilder::new)
+                .run(context -> assertThat(context).getFailure().rootCause()
+                        .hasMessageContaining("defina connection-string ou declare um bean"));
+    }
+
+    @Test
+    void azureBeanNamedAfterTheProviderIsUsedWithTwoProviders() {
+        runner.withPropertyValues("messaging.providers.a1.type=azure", "messaging.providers.a2.type=azure",
+                        "messaging.providers.a2.connection-string=" + AZURE)
+                .withBean("a1", ServiceBusClientBuilder.class, ServiceBusClientBuilder::new)
+                .run(context -> assertThat(context).hasNotFailed());
+    }
+
+    @Test
+    void azureConnectionStringWinsOverTheBean() {
+        runner.withPropertyValues("messaging.providers.a.type=azure", "messaging.providers.a.connection-string=" + AZURE)
+                .withBean(ServiceBusClientBuilder.class, ServiceBusClientBuilder::new)
+                .run(context -> assertThat(context).hasNotFailed());
     }
 }
