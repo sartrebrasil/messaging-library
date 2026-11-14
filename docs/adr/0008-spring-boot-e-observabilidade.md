@@ -91,15 +91,22 @@ Pub/Sub só é testado com mocks.
 Observabilidade, como decorators no starter (o core continua sem
 dependências):
 
-- Métricas Micrometer: `messaging_send`, `messaging_receive`, `messaging_ack`,
-  `messaging_nack`, `messaging_dead_letter` (timers e contadores), com tags
-  `provider`, `destination`, `outcome`. `messaging_receive_messages`
-  (distribution summary) mede o tamanho dos lotes.
+- Métricas Micrometer: `messaging_send_duration_seconds`, `messaging_receive_duration_seconds`, `messaging_ack_duration_seconds`,
+  `messaging_nack_duration_seconds`, `messaging_dead_letter_duration_seconds` (timers), com tags `batch` (só em `send` e `ack`: `true` para `sendAll` e `ackAll`),
+  `provider`, `destination`, `exception` (simples da classe lançada, ou `none`), `outcome` (`success`, `error` e `partial`, num lote em que só parte falhou).
+  `messaging_receive_messages`
+  (distribution summary) mede o tamanho dos lotes. `messaging_messages_failed_total` conta uma vez cada mensagem cuja
+  chamada falhou (`operation` = `send`, `ack`, `nack`, `dead_letter`; item de lote que falhou conta, e chamada que
+  lança conta todas as mensagens dela), com `provider`, `destination`, `operation` e `exception`.
+  `messaging_message_size_bytes` mede o corpo de cada mensagem enviada.
 - Tracing com Micrometer Observation: o sender abre uma observation com
   `SenderContext<Map<String,String>>` sobre os atributos, e os handlers de
   tracing do Boot injetam o `traceparent` (W3C) como atributo reservado. O receiver expõe o contexto extraído em
   `ReceivedMessage`. Abrir o span de processamento é de quem consome, porque a
-  lib não sabe quando o processamento termina.
+  lib não sabe quando o processamento termina. Revisão de 2026-11-13: com o `DefaultMeterObservationHandler`, a
+  observation `messaging.publish` gera também `messaging_publish_seconds` e `messaging_publish_active_seconds`, com
+  as tags `provider` e `destination` dos meters acima (mais o `error` do Micrometer, que os meters explícitos chamam
+  de `exception`). Os nomes do OpenTelemetry (`messaging.system`, `messaging.destination.name`) ficam só no span.
 - Health check: `checkAccess()` por destino, como na storage-lib, ligado só
   quando `management.health.messaging.enabled=true`. Receber mensagem não pode
   fazer parte do health check, porque consumiria mensagens.

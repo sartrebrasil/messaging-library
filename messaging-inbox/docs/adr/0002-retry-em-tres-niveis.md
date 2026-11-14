@@ -263,7 +263,7 @@ l2 = l2 do atributo inbox_attempts (0 se ausente)
   e essas entregas também contam como tentativa.
 - `broker-delay` sem `deliveryCount` (Pub/Sub sem dead letter policy): não dá
   para contar. A mensagem vai para a DLQ depois do nível 1, com log de erro e
-  `inbox_retry_skipped_total{reason="delivery_count_unavailable"}`. Para ter
+  `inbox_retries_skipped_total{reason="delivery_count_unavailable"}`. Para ter
   nível 2 no Pub/Sub, a subscription precisa de dead letter policy.
 - Toda entrega pelo broker conta, inclusive as de `in_progress` (ADR-0004) e
   as que voltam por `Release` (`nack(0)` no shutdown, ADR-0009). Em
@@ -334,7 +334,7 @@ sobrar espaço para os dois da inbox. Quando a cópia passaria do limite:
 2. Se ainda passar, `inbox_attempts` sai, e a cópia não pode mais carregar a
    contagem: em `retry-queues` a mensagem vai para a DLQ, e no nível 3 vai para
    `failed`. Nunca há loop sem contagem.
-3. Métrica `inbox_attribute_budget_exceeded_total`.
+3. Métrica `inbox_attributes_budget_exceeded_total`.
 
 Os atributos `inbox_*` não aparecem em `InboxMessage.headers()`. O handler vê
 a tentativa em `InboxMessage.delivery()` (`level`, `attempt`).
@@ -356,7 +356,7 @@ Revisão de 2026-11-05:
 - A cópia é enviada **antes** do `ack` da original. Uma falha entre os dois
   gera duplicata, nunca perda (mesma regra da messaging-lib, ADR-0005).
 - Se o envio da cópia falhar, a original não é confirmada e volta pelo
-  vencimento do lease ou por `nack(0)`. Métrica `inbox_effect_failed_total`.
+  vencimento do lease ou por `nack(0)`. Métrica `inbox_effects_failed_total`.
 - `LeaseExpiredException` no `ack`: a mensagem será reentregue. A
   idempotência (ADR-0004) transforma a reentrega em `duplicate`.
 
@@ -454,7 +454,8 @@ configuração padrão de cada broker:
   leitores na DLQ. Risco aceito.
 - Sem `enqueuedAt` e sem idempotência (RabbitMQ sem `timestamp`), a chave repetida não pega a própria cópia (que tem
   `messageId` novo): o teto da passada é o `max-per-pass`.
-- Métricas da passada com `consumer=<receiver>.dead-letter` e o contador `inbox.dead.letter.passes{consumer,end}`.
+- Métricas da passada com o `consumer` do receiver e `destination=<receiver>.dead-letter` (revisão de 2026-11-13; antes o
+  `consumer` levava o sufixo), e o contador `inbox.dead.letter.passes{consumer,end}`.
 
 ## Alternativas descartadas
 

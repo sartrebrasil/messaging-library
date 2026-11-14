@@ -283,11 +283,16 @@ falha, porque o `checkAccess` precisa da `ActiveMQConnection`. Nesse caso, use `
 - Clientes: beans `SqsClient`/`SnsClient` e `ServiceBusClientBuilder` da aplicação são
   reaproveitados; sem eles, o starter cria e fecha os seus. No GCP, credenciais padrão do Google,
   ou `emulator-host` para o emulator.
-- Métricas (com `MeterRegistry`): timers `messaging.send`, `messaging.receive`, `messaging.ack`,
-  `messaging.nack`, `messaging.dead.letter` com `provider`, `destination` e `outcome`, e a
-  distribuição `messaging.receive.messages`.
+- Métricas (com `MeterRegistry`): timers `messaging.send.duration`, `messaging.receive.duration`, `messaging.ack.duration`,
+  `messaging.nack.duration`, `messaging.dead.letter.duration` com `provider`, `destination`, `exception` (nome simples da classe lançada, ou `none`) e `outcome`
+  (`success`, `error` e, em lote com falha parcial, `partial`; `send` e `ack` têm também `batch`), a
+  distribuição `messaging.receive.messages`, o counter `messaging.messages.failed` (uma contagem por mensagem que
+  falhou, com `operation` = `send`, `ack`, `nack` ou `dead_letter`, inclusive item de lote) e a distribuição
+  `messaging.message.size` (bytes do corpo enviado).
 - Tracing (com `ObservationRegistry`): o envio abre a observation `messaging.publish` e grava o
-  `traceparent` na mensagem. No receive, `ReceivedMessage.traceparent()` traz o contexto de quem
+  `traceparent` na mensagem. Com o `DefaultMeterObservationHandler`, ela gera também `messaging_publish_seconds` e
+  `messaging_publish_active_seconds`, com as tags `provider` e `destination` dos meters `messaging.*` (mais o
+  `error` do Micrometer); o span leva `messaging.system` e `messaging.destination.name`. No receive, `ReceivedMessage.traceparent()` traz o contexto de quem
   publicou; abrir o span de processamento é de quem consome.
 - Health `messaging`: opt-in com `management.health.messaging.enabled=true`; chama `checkAccess()`
   de cada sender e receiver, sem consumir mensagens.

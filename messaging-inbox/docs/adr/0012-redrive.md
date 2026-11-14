@@ -102,7 +102,7 @@ até `limit`:
   explicitamente. A proteção (Spring Security) é da aplicação.
 - Cada execução gera um `redriveId` (UUID) e um log de auditoria com o id,
   consumer, origem, destino, filtro e contagens, sem payload. Métrica
-  `inbox_redrive_total` (ADR-0007), sem o id.
+  `inbox_messages_redriven_total` (ADR-0007), sem o id.
 
 ### Implementação (revisão de 2026-11-07)
 

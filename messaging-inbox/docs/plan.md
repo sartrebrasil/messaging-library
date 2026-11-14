@@ -94,6 +94,7 @@ Na messaging-library:
 - `retry.dead-letter.concurrency`: as passadas do nível 3 processam uma mensagem por vez.
 - Documentar por adapter quando `enqueuedAt` vem nulo (o filtro por data do redrive e o nível 3 usam o campo).
 - Confirmar a afinidade de `orderingKey` no Pub/Sub com vários receivers de pull unário (ADR-0005).
+- Padronizar nomes, corrigir e completar as métricas: [backlog de métricas](../../docs/metricas-backlog.md).
 
 Na outbox-library (F1):
 
