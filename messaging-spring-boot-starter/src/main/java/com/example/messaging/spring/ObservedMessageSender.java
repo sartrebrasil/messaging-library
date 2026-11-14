@@ -5,6 +5,7 @@ import com.example.messaging.Capabilities;
 import com.example.messaging.MessageSender;
 import com.example.messaging.OutgoingMessage;
 import com.example.messaging.SendResult;
+import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.observation.Observation;
@@ -24,8 +25,9 @@ import java.util.function.Supplier;
  * handlers de tracing do Boot gravam o {@code traceparent} nele, e o adapter o envia como atributo
  * reservado. Mensagem que já tem {@code traceparent} segue como está.
  *
- * <p>Com {@link MeterRegistry}: timer {@code messaging.send} com {@code provider},
- * {@code destination} e {@code outcome} ({@code success}/{@code error}). O nome é diferente do da
+ * <p>Com {@link MeterRegistry}: timer {@code messaging.send.duration} com {@code provider},
+ * {@code destination}, {@code batch} e {@code outcome} ({@code success}, {@code error} ou, num lote em que só
+ * parte das mensagens falhou, {@code partial}). O nome é diferente do da
  * observation para não colidir com o timer que o {@code DefaultMeterObservationHandler} cria.</p>
  */
 final class ObservedMessageSender implements MessageSender {
@@ -49,14 +51,30 @@ final class ObservedMessageSender implements MessageSender {
 
     @Override
     public SendResult send(OutgoingMessage message) {
-        return observe(traceparent -> timed(() -> delegate.send(withTraceparent(message, traceparent))));
+        recordSize(message);
+        return observe(traceparent -> timed("false", 1, r -> "success",
+                () -> delegate.send(withTraceparent(message, traceparent))));
     }
 
     /** Uma observation para o lote: todas as mensagens levam o mesmo {@code traceparent}. */
     @Override
     public BatchSendResult sendAll(List<OutgoingMessage> messages) {
-        return observe(traceparent -> timed(() -> delegate.sendAll(
-                messages.stream().map(message -> withTraceparent(message, traceparent)).toList())));
+        messages.forEach(this::recordSize);
+        BatchSendResult result = observe(traceparent -> timed("true", messages.size(),
+                r -> TransportTags.batchOutcome(r.failures().size(), messages.size()),
+                () -> delegate.sendAll(messages.stream().map(message -> withTraceparent(message, traceparent)).toList())));
+        if (meters != null) {
+            result.failures().values().forEach(e -> TransportTags.failed(meters, provider, destination, "send", e, 1));
+        }
+        return result;
+    }
+
+    private void recordSize(OutgoingMessage message) {
+        if (meters != null && message.body() != null) {
+            DistributionSummary.builder("messaging.message.size").baseUnit("bytes")
+                    .description("body size of the messages sent").tags("provider", provider, "destination", destination)
+                    .register(meters).record(message.body().length);
+        }
     }
 
     private <T> T observe(Function<String, T> action) {
@@ -67,8 +85,12 @@ final class ObservedMessageSender implements MessageSender {
         context.setCarrier(new HashMap<>());
         context.setRemoteServiceName(provider);
         Observation observation = Observation.createNotStarted("messaging.publish", () -> context, observations)
-                .lowCardinalityKeyValue("messaging.system", provider)
-                .lowCardinalityKeyValue("messaging.destination.name", destination)
+                // the low cardinality keys are the tags of the timer the meter handler builds: those of the
+                // messaging.* meters. The OpenTelemetry names stay on the span only (ADR-0007 of the inbox)
+                .lowCardinalityKeyValue("provider", provider)
+                .lowCardinalityKeyValue("destination", destination)
+                .highCardinalityKeyValue("messaging.system", provider)
+                .highCardinalityKeyValue("messaging.destination.name", destination)
                 .start();
         try (Observation.Scope ignored = observation.openScope()) {
             return action.apply(context.getCarrier().get(TRACEPARENT));
@@ -80,19 +102,25 @@ final class ObservedMessageSender implements MessageSender {
         }
     }
 
-    private <T> T timed(Supplier<T> action) {
+    private <T> T timed(String batch, int items, Function<T, String> outcomeOf, Supplier<T> action) {
         if (meters == null) {
             return action.get();
         }
         Timer.Sample sample = Timer.start(meters);
         String outcome = "error";
+        Throwable thrown = null;
         try {
             T result = action.get();
-            outcome = "success";
+            outcome = outcomeOf.apply(result);
             return result;
+        } catch (RuntimeException | Error e) {
+            thrown = e;
+            TransportTags.failed(meters, provider, destination, "send", e, items);
+            throw e;
         } finally {
-            sample.stop(Timer.builder("messaging.send").tag("provider", provider).tag("destination", destination)
-                    .tag("outcome", outcome).register(meters));
+            sample.stop(Timer.builder("messaging.send.duration").description("call to the broker").tag("provider", provider).tag("destination", destination)
+                    .tag("batch", batch).tag("outcome", outcome).tag("exception", TransportTags.exception(thrown))
+                    .register(meters));
         }
     }
 

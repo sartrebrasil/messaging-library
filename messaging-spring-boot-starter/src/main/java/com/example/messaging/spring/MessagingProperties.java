@@ -69,7 +69,14 @@ public record MessagingProperties(Map<String, Provider> providers, Map<String, S
     }
 
     /** {@code activemq-classic}, {@code artemis} e {@code rabbitmq} no YAML. */
-    public enum Type { AWS, AZURE, GCP, ACTIVEMQ_CLASSIC, ARTEMIS, RABBITMQ }
+    public enum Type {
+        AWS, AZURE, GCP, ACTIVEMQ_CLASSIC, ARTEMIS, RABBITMQ;
+
+        /** The value of the {@code provider} tag of the meters and the {@code messaging.system} of the spans. */
+        public String tag() {
+            return name().toLowerCase().replace('_', '-');
+        }
+    }
 
     /**
      * Conexão com um provedor. Cada tipo usa só os seus campos:
