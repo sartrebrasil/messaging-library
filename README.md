@@ -280,9 +280,15 @@ falha, porque o `checkAccess` precisa da `ActiveMQConnection`. Nesse caso, use `
 - O startup falha listando todos os erros de configuração, e em seguida confere o `require`
   (`ordered-delivery`, `delayed-redelivery`, `native-dead-letter`, `publisher-deduplication`,
   `lease-expired-on-ack`) contra as capabilities dos adapters.
-- Clientes: beans `SqsClient`/`SnsClient` e `ServiceBusClientBuilder` da aplicação são
-  reaproveitados; sem eles, o starter cria e fecha os seus. No GCP, credenciais padrão do Google,
-  ou `emulator-host` para o emulator.
+- Clientes: o starter cria e fecha o cliente de cada provider a partir das properties. Um bean da
+  aplicação (`SqsClient`/`SnsClient`, `ServiceBusClientBuilder`, `jakarta.jms.ConnectionFactory`,
+  `com.rabbitmq.client.ConnectionFactory`) vale no lugar dele quando o provider não define os campos de
+  conexão, e o starter não o fecha. O bean é o do tipo, qualquer que seja o nome, só quando nenhum outro provider
+  usa o mesmo tipo de cliente (`activemq-classic` e `artemis` contam como um); com vários, só vale o bean com o
+  nome do provider (`aws`) ou `<provider><Tipo>` (`awsSnsClient`; um provider AWS tem dois clientes). No AWS,
+  bean junto com `region`, `endpoint` ou credenciais derruba o startup; no Azure, JMS e RabbitMQ,
+  `connection-string` e `broker-url` vencem o bean. No GCP não há bean: credenciais padrão do Google, ou
+  `emulator-host` para o emulator.
 - Métricas (com `MeterRegistry`; referência completa em [docs/metricas.md](docs/metricas.md)): timers `messaging.send.duration`, `messaging.receive.duration`, `messaging.ack.duration`,
   `messaging.nack.duration`, `messaging.dead.letter.duration` com `provider`, `destination`, `exception` (nome simples da classe lançada, ou `none`) e `outcome`
   (`success`, `error` e, em lote com falha parcial, `partial`; `send` e `ack` têm também `batch`), a

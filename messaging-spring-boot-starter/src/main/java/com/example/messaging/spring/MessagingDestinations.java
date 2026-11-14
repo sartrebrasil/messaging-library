@@ -352,7 +352,7 @@ public final class MessagingDestinations implements AutoCloseable {
             case AZURE -> new AzureProviderConnection(name, provider, beans, onlyOfItsType(provider));
             case GCP -> new GcpProviderConnection(name, provider);
             case ACTIVEMQ_CLASSIC, ARTEMIS -> new JmsProviderConnection(name, provider, beans, onlyOfItsType(provider));
-            case RABBITMQ -> new RabbitProviderConnection(name, provider, beans);
+            case RABBITMQ -> new RabbitProviderConnection(name, provider, beans, onlyOfItsType(provider));
         }));
     }
 

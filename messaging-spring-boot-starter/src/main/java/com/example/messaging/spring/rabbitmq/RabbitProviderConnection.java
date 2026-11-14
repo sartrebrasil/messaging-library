@@ -4,6 +4,7 @@ import com.example.messaging.MessageReceiver;
 import com.example.messaging.MessageSender;
 import com.example.messaging.rabbitmq.RabbitMessageReceiver;
 import com.example.messaging.rabbitmq.RabbitMessageSender;
+import com.example.messaging.spring.ClientBeans;
 import com.example.messaging.spring.MessagingProperties;
 import com.example.messaging.spring.ProviderConnection;
 import com.rabbitmq.client.Connection;
@@ -25,9 +26,11 @@ public final class RabbitProviderConnection implements ProviderConnection {
 
     private final Connection connection;
 
-    public RabbitProviderConnection(String providerName, MessagingProperties.Provider provider, ListableBeanFactory beans) {
+    public RabbitProviderConnection(String providerName, MessagingProperties.Provider provider, ListableBeanFactory beans,
+                                    boolean onlyOfItsType) {
         ConnectionFactory factory = provider.brokerUrl() != null
-                ? new ConnectionFactory() : beans.getBeanProvider(ConnectionFactory.class).getIfAvailable();
+                ? new ConnectionFactory()
+                : ClientBeans.find(beans, ConnectionFactory.class, providerName, onlyOfItsType);
         if (factory == null) {
             throw new IllegalStateException("messaging.providers." + providerName
                     + ": defina broker-url ou declare um bean com.rabbitmq.client.ConnectionFactory");

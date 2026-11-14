@@ -13,6 +13,7 @@ import jakarta.jms.Connection;
 import jakarta.jms.ConnectionFactory;
 import jakarta.jms.JMSException;
 
+import java.io.IOException;
 import java.lang.reflect.Proxy;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -181,5 +182,50 @@ class ClientBeansTest {
                 .run(context -> assertThat(context).getFailure()
                         .hasStackTraceContaining("não conectou ao broker")
                         .satisfies(e -> assertThat(e.toString()).doesNotContain("BEAN-USED")));
+    }
+
+    /** Uma fábrica RabbitMQ que falha com {@code failure} ({@code BEAN-USED} na mensagem) ou, sem ela, conecta num stub. */
+    private static com.rabbitmq.client.ConnectionFactory rabbit(String failure) {
+        com.rabbitmq.client.Connection connection = (com.rabbitmq.client.Connection) Proxy.newProxyInstance(
+                com.rabbitmq.client.Connection.class.getClassLoader(),
+                new Class<?>[]{com.rabbitmq.client.Connection.class}, (proxy, method, args) -> null);
+        return new com.rabbitmq.client.ConnectionFactory() {
+            @Override
+            public com.rabbitmq.client.Connection newConnection(String connectionName) throws IOException {
+                if (failure != null) {
+                    throw new IOException(failure);
+                }
+                return connection;
+            }
+        };
+    }
+
+    @Test
+    void rabbitNamedBeanIsUsedWithTwoProviders() {
+        runner.withPropertyValues("messaging.providers.r1.type=rabbitmq", "messaging.providers.r2.type=rabbitmq")
+                .withBean("r1", com.rabbitmq.client.ConnectionFactory.class, () -> rabbit("BEAN-USED"))
+                .withBean("r2", com.rabbitmq.client.ConnectionFactory.class, () -> rabbit(null))
+                .run(context -> assertThat(context).getFailure().hasStackTraceContaining(
+                        "messaging.providers.r1: não conectou ao broker: BEAN-USED"));
+    }
+
+    @Test
+    void rabbitUnnamedBeanIsIgnoredWithTwoProviders() {
+        runner.withPropertyValues("messaging.providers.r1.type=rabbitmq", "messaging.providers.r2.type=rabbitmq")
+                .withBean(com.rabbitmq.client.ConnectionFactory.class, () -> rabbit("BEAN-USED"))
+                .withBean("r2", com.rabbitmq.client.ConnectionFactory.class, () -> rabbit(null))
+                .run(context -> assertThat(context).getFailure().rootCause()
+                        .hasMessageContaining("messaging.providers.r1: defina broker-url ou declare um bean"));
+    }
+
+    @Test
+    void rabbitBrokerUrlWinsOverAnUnnamedBean() {
+        runner.withPropertyValues("messaging.providers.r.type=rabbitmq",
+                        "messaging.providers.r.broker-url=amqp://localhost:1")
+                .withBean(com.rabbitmq.client.ConnectionFactory.class, () -> rabbit("BEAN-USED"))
+                .run(context -> assertThat(context).getFailure()
+                        .hasStackTraceContaining("não conectou ao broker")
+                        .satisfies(e -> assertThat(e.toString()).doesNotContain("BEAN-USED"))
+                        .rootCause().hasMessageNotContaining("BEAN-USED"));
     }
 }
