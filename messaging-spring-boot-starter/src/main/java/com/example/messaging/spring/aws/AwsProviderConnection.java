@@ -6,6 +6,7 @@ import com.example.messaging.MessageSender;
 import com.example.messaging.aws.SnsMessageSender;
 import com.example.messaging.aws.SqsMessageReceiver;
 import com.example.messaging.aws.SqsMessageSender;
+import com.example.messaging.spring.ClientBeans;
 import com.example.messaging.spring.MessagingProperties;
 import com.example.messaging.spring.ProviderConnection;
 import org.springframework.beans.factory.ListableBeanFactory;
@@ -26,8 +27,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * SQS e SNS. Beans {@code SqsClient}/{@code SnsClient} da aplicação valem para todos os
- * providers {@code aws}; sem eles, um cliente por provider com {@code apache-client} e read
+ * SQS e SNS. Beans {@code SqsClient}/{@code SnsClient} da aplicação valem pela regra de {@link ClientBeans}, e só
+ * para um provider sem {@code region}, {@code endpoint} nem credenciais; sem eles, um cliente por provider com {@code apache-client} e read
  * timeout de 30 s (acima dos 20 s do long poll).
  */
 public final class AwsProviderConnection implements ProviderConnection {
@@ -39,13 +40,29 @@ public final class AwsProviderConnection implements ProviderConnection {
     /** URL de cada nome de fila, resolvida uma vez ({@code GetQueueUrl}). */
     private final Map<String, String> queueUrls = new ConcurrentHashMap<>();
 
-    public AwsProviderConnection(MessagingProperties.Provider provider, ListableBeanFactory beans) {
-        SqsClient userSqs = beans.getBeanProvider(SqsClient.class).getIfAvailable();
-        SnsClient userSns = beans.getBeanProvider(SnsClient.class).getIfAvailable();
+    public AwsProviderConnection(String providerName, MessagingProperties.Provider provider, ListableBeanFactory beans,
+                                 boolean onlyOfItsType) {
+        SqsClient userSqs = ClientBeans.find(beans, SqsClient.class, providerName, onlyOfItsType);
+        SnsClient userSns = ClientBeans.find(beans, SnsClient.class, providerName, onlyOfItsType);
+        if (userSqs != null) {
+            rejectConnectionFields(providerName, provider, "SqsClient");
+        }
+        if (userSns != null) {
+            rejectConnectionFields(providerName, provider, "SnsClient");
+        }
         this.ownsSqs = userSqs == null;
         this.ownsSns = userSns == null;
         this.sqs = ownsSqs ? configure(SqsClient.builder(), provider).build() : userSqs;
         this.sns = ownsSns ? configure(SnsClient.builder(), provider).build() : userSns;
+    }
+
+    /** O bean da aplicação vence; as properties de conexão seriam ignoradas em silêncio. */
+    private static void rejectConnectionFields(String providerName, MessagingProperties.Provider provider, String bean) {
+        if (provider.region() != null || provider.endpoint() != null || provider.accessKey() != null
+                || provider.secretKey() != null) {
+            throw new IllegalStateException("messaging.providers." + providerName + ": defina region, endpoint, "
+                    + "access-key e secret-key ou o bean " + bean + ", não os dois");
+        }
     }
 
     private static SqsClientBuilder configure(SqsClientBuilder builder, MessagingProperties.Provider provider) {

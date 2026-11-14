@@ -348,12 +348,18 @@ public final class MessagingDestinations implements AutoCloseable {
     private void connect(ListableBeanFactory beans) {
         // as classes de cada provedor só são carregadas aqui, depois da checagem do adapter em validateProviders
         properties.providers().forEach((name, provider) -> connections.put(name, switch (provider.type()) {
-            case AWS -> new AwsProviderConnection(provider, beans);
+            case AWS -> new AwsProviderConnection(name, provider, beans, onlyOfItsType(provider));
             case AZURE -> new AzureProviderConnection(name, provider, beans);
             case GCP -> new GcpProviderConnection(name, provider);
             case ACTIVEMQ_CLASSIC, ARTEMIS -> new JmsProviderConnection(name, provider, beans);
             case RABBITMQ -> new RabbitProviderConnection(name, provider, beans);
         }));
+    }
+
+    /** Nenhum outro provider usa o mesmo módulo (e, portanto, o mesmo tipo de cliente nativo). */
+    private boolean onlyOfItsType(Provider provider) {
+        return properties.providers().values().stream()
+                .filter(p -> MODULES.get(p.type()).equals(MODULES.get(provider.type()))).count() == 1;
     }
 
     /** Um sender não tem como provar capacidade do lado de quem recebe: essas exigências são de receiver. */

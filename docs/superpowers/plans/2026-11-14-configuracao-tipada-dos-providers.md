@@ -68,7 +68,7 @@ git commit -m "docs: ADR-0010 configuração tipada dos providers e plano"
 
 **Interfaces:**
 - Produces (usado pelas Tasks 4 a 6):
-  - `public final class ClientBeans` com `public static <T> T find(ListableBeanFactory beans, Class<T> type, String providerName, boolean onlyOfItsType)`: devolve o bean chamado `providerName` se for do tipo `type` (`beans.containsBean(name) && beans.isTypeMatch(name, type)`); senão, se `onlyOfItsType`, `beans.getBeanProvider(type).getIfAvailable()`; senão `null`.
+  - `public final class ClientBeans` com `public static <T> T find(ListableBeanFactory beans, Class<T> type, String providerName, boolean onlyOfItsType)`: devolve o bean chamado `providerName` ou `providerName + type.getSimpleName()` (um provider AWS precisa de `SqsClient` e `SnsClient`, e dois beans não têm o mesmo nome) se for do tipo `type` (`beans.containsBean(name) && beans.isTypeMatch(name, type)`); senão, se `onlyOfItsType`, `beans.getBeanProvider(type).getIfAvailable()`; senão `null`.
   - `MessagingDestinations.connect` calcula `onlyOfItsType` = nenhum outro provider com o mesmo valor em `MODULES` (assim `activemq-classic` e `artemis`, que usam o mesmo `jakarta.jms.ConnectionFactory`, contam como um grupo) e o passa ao construtor de cada conexão.
   - `AwsProviderConnection(String providerName, MessagingProperties.Provider provider, ListableBeanFactory beans, boolean onlyOfItsType)`.
 
