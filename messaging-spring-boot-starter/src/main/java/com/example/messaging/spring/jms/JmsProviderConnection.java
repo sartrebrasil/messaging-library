@@ -40,7 +40,8 @@ public final class JmsProviderConnection implements ProviderConnection {
                 : ClientBeans.find(beans, ConnectionFactory.class, providerName, onlyOfItsType);
         if (factory == null) {
             throw new IllegalStateException("messaging.providers." + providerName
-                    + ": defina broker-url ou declare um bean jakarta.jms.ConnectionFactory");
+                    + ": defina broker-url ou declare um bean jakarta.jms.ConnectionFactory ("
+                    + ClientBeans.namingHint(providerName, ConnectionFactory.class) + ")");
         }
         try {
             connection = provider.user() != null

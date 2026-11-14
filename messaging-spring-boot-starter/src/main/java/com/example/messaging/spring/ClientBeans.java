@@ -13,6 +13,12 @@ public final class ClientBeans {
     private ClientBeans() {
     }
 
+    /** Para as mensagens de "defina X ou declare um bean": o bean que existe e não casa precisa de um destes nomes. */
+    public static String namingHint(String providerName, Class<?> type) {
+        return "com mais de um provider do mesmo tipo, o bean precisa se chamar '" + providerName + "' ou '"
+                + providerName + type.getSimpleName() + "'";
+    }
+
     /**
      * @param onlyOfItsType nenhum outro provider usa este tipo de cliente
      * @return o bean, ou {@code null} quando o starter deve criar o cliente

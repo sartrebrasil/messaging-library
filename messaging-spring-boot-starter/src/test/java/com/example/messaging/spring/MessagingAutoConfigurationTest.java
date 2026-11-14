@@ -280,4 +280,11 @@ class MessagingAutoConfigurationTest {
                         .isInstanceOfSatisfying(MessagingProperties.AwsProvider.class,
                                 aws -> assertThat(aws.region()).isEqualTo("us-west-2")));
     }
+
+    @Test
+    void providerNameWithADotBinds() {
+        runner.withPropertyValues("messaging.providers[a.b].type=aws", "messaging.providers[a.b].region=sa-east-1")
+                .run(context -> assertThat(context.getBean(MessagingProperties.class).providers())
+                        .containsKey("a.b"));
+    }
 }

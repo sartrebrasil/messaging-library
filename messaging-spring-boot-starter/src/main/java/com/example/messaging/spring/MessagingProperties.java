@@ -87,8 +87,11 @@ public record MessagingProperties(Map<String, Provider> providers, Map<String, S
                         throw new IllegalStateException("messaging.providers." + name + ".type é obrigatório (aws, azure, "
                                 + "gcp, activemq-classic, artemis ou rabbitmq)");
                     }
-                    // adapt, não of: o nome vem como o usuário o escreveu (Aws_Prod), que of() recusa
-                    ConfigurationPropertyName node = ConfigurationPropertyName.adapt("messaging.providers." + name, '.');
+                    // adapt, não of: o nome vem como o usuário o escreveu (Aws_Prod), que of() recusa; com '.', só entre colchetes
+                    // ele é um elemento só
+                    ConfigurationPropertyName node = name.contains(".")
+                            ? ConfigurationPropertyName.of("messaging.providers[" + name + "]")
+                            : ConfigurationPropertyName.adapt("messaging.providers." + name, '.');
                     providers.put(name, switch (typeOnly.type()) {
                         case AWS -> binder.bind(node, Bindable.of(AwsProvider.class), strict).get();
                         case AZURE -> binder.bind(node, Bindable.of(AzureProvider.class), strict).get();

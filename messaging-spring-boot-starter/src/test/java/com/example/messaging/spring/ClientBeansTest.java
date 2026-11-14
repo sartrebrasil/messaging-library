@@ -137,7 +137,8 @@ class ClientBeansTest {
         runner.withPropertyValues("messaging.providers.a1.type=azure", "messaging.providers.a2.type=azure")
                 .withBean(ServiceBusClientBuilder.class, ServiceBusClientBuilder::new)
                 .run(context -> assertThat(context).getFailure().rootCause()
-                        .hasMessageContaining("defina connection-string ou declare um bean"));
+                        .hasMessageContaining("defina connection-string ou declare um bean")
+                        .hasMessageMatching("(?s).*a[12]ServiceBusClientBuilder.*"));
     }
 
     @Test
@@ -183,7 +184,8 @@ class ClientBeansTest {
                 .withBean(ConnectionFactory.class, () -> jms("BEAN-USED"))
                 .withBean("j2", ConnectionFactory.class, () -> jms(null))
                 .run(context -> assertThat(context).getFailure().rootCause()
-                        .hasMessageContaining("messaging.providers.j1: defina broker-url ou declare um bean"));
+                        .hasMessageContaining("messaging.providers.j1: defina broker-url ou declare um bean")
+                        .hasMessageContaining("j1ConnectionFactory"));
     }
 
     @Test
@@ -227,7 +229,8 @@ class ClientBeansTest {
                 .withBean(com.rabbitmq.client.ConnectionFactory.class, () -> rabbit("BEAN-USED"))
                 .withBean("r2", com.rabbitmq.client.ConnectionFactory.class, () -> rabbit(null))
                 .run(context -> assertThat(context).getFailure().rootCause()
-                        .hasMessageContaining("messaging.providers.r1: defina broker-url ou declare um bean"));
+                        .hasMessageContaining("messaging.providers.r1: defina broker-url ou declare um bean")
+                        .hasMessageContaining("r1ConnectionFactory"));
     }
 
     @Test
@@ -239,5 +242,37 @@ class ClientBeansTest {
                         .hasStackTraceContaining("não conectou ao broker")
                         .satisfies(e -> assertThat(e.toString()).doesNotContain("BEAN-USED"))
                         .rootCause().hasMessageNotContaining("BEAN-USED"));
+    }
+
+    /** Com dois providers e um bean sem nome, o provider sem campos de conexão cria o cliente e avisa que ignorou o bean. */
+    @Test
+    void awsIgnoredBeanIsWarnedAbout() {
+        java.util.List<String> logged = new CopyOnWriteArrayList<>();
+        java.util.logging.Logger jul = java.util.logging.Logger.getLogger(
+                "com.example.messaging.spring.aws.AwsProviderConnection");
+        java.util.logging.Handler handler = new java.util.logging.Handler() {
+            @Override
+            public void publish(java.util.logging.LogRecord r) {
+                logged.add(r.getLevel() + " " + new java.util.logging.SimpleFormatter().formatMessage(r));
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        jul.addHandler(handler);
+        try {
+            runner.withPropertyValues(AWS_FIELDS_A + "type=aws", AWS_FIELDS_A + "region=us-east-1",
+                            AWS_FIELDS_B + "type=aws", AWS_FIELDS_B + "region=us-east-1")
+                    .withBean(SqsClient.class, () -> counting(SqsClient.class, new CopyOnWriteArrayList<>()))
+                    .run(context -> assertThat(context).hasNotFailed());
+        } finally {
+            jul.removeHandler(handler);
+        }
+        assertThat(logged).anyMatch(m -> m.startsWith("WARNING") && m.contains("SqsClient") && m.contains("'a' ou 'aSqsClient'"));
     }
 }

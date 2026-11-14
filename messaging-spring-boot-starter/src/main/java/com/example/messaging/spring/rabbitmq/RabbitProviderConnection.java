@@ -33,7 +33,8 @@ public final class RabbitProviderConnection implements ProviderConnection {
                 : ClientBeans.find(beans, ConnectionFactory.class, providerName, onlyOfItsType);
         if (factory == null) {
             throw new IllegalStateException("messaging.providers." + providerName
-                    + ": defina broker-url ou declare um bean com.rabbitmq.client.ConnectionFactory");
+                    + ": defina broker-url ou declare um bean com.rabbitmq.client.ConnectionFactory ("
+                    + ClientBeans.namingHint(providerName, ConnectionFactory.class) + ")");
         }
         try {
             if (provider.brokerUrl() != null) {

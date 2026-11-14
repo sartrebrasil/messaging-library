@@ -33,6 +33,8 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class AwsProviderConnection implements ProviderConnection {
 
+    private static final System.Logger LOG = System.getLogger(AwsProviderConnection.class.getName());
+
     private final SqsClient sqs;
     private final SnsClient sns;
     private final boolean ownsSqs;
@@ -47,6 +49,8 @@ public final class AwsProviderConnection implements ProviderConnection {
         if (userSqs != null && userSns != null) {
             rejectConnectionFields(providerName, provider);
         }
+        warnIgnoredBean(beans, SqsClient.class, providerName, userSqs, provider);
+        warnIgnoredBean(beans, SnsClient.class, providerName, userSns, provider);
         this.ownsSqs = userSqs == null;
         this.ownsSns = userSns == null;
         this.sqs = ownsSqs ? configure(SqsClient.builder(), provider).build() : userSqs;
@@ -54,12 +58,29 @@ public final class AwsProviderConnection implements ProviderConnection {
     }
 
     /**
+     * Existe um bean do tipo e o starter não o usa para este provider (há mais de um provider AWS e o bean não tem o
+     * nome de nenhum deles): o cliente é criado pelas properties e pela cadeia padrão do SDK. É fácil de não perceber.
+     */
+    private static void warnIgnoredBean(ListableBeanFactory beans, Class<?> type, String providerName, Object found,
+                                        MessagingProperties.AwsProvider provider) {
+        if (found == null && beans.getBeanNamesForType(type).length > 0) {
+            LOG.log(System.Logger.Level.WARNING, "messaging.providers.{0}: o bean {1} da aplicação não é usado por este "
+                    + "provider e ele cria o cliente pela cadeia padrão do SDK ({2})", providerName,
+                    type.getSimpleName(), ClientBeans.namingHint(providerName, type));
+        }
+    }
+
+    private static boolean hasConnectionFields(MessagingProperties.AwsProvider provider) {
+        return provider.region() != null || provider.endpoint() != null || provider.accessKey() != null
+                || provider.secretKey() != null;
+    }
+
+    /**
      * Com os dois beans da aplicação, as properties de conexão não configurariam nenhum cliente e seriam ignoradas
      * em silêncio. Com um só, elas ainda configuram o outro cliente (o {@code SnsClient} precisa de região).
      */
     private static void rejectConnectionFields(String providerName, MessagingProperties.AwsProvider provider) {
-        if (provider.region() != null || provider.endpoint() != null || provider.accessKey() != null
-                || provider.secretKey() != null) {
+        if (hasConnectionFields(provider)) {
             throw new IllegalStateException("messaging.providers." + providerName + ": defina region, endpoint, "
                     + "access-key e secret-key ou os beans SqsClient e SnsClient, não os dois");
         }

@@ -29,7 +29,8 @@ public final class AzureProviderConnection implements ProviderConnection {
             builder = ClientBeans.find(beans, ServiceBusClientBuilder.class, providerName, onlyOfItsType);
             if (builder == null) {
                 throw new IllegalStateException("messaging.providers." + providerName
-                        + ": defina connection-string ou declare um bean ServiceBusClientBuilder");
+                        + ": defina connection-string ou declare um bean ServiceBusClientBuilder ("
+                        + ClientBeans.namingHint(providerName, ServiceBusClientBuilder.class) + ")");
             }
         }
     }
