@@ -44,7 +44,7 @@ final class IdempotencyGuard {
      * @param run          the handler and the retry levels
      * @param storeFailure outcome for a failure of the store itself (a retryable failure)
      */
-    Outcome apply(InboxMessage inbox, AttemptState state, Supplier<Outcome> run,
+    Outcome apply(InboxMessage inbox, AttemptState state, ConsumerObserver observer, Supplier<Outcome> run,
                   Function<RuntimeException, Outcome> storeFailure) {
         IdempotencyKeyId id = new IdempotencyKeyId(inbox.id(), consumer);
         String fingerprint = sha256(inbox.payload());
@@ -53,7 +53,8 @@ final class IdempotencyGuard {
                 now.plus(idempotency.reservationTtl()));
         Optional<IdempotencyRecord> existing;
         try {
-            existing = idempotency.store().reserve(candidate);
+            existing = timed(observer, inbox, ConsumerObserver.StoreCall.RESERVE,
+                    () -> idempotency.store().reserve(candidate));
         } catch (RuntimeException e) {
             LOG.log(System.Logger.Level.WARNING, "Consumer " + consumer + ": idempotency store failed on reserve of "
                     + id, e);
@@ -67,16 +68,16 @@ final class IdempotencyGuard {
         try {
             outcome = run.get();
         } catch (RuntimeException | Error e) {
-            release(id, owner);
+            release(observer, inbox, id, owner);
             throw e;
         }
         if (!(outcome instanceof Outcome.Ack)) {
-            release(id, owner);
+            release(observer, inbox, id, owner);
             return outcome;
         }
         try {
-            if (!idempotency.store().complete(id, owner, null, null,
-                    idempotency.clock().instant().plus(idempotency.completedTtl()))) {
+            if (!timed(observer, inbox, ConsumerObserver.StoreCall.COMPLETE, () -> idempotency.store().complete(id, owner,
+                    null, null, idempotency.clock().instant().plus(idempotency.completedTtl())))) {
                 // the reservation expired and another instance took the key: both ran the handler
                 LOG.log(System.Logger.Level.WARNING, "Consumer {0}: reservation of {1} was lost before complete; "
                         + "raise the reservation TTL above max-processing", consumer, id);
@@ -85,7 +86,7 @@ final class IdempotencyGuard {
             // no ack without complete (ADR-0004)
             LOG.log(System.Logger.Level.WARNING, "Consumer " + consumer + ": idempotency store failed on complete of "
                     + id, e);
-            release(id, owner);
+            release(observer, inbox, id, owner);
             return storeFailure.apply(e);
         }
         return outcome;
@@ -112,13 +113,31 @@ final class IdempotencyGuard {
         return new Outcome.Retry(delay, state, inProgress, Outcome.RetryReason.IN_PROGRESS);
     }
 
-    private void release(IdempotencyKeyId id, String owner) {
+    private void release(ConsumerObserver observer, InboxMessage inbox, IdempotencyKeyId id, String owner) {
         try {
-            idempotency.store().release(id, owner);
+            timed(observer, inbox, ConsumerObserver.StoreCall.RELEASE, () -> {
+                idempotency.store().release(id, owner);
+                return null;
+            });
         } catch (RuntimeException e) {
             // the key stays IN_PROGRESS until the reservation TTL; redeliveries meanwhile are in_progress
             LOG.log(System.Logger.Level.WARNING, "Consumer " + consumer + ": idempotency store failed on release of "
                     + id, e);
+        }
+    }
+
+    /** One store call, reported to the observer whether it worked or not (the observer never throws). */
+    private static <T> T timed(ConsumerObserver observer, InboxMessage inbox, ConsumerObserver.StoreCall call,
+                               Supplier<T> action) {
+        long start = System.nanoTime();
+        RuntimeException failure = null;
+        try {
+            return action.get();
+        } catch (RuntimeException e) {
+            failure = e;
+            throw e;
+        } finally {
+            observer.idempotency(inbox, call, Duration.ofNanos(System.nanoTime() - start), failure);
         }
     }
 

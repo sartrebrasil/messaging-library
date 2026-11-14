@@ -2,6 +2,7 @@ package com.example.messaging.inbox;
 
 import com.example.messaging.Capabilities;
 import com.example.messaging.KeepAlive;
+import com.example.messaging.LeaseExpiredException;
 import com.example.messaging.MessageReceiver;
 import com.example.messaging.MessageSender;
 import com.example.messaging.OutgoingMessage;
@@ -70,6 +71,7 @@ class OutcomeApplierTest {
                 new Outcome.Failed(Outcome.FailureReason.NON_RETRYABLE, AttemptState.initial(), new IllegalArgumentException(), null));
 
         assertEquals(Effect.COPY_IMPOSSIBLE, applied.effect());
+        assertEquals(ConsumerObserver.BrokerCall.COPY, applied.failedCall());
         assertEquals(List.of("nack PT0S"), receiver.calls);
         assertTrue(failed.sent.isEmpty());
     }
@@ -81,7 +83,36 @@ class OutcomeApplierTest {
                 new Outcome.Failed(Outcome.FailureReason.REJECTED, AttemptState.initial(), null, "bad"));
 
         assertEquals(Effect.EFFECT_FAILED, applied.effect());
+        assertEquals(ConsumerObserver.BrokerCall.COPY, applied.failedCall());
         assertEquals(List.of("nack PT0S"), receiver.calls);
+    }
+
+    @Test
+    void theFailedCallIsTheOneThatFailed() {
+        // the copy went out and the ack failed: not a "copy" failure, whatever the outcome says
+        receiver.ackFails = true;
+        var ack = applier(DelayedStrategy.BROKER_DELAY).apply(receiver, received(OptionalInt.of(1), null),
+                new Outcome.Failed(Outcome.FailureReason.REJECTED, AttemptState.initial(), null, "bad"));
+        assertEquals(Effect.EFFECT_FAILED, ack.effect());
+        assertEquals(ConsumerObserver.BrokerCall.ACK, ack.failedCall());
+        assertEquals(1, failed.sent.size());
+
+        receiver.ackFails = false;
+        receiver.nackFails = true;
+        var nack = applier(DelayedStrategy.BROKER_DELAY).apply(receiver, received(OptionalInt.of(1), null),
+                new Outcome.Retry(Duration.ofSeconds(30), new AttemptState(1, 0), null));
+        assertEquals(Effect.EFFECT_FAILED, nack.effect());
+        assertEquals(ConsumerObserver.BrokerCall.NACK, nack.failedCall());
+    }
+
+    @Test
+    void anExpiredLeaseOnTheAckIsNotAFailedCall() {
+        receiver.leaseExpired = true;
+        var applied = applier(DelayedStrategy.BROKER_DELAY).apply(receiver, received(OptionalInt.of(1), null),
+                new Outcome.Ack(Outcome.AckReason.SUCCESS));
+
+        assertEquals(Effect.ACK_LEASE_EXPIRED, applied.effect());
+        assertNull(applied.failedCall());
     }
 
     private static ReceivedMessage received(OptionalInt deliveryCount, String orderingKey) {
@@ -120,6 +151,9 @@ class OutcomeApplierTest {
         final List<String> calls = new ArrayList<>();
         Duration maxDelay = Duration.ofHours(12);
         boolean refuseDelay;
+        boolean ackFails;
+        boolean nackFails;
+        boolean leaseExpired;
 
         @Override
         public List<ReceivedMessage> receive(int maxMessages, Duration maxWait) {
@@ -128,11 +162,20 @@ class OutcomeApplierTest {
 
         @Override
         public void ack(ReceivedMessage message) {
+            if (leaseExpired) {
+                throw new LeaseExpiredException("aws", "lease expired", null);
+            }
+            if (ackFails) {
+                throw new IllegalStateException("broker down");
+            }
             calls.add("ack");
         }
 
         @Override
         public void nack(ReceivedMessage message, Duration redeliverAfter) {
+            if (nackFails) {
+                throw new IllegalStateException("broker down");
+            }
             if (refuseDelay && !redeliverAfter.isZero()) {
                 throw new IllegalArgumentException("past the 12 h limit");
             }

@@ -46,13 +46,40 @@ public interface ConsumerObserver {
     default void receiveFailed(RuntimeException failure) {
     }
 
+    /** The {@code keepAlive} of a message could not start: it is processed without lease renewal. */
+    default void keepAliveFailed(ReceivedMessage message, RuntimeException failure) {
+    }
+
+    /** A failure nobody expected (an {@code Error}, a bug); the message was released or sent to failed. */
+    default void unexpectedFailure(Stage stage, Throwable failure) {
+    }
+
+    /** One call of the handler, each immediate retry being one; {@code failure} is {@code null} when it returned. */
+    default void handled(InboxMessage message, Duration duration, Throwable failure) {
+    }
+
+    /** One call to the idempotency store; {@code failure} is {@code null} when it worked. */
+    default void idempotency(InboxMessage message, StoreCall call, Duration duration, RuntimeException failure) {
+    }
+
     /**
      * @param inbox          the read message; {@code null} when the envelope could not be read
      * @param retrySkipped   the delayed level was skipped (no delivery count, or the delay was refused)
      * @param budgetExceeded a copy left out {@code inbox_*} attributes for lack of room
      * @param duration       from the start of the first execution to the end of the effect
+     * @param failedCall     the broker call that failed when {@code effect} is {@code EFFECT_FAILED} or
+     *                       {@code COPY_IMPOSSIBLE}; {@code null} otherwise
      */
     record Report(ReceivedMessage message, InboxMessage inbox, Outcome outcome, Effect effect, DelayedStrategy strategy,
-                  boolean retrySkipped, boolean budgetExceeded, Duration duration) {
+                  boolean retrySkipped, boolean budgetExceeded, Duration duration, BrokerCall failedCall) {
     }
+
+    /** A call the consumer makes on the broker to apply an outcome. */
+    enum BrokerCall { ACK, NACK, COPY }
+
+    /** Where an unexpected failure was caught. */
+    enum Stage { LANE, DELIVERY, DEAD_LETTER_PASS }
+
+    /** A call the consumer makes on the idempotency store. */
+    enum StoreCall { RESERVE, COMPLETE, RELEASE }
 }

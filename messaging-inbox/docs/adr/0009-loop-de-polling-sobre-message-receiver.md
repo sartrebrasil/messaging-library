@@ -84,7 +84,7 @@ enquanto rodando:
   (ADR-0002), e a `failed` também.
 - Falha no envio da cópia ou no `nack`: a mensagem não é confirmada, volta por
   `nack(0)` (ou pelo vencimento do lease, se o `nack` também falhar) e
-  `inbox_effect_failed_total` incrementa.
+  `inbox_effects_failed_total` incrementa.
 - `LeaseExpiredException` no `ack`: log de aviso e métrica. A reentrega vira
   `duplicate` pela idempotência. Sem idempotência, o handler roda de novo.
 - `KeepAlive.lost()` antes do `ack`: o `ack` é tentado mesmo assim. Onde o
@@ -98,7 +98,7 @@ enquanto rodando:
 - `retryable = false` (`AccessDeniedException`, `DestinationNotFoundException`):
   mesmo backoff, com máx. 1 min, e log de erro a cada tentativa. O worker não
   morre: credencial e destino costumam ser corrigidos sem restart.
-- Métrica `inbox_effect_failed_total{effect="receive"}`.
+- Métrica `inbox_effects_failed_total{effect="receive"}`.
 
 ### Nível 3
 

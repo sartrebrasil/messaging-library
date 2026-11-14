@@ -395,7 +395,7 @@ public final class MessagingDestinations implements AutoCloseable {
     }
 
     private String providerType(Resolved r) {
-        return properties.providers().get(r.provider()).type().name().toLowerCase().replace('_', '-');
+        return properties.providers().get(r.provider()).type().tag();
     }
 
     /** Fecha receivers que sobraram, senders e os clientes criados pelo starter. */

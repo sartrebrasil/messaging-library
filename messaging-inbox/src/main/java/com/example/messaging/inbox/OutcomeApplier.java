@@ -22,14 +22,19 @@ final class OutcomeApplier {
     /**
      * @param retrySkipped    the delayed level was skipped (no delivery count, or the delay was refused)
      * @param budgetExceeded  a copy left out {@code inbox_*} attributes for lack of room
+     * @param failedCall      the broker call that failed, for {@code EFFECT_FAILED} and {@code COPY_IMPOSSIBLE}
      */
-    record Applied(Effect effect, boolean retrySkipped, boolean budgetExceeded) {
+    record Applied(Effect effect, boolean retrySkipped, boolean budgetExceeded, ConsumerObserver.BrokerCall failedCall) {
         static Applied of(Effect effect) {
-            return new Applied(effect, false, false);
+            return new Applied(effect, false, false, null);
+        }
+
+        static Applied failed(Effect effect, ConsumerObserver.BrokerCall call) {
+            return new Applied(effect, false, false, call);
         }
 
         Applied withBudgetExceeded() {
-            return new Applied(effect, retrySkipped, true);
+            return new Applied(effect, retrySkipped, true, failedCall);
         }
     }
 
@@ -78,7 +83,7 @@ final class OutcomeApplier {
                 } catch (RuntimeException e) {
                     LOG.log(System.Logger.Level.WARNING, "Consumer " + settings.consumer() + ": nack of message "
                             + message.messageId() + " failed; it comes back when the lease expires", e);
-                    yield Applied.of(Effect.EFFECT_FAILED);
+                    yield Applied.failed(Effect.EFFECT_FAILED, ConsumerObserver.BrokerCall.NACK);
                 }
             }
             case RETRY_QUEUES -> {
@@ -131,7 +136,7 @@ final class OutcomeApplier {
             LOG.log(System.Logger.Level.WARNING, "Consumer " + settings.consumer() + ": copy of message "
                     + message.messageId() + " failed; the message goes back", e);
             release(receiver, message, Effect.EFFECT_FAILED);
-            return new Applied(Effect.EFFECT_FAILED, retrySkipped, copy.budgetExceeded());
+            return new Applied(Effect.EFFECT_FAILED, retrySkipped, copy.budgetExceeded(), ConsumerObserver.BrokerCall.COPY);
         }
         return ack(receiver, message, effect, retrySkipped, copy.budgetExceeded());
     }
@@ -140,22 +145,22 @@ final class OutcomeApplier {
         LOG.log(System.Logger.Level.ERROR, "Consumer " + settings.consumer() + ": message " + message.messageId()
                 + " cannot be copied (" + e.getMessage() + "); released, the broker's redrive policy must take it", e);
         release(receiver, message, Effect.COPY_IMPOSSIBLE);
-        return Applied.of(Effect.COPY_IMPOSSIBLE);
+        return Applied.failed(Effect.COPY_IMPOSSIBLE, ConsumerObserver.BrokerCall.COPY);
     }
 
     private Applied ack(MessageReceiver receiver, ReceivedMessage message, Effect effect, boolean retrySkipped,
                         boolean budgetExceeded) {
         try {
             receiver.ack(message);
-            return new Applied(effect, retrySkipped, budgetExceeded);
+            return new Applied(effect, retrySkipped, budgetExceeded, null);
         } catch (LeaseExpiredException e) {
             LOG.log(System.Logger.Level.WARNING, "Consumer {0}: lease of message {1} expired before the ack; it will "
                     + "be delivered again", settings.consumer(), message.messageId());
-            return new Applied(Effect.ACK_LEASE_EXPIRED, retrySkipped, budgetExceeded);
+            return new Applied(Effect.ACK_LEASE_EXPIRED, retrySkipped, budgetExceeded, null);
         } catch (RuntimeException e) {
             LOG.log(System.Logger.Level.WARNING, "Consumer " + settings.consumer() + ": ack of message "
                     + message.messageId() + " failed", e);
-            return new Applied(Effect.EFFECT_FAILED, retrySkipped, budgetExceeded);
+            return new Applied(Effect.EFFECT_FAILED, retrySkipped, budgetExceeded, ConsumerObserver.BrokerCall.ACK);
         }
     }
 
@@ -166,7 +171,7 @@ final class OutcomeApplier {
         } catch (RuntimeException e) {
             LOG.log(System.Logger.Level.WARNING, "Consumer " + settings.consumer() + ": nack of message "
                     + message.messageId() + " failed; it comes back when the lease expires", e);
-            return Applied.of(Effect.EFFECT_FAILED);
+            return Applied.failed(Effect.EFFECT_FAILED, ConsumerObserver.BrokerCall.NACK);
         }
     }
 

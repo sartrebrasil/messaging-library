@@ -56,15 +56,19 @@ class ObservabilityTest {
             messaging.queueSender("orders").send(OutgoingMessage.ofText(InboxAutoConfigurationTest.ORDER));
             PrometheusMeterRegistry registry = context.getBean(PrometheusMeterRegistry.class);
             // delivered() runs right after the ack: wait for it rather than for the queue
-            await(() -> registry.scrape().contains("inbox_failed_total"));
+            await(() -> registry.scrape().contains("inbox_messages_failed_total"));
 
             String scrape = registry.scrape();
             assertThat(scrape)
                     .contains("inbox_messages_received_total{consumer=\"billing-orders\",destination=\"billing-orders\"} 1.0")
                     .contains("inbox_messages_processed_total{consumer=\"billing-orders\",destination=\"billing-orders\",outcome=\"failed\"} 1.0")
-                    .contains("inbox_failed_total{consumer=\"billing-orders\",destination=\"billing-orders\",exception=\"none\",reason=\"rejected\"} 1.0")
+                    .contains("inbox_messages_failed_total{consumer=\"billing-orders\",destination=\"billing-orders\",exception=\"none\",reason=\"rejected\"} 1.0")
                     .contains("inbox_processing_duration_seconds_count{consumer=\"billing-orders\",destination=\"billing-orders\",outcome=\"failed\"} 1")
                     .contains("inbox_last_receive_age_seconds{consumer=\"billing-orders\"}")
+                    // wiring of the diagnostic meters: the worker and the pipeline call the observer
+                    .contains("inbox_handler_duration_seconds_count{consumer=\"billing-orders\",destination=\"billing-orders\",outcome=\"success\"} 1")
+                    .contains("inbox_delivery_attempts_count{consumer=\"billing-orders\",destination=\"billing-orders\",level=\"immediate\"} 1")
+                    .contains("inbox_messages_in_flight{consumer=\"billing-orders\",destination=\"billing-orders\"} 0.0")
                     .doesNotContain("_total_total");
         });
     }
@@ -76,7 +80,7 @@ class ObservabilityTest {
                     PrometheusMeterRegistry registry = context.getBean(PrometheusMeterRegistry.class);
                     await(() -> registry.scrape().contains("inbox_dead_letter_passes_total"));
                     assertThat(registry.scrape()).contains(
-                            "inbox_dead_letter_passes_total{consumer=\"billing-orders.dead-letter\",end=\"empty\"}");
+                            "inbox_dead_letter_passes_total{consumer=\"billing-orders\",end=\"empty\"}");
                 });
     }
 
@@ -91,7 +95,7 @@ class ObservabilityTest {
                     Target.MAIN, 10, Filter.NONE, 100, false));
 
             assertThat(context.getBean(PrometheusMeterRegistry.class).scrape()).contains(
-                    "inbox_redrive_total{consumer=\"billing-orders\",result=\"moved\",source=\"failed\",target=\"main\"} 1.0");
+                    "inbox_messages_redriven_total{consumer=\"billing-orders\",result=\"moved\",source=\"failed\",target=\"main\"} 1.0");
         });
     }
 

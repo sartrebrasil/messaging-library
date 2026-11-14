@@ -87,8 +87,8 @@ class ObservabilityTest {
         delegate.fail = true;
         assertThatThrownBy(() -> sender.send(OutgoingMessage.ofText("x"))).isInstanceOf(IllegalStateException.class);
 
-        assertThat(meters.get("messaging.send").tags("provider", "aws", "destination", "pedidos", "outcome", "success")
+        assertThat(meters.get("messaging.send.duration").tags("provider", "aws", "destination", "pedidos", "outcome", "success")
                 .timer().count()).isEqualTo(1);
-        assertThat(meters.get("messaging.send").tags("outcome", "error").timer().count()).isEqualTo(1);
+        assertThat(meters.get("messaging.send.duration").tags("outcome", "error").timer().count()).isEqualTo(1);
     }
 }

@@ -438,26 +438,42 @@ Com um `MeterRegistry` (nomes no Prometheus):
 | `inbox_messages_received_total` | `consumer`, `destination` | Cada entrega recebida |
 | `inbox_messages_processed_total` | `consumer`, `destination`, `outcome` | Resultado final de cada entrega |
 | `inbox_processing_duration_seconds` | `consumer`, `destination`, `outcome` | Da primeira execução ao efeito no broker |
-| `inbox_retry_total` | `consumer`, `destination`, `level`, `strategy`, `exception` | Retry agendado |
-| `inbox_dead_letter_total` | `consumer`, `destination`, `exception` | Cópia para a DLQ |
-| `inbox_failed_total` | `consumer`, `destination`, `reason`, `exception` | Cópia para a `failed` |
-| `inbox_retry_skipped_total` | `consumer`, `reason` | Nível 2 pulado (broker sem contagem) |
-| `inbox_attribute_budget_exceeded_total` | `consumer` | Atributos da inbox cortados (produtor com atributos demais) |
-| `inbox_effect_failed_total` | `consumer`, `effect` | Chamada ao broker falhou (`receive`, `ack`, cópia...) |
+| `inbox_messages_retried_total` | `consumer`, `destination`, `level`, `strategy`, `exception` | Retry agendado |
+| `inbox_messages_dead_lettered_total` | `consumer`, `destination`, `exception` | Cópia para a DLQ |
+| `inbox_messages_failed_total` | `consumer`, `destination`, `reason`, `exception` | Cópia para a `failed` |
+| `inbox_retries_skipped_total` | `consumer`, `destination`, `reason` | Nível 2 pulado (broker sem contagem) |
+| `inbox_attributes_budget_exceeded_total` | `consumer`, `destination` | Atributos da inbox cortados (produtor com atributos demais) |
+| `inbox_effects_failed_total` | `consumer`, `destination`, `effect` | Chamada ao broker falhou (`receive`, `ack`, cópia...) |
 | `inbox_message_age_seconds` | `consumer`, `destination` | Do instante do evento ao início do consumo |
+| `inbox_messages_in_flight` | `consumer`, `destination` | Gauge: entregues e ainda sem efeito no broker |
+| `inbox_handler_duration_seconds` | `consumer`, `destination`, `outcome` | Uma chamada do handler (`success` ou `error`) |
+| `inbox_idempotency_duration_seconds` | `consumer`, `destination`, `operation`, `outcome` | Chamada ao store de idempotência (`reserve`, `complete`, `release`) |
+| `inbox_delivery_attempts` | `consumer`, `destination`, `level` | Tentativas já gastas no nível, por entrega |
+| `inbox_hold_wait_duration_seconds` | `consumer`, `destination` | Espera planejada do `hold` |
+| `inbox_keepalives_failed_total` | `consumer`, `destination` | `keepAlive` que não começou: sem renovação de lease |
+| `inbox_failures_unexpected_total` | `consumer`, `destination`, `stage`, `exception` | Falha inesperada (`lane`, `delivery`, `dead_letter_pass`) |
+| `inbox_redrive_duration_seconds` | `consumer`, `source`, `target` | Duração de cada execução de redrive |
 | `inbox_last_receive_age_seconds` | `consumer` | Gauge: tempo desde o último `receive`. Cresceu = worker travado |
 | `inbox_dead_letter_passes_total` | `consumer`, `end` | Passadas do nível 3 |
-| `inbox_redrive_total` | `consumer`, `source`, `target`, `result` | Mensagens do redrive (`moved`, `skipped`, `error`) |
+| `inbox_redrives_ended_total` | `consumer`, `source`, `target`, `end` | Execuções de redrive, por como terminaram |
+| `inbox_messages_redriven_total` | `consumer`, `source`, `target`, `result` | Mensagens do redrive (`moved`, `skipped`, `error`) |
 
-`outcome`: `success`, `duplicate`, `discarded`, `retry_delayed`, `in_progress`, `dead_letter`, `failed`,
-`released`. `destination` é o nome do receiver; as passadas do nível 3 usam `<receiver>.dead-letter`.
+`outcome`: `success`, `duplicate`, `discarded`, `retry_delayed`, `retry_dead_letter`, `in_progress`, `dead_letter`,
+`failed`, `lease_expired`, `released`. `destination` é o nome do receiver; nas passadas do nível 3 é
+`<receiver>.dead-letter` e o `consumer` continua sendo o receiver.
 
 Com um `ObservationRegistry`, cada execução abre o span `inbox.consume` (kind `CONSUMER`), filho do `traceparent` da
 mensagem (ordem: `headers.traceparent` da outbox, CloudEvents, transporte). O span fica ativo durante o handler: o
-que ele publicar continua o mesmo trace.
+que ele publicar continua o mesmo trace. Com o `DefaultMeterObservationHandler` (padrão do Boot), a observation também
+gera `inbox_consume_seconds` e `inbox_consume_active_seconds`, uma por execução do pipeline, com as tags `consumer`,
+`destination`, `level` e `outcome` dos meters acima (mais `error`, do próprio Micrometer); detalhes no ADR-0007.
 
-Alertas sugeridos: `inbox_failed_total` crescendo; `inbox_last_receive_age_seconds` acima de alguns `poll-wait`;
-`inbox_effect_failed_total{effect="receive"}` crescendo.
+Referência completa de todas as métricas (inbox, transporte e observations): [docs/metricas.md](../docs/metricas.md).
+
+Alertas sugeridos: `inbox_messages_failed_total` crescendo; `inbox_last_receive_age_seconds` acima de alguns `poll-wait`;
+`inbox_effects_failed_total{effect="receive"}` crescendo; `inbox_failures_unexpected_total` acima de zero (era só log
+ERROR); `inbox_messages_processed_total{outcome="lease_expired"}` subindo (o `max-processing` ou o lease estão curtos
+para o handler); `inbox_messages_in_flight` parado em um valor alto (consumer travado dentro do handler).
 
 ## Shutdown
 

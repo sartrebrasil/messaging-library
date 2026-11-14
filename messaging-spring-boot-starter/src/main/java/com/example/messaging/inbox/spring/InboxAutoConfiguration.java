@@ -95,7 +95,7 @@ public class InboxAutoConfiguration {
         return lifecycle[0];
     }
 
-    /** Redrive of {@code failed} and the DLQ (ADR-0012), with {@code inbox.redrive} when Micrometer is there. */
+    /** Redrive of {@code failed} and the DLQ (ADR-0012), with {@code inbox.messages.redriven} when Micrometer is there. */
     @Bean
     @ConditionalOnMissingBean
     InboxRedrive inboxRedrive(InboxLifecycle lifecycle, ConfigurableListableBeanFactory beans) {

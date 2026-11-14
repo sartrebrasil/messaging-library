@@ -10,6 +10,7 @@ import com.example.messaging.inbox.retry.RetryDecision;
 import com.example.messaging.inbox.retry.RetryPolicy;
 
 import java.lang.reflect.Type;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -127,7 +128,8 @@ public final class Pipeline<T> {
         InboxMessage inbox = typed.message();
         Outcome outcome = observer.execution(inbox, () -> guard == null
                 ? run(typed, state, observer, pass)
-                : guard.apply(inbox, state, () -> run(typed, state, observer, pass), e -> storeFailure(e, state, pass)));
+                : guard.apply(inbox, state, observer, () -> run(typed, state, observer, pass),
+                        e -> storeFailure(e, state, pass)));
         return new Execution(outcome, inbox);
     }
 
@@ -143,9 +145,13 @@ public final class Pipeline<T> {
         ImmediateRetrier.Result result;
         try {
             result = retrier.execute(() -> {
+                long start = System.nanoTime();
                 try {
-                    return handler.handle(typed);
+                    HandlerResult handled = handler.handle(typed);
+                    observer.handled(typed.message(), Duration.ofNanos(System.nanoTime() - start), null);
+                    return handled;
                 } catch (Exception e) {
+                    observer.handled(typed.message(), Duration.ofNanos(System.nanoTime() - start), e);
                     failures.add(e);
                     throw e;
                 }

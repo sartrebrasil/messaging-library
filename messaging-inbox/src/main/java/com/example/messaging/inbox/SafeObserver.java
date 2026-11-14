@@ -62,6 +62,27 @@ final class SafeObserver implements ConsumerObserver {
     }
 
     @Override
+    public void keepAliveFailed(com.example.messaging.ReceivedMessage message, RuntimeException failure) {
+        run(() -> delegate.keepAliveFailed(message, failure));
+    }
+
+    @Override
+    public void unexpectedFailure(Stage stage, Throwable failure) {
+        run(() -> delegate.unexpectedFailure(stage, failure));
+    }
+
+    @Override
+    public void handled(InboxMessage message, java.time.Duration duration, Throwable failure) {
+        run(() -> delegate.handled(message, duration, failure));
+    }
+
+    @Override
+    public void idempotency(InboxMessage message, StoreCall call, java.time.Duration duration,
+                            RuntimeException failure) {
+        run(() -> delegate.idempotency(message, call, duration, failure));
+    }
+
+    @Override
     public void passEnded(PassEnd end, int processed) {
         run(() -> delegate.passEnded(end, processed));
     }

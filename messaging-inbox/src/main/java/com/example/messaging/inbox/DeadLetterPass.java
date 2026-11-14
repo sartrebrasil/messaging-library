@@ -99,6 +99,7 @@ final class DeadLetterPass {
             // returns it to the head would stall every later pass on it (T-88/B20 in the Worker)
             LOG.log(System.Logger.Level.ERROR, "Consumer " + settings.consumer() + ": unexpected failure on message "
                     + message.messageId() + " in a dead-letter pass; sent to failed", t);
+            observer.unexpectedFailure(ConsumerObserver.Stage.DEAD_LETTER_PASS, t);
             outcome = new Outcome.Failed(Outcome.FailureReason.NON_RETRYABLE,
                     AttemptState.from(message.attributes().get(AttemptState.ATTRIBUTE), 0), t,
                     "unexpected failure in a dead-letter pass");
@@ -107,7 +108,8 @@ final class DeadLetterPass {
             lease.close();
         }
         observer.delivered(new ConsumerObserver.Report(message, inbox, outcome, applied.effect(), settings.strategy(),
-                applied.retrySkipped(), applied.budgetExceeded(), Duration.ofNanos(System.nanoTime() - start)));
+                applied.retrySkipped(), applied.budgetExceeded(), Duration.ofNanos(System.nanoTime() - start),
+                applied.failedCall()));
         return applied.effect();
     }
 
@@ -117,6 +119,7 @@ final class DeadLetterPass {
         } catch (RuntimeException e) {
             LOG.log(System.Logger.Level.WARNING, "Consumer " + settings.consumer() + ": keepAlive of message "
                     + message.messageId() + " failed in a dead-letter pass; processing without lease renewal", e);
+            observer.keepAliveFailed(message, e);
             return NO_LEASE;
         }
     }

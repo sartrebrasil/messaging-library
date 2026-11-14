@@ -2,6 +2,7 @@ package com.example.messaging.inbox.spring;
 
 import com.example.messaging.inbox.ConsumerObserver;
 import com.example.messaging.inbox.redrive.InboxRedrive;
+import com.example.messaging.spring.MessagingProperties;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.observation.ObservationRegistry;
@@ -37,7 +38,7 @@ final class MicrometerSupport {
                     .tag("consumer", c.name())
                     .register(meters);
         }
-        return new MicrometerConsumerObserver(c.name(), c.name(), meters, observations, clock);
+        return new MicrometerConsumerObserver(c.name(), c.name(), system(c, beans), meters, observations, clock, false);
     }
 
     /** The level-3 passes of {@code c} (ADR-0002): its metrics under {@code <consumer>.dead-letter}, no liveness gauge. */
@@ -47,8 +48,28 @@ final class MicrometerSupport {
         if (meters == null && observations == null) {
             return ConsumerObserver.NONE;
         }
-        String name = c.name() + ".dead-letter";
-        return new MicrometerConsumerObserver(name, name, meters, observations, clock);
+        // same consumer as the main loop; the destination (the name of the DLQ receiver in the transport meters) tells
+        // the pass apart
+        return new MicrometerConsumerObserver(c.name(), c.name() + ".dead-letter", system(c, beans), meters,
+                observations, clock, true);
+    }
+
+    private static String system(InboxConfig.Consumer c, ListableBeanFactory beans) {
+        return system(c.provider(), beans.getBeanProvider(MessagingProperties.class).getIfAvailable());
+    }
+
+    /**
+     * The type of the receiver's provider, as the transport meters tag it. {@code provider} {@code null} means the
+     * only one. {@code "messaging"} when it cannot be told (a custom {@code InboxDestinations} without properties).
+     */
+    static String system(String provider, MessagingProperties properties) {
+        if (properties == null) {
+            return "messaging";
+        }
+        var providers = properties.providers();
+        var found = provider != null ? providers.get(provider)
+                : providers.size() == 1 ? providers.values().iterator().next() : null;
+        return found == null || found.type() == null ? "messaging" : found.type().tag();
     }
 
     static InboxRedrive metered(InboxRedrive redrive, ListableBeanFactory beans) {
