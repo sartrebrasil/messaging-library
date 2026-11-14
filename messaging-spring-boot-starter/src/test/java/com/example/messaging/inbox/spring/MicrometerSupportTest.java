@@ -7,6 +7,7 @@ import com.example.messaging.inbox.Outcome;
 import com.example.messaging.spring.MessagingProperties;
 import com.example.messaging.spring.MessagingProperties.Provider;
 import com.example.messaging.spring.MessagingProperties.Type;
+import com.example.messaging.spring.TestProviders;
 import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationHandler;
 import io.micrometer.observation.ObservationRegistry;
@@ -22,7 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class MicrometerSupportTest {
 
     private static Provider provider(Type type) {
-        return new Provider(type, null, null, null, null, null, "p", null, null, null, null);
+        return TestProviders.of(type);
     }
 
     @Test

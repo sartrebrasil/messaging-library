@@ -4,6 +4,7 @@ import com.example.messaging.MessageReceiver;
 import com.example.messaging.MessageSender;
 import com.example.messaging.rabbitmq.RabbitMessageReceiver;
 import com.example.messaging.rabbitmq.RabbitMessageSender;
+import com.example.messaging.spring.ClientBeans;
 import com.example.messaging.spring.MessagingProperties;
 import com.example.messaging.spring.ProviderConnection;
 import com.rabbitmq.client.Connection;
@@ -25,12 +26,15 @@ public final class RabbitProviderConnection implements ProviderConnection {
 
     private final Connection connection;
 
-    public RabbitProviderConnection(String providerName, MessagingProperties.Provider provider, ListableBeanFactory beans) {
+    public RabbitProviderConnection(String providerName, MessagingProperties.RabbitProvider provider, ListableBeanFactory beans,
+                                    boolean onlyOfItsType) {
         ConnectionFactory factory = provider.brokerUrl() != null
-                ? new ConnectionFactory() : beans.getBeanProvider(ConnectionFactory.class).getIfAvailable();
+                ? new ConnectionFactory()
+                : ClientBeans.find(beans, ConnectionFactory.class, providerName, onlyOfItsType);
         if (factory == null) {
             throw new IllegalStateException("messaging.providers." + providerName
-                    + ": defina broker-url ou declare um bean com.rabbitmq.client.ConnectionFactory");
+                    + ": defina broker-url ou declare um bean com.rabbitmq.client.ConnectionFactory ("
+                    + ClientBeans.namingHint(providerName, ConnectionFactory.class) + ")");
         }
         try {
             if (provider.brokerUrl() != null) {
@@ -60,10 +64,8 @@ public final class RabbitProviderConnection implements ProviderConnection {
         } else if (destination.topic() != null) {
             sender = RabbitMessageSender.forExchange(connection, destination.topic(),
                     destination.routingKey() != null ? destination.routingKey() : "", max);
-        } else if (destination.queue() != null) {
-            sender = RabbitMessageSender.forQueue(connection, destination.queue(), max);
         } else {
-            return null;
+            sender = RabbitMessageSender.forQueue(connection, destination.queue(), max);
         }
         return destination.confirmTimeout() != null ? sender.withConfirmTimeout(destination.confirmTimeout()) : sender;
     }
@@ -73,9 +75,6 @@ public final class RabbitProviderConnection implements ProviderConnection {
     public MessageReceiver receiver(String name, MessagingProperties.Destination destination,
                                     MessageSender deadLetterSender) {
         String queue = destination.subscription() != null ? destination.subscription() : destination.queue();
-        if (queue == null) {
-            return null;
-        }
         return new RabbitMessageReceiver(connection, queue,
                 destination.lease() != null ? destination.lease() : RabbitMessageReceiver.DEFAULT_LEASE,
                 deadLetterSender);

@@ -4,9 +4,11 @@ import org.springframework.boot.context.properties.bind.BindHandler;
 import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.bind.handler.NoUnboundElementsBindHandler;
+import org.springframework.boot.context.properties.source.ConfigurationPropertyName;
 
 import java.net.URI;
 import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
@@ -64,8 +66,41 @@ public record MessagingProperties(Map<String, Provider> providers, Map<String, S
                 });
         BindHandler strict = new NoUnboundElementsBindHandler(BindHandler.DEFAULT);
         return new MessagingProperties(
-                binder.bind("messaging.providers", Bindable.mapOf(String.class, Provider.class), strict).orElse(null),
+                bindProviders(binder, strict),
                 binder.bind("messaging.senders", Bindable.mapOf(String.class, Sender.class), strict).orElse(null));
+    }
+
+    /** Só para listar os providers e ler o {@code type} de cada um; o resto é de {@link #bindProviders}. */
+    record TypeOnly(Type type) {
+    }
+
+    /** Lê {@code type} de cada provider e liga o resto ao record daquele tipo, em modo estrito. */
+    private static Map<String, Provider> bindProviders(Binder binder, BindHandler strict) {
+        Map<String, Provider> providers = new LinkedHashMap<>();
+        Map<String, TypeOnly> types = binder.bind("messaging.providers", Bindable.mapOf(String.class, TypeOnly.class))
+                .orElse(Map.of());
+        // os nomes vêm de um mapa sem tipo de valor: um provider sem type não aparece em types
+        binder.bind("messaging.providers", Bindable.mapOf(String.class, Object.class)).orElse(Map.of()).keySet()
+                .forEach(name -> {
+                    TypeOnly typeOnly = types.get(name);
+                    if (typeOnly == null || typeOnly.type() == null) {
+                        throw new IllegalStateException("messaging.providers." + name + ".type é obrigatório (aws, azure, "
+                                + "gcp, activemq-classic, artemis ou rabbitmq)");
+                    }
+                    // adapt, não of: o nome vem como o usuário o escreveu (Aws_Prod), que of() recusa; com '.', só entre colchetes
+                    // ele é um elemento só
+                    ConfigurationPropertyName node = name.contains(".")
+                            ? ConfigurationPropertyName.of("messaging.providers[" + name + "]")
+                            : ConfigurationPropertyName.adapt("messaging.providers." + name, '.');
+                    providers.put(name, switch (typeOnly.type()) {
+                        case AWS -> binder.bind(node, Bindable.of(AwsProvider.class), strict).get();
+                        case AZURE -> binder.bind(node, Bindable.of(AzureProvider.class), strict).get();
+                        case GCP -> binder.bind(node, Bindable.of(GcpProvider.class), strict).get();
+                        case ACTIVEMQ_CLASSIC, ARTEMIS -> binder.bind(node, Bindable.of(JmsProvider.class), strict).get();
+                        case RABBITMQ -> binder.bind(node, Bindable.of(RabbitProvider.class), strict).get();
+                    });
+                });
+        return providers;
     }
 
     /** {@code activemq-classic}, {@code artemis} e {@code rabbitmq} no YAML. */
@@ -79,26 +114,55 @@ public record MessagingProperties(Map<String, Provider> providers, Map<String, S
     }
 
     /**
-     * Conexão com um provedor. Cada tipo usa só os seus campos:
-     *
-     * @param region           AWS: região; sem ela, a cadeia padrão do SDK
-     * @param endpoint         AWS: endpoint alternativo (LocalStack)
-     * @param accessKey        AWS: credencial estática; sem ela, a cadeia padrão do SDK
-     * @param secretKey        AWS: par de {@code accessKey}
-     * @param connectionString Azure: connection string do namespace; sem ela, um bean {@code ServiceBusClientBuilder}
-     * @param project          GCP: projeto, usado para completar nomes curtos de tópico e subscription
-     * @param emulatorHost     GCP: {@code host:porta} do emulator (canal sem TLS e sem credenciais)
-     * @param brokerUrl        ActiveMQ: URL do broker ({@code tcp://...}, {@code failover:(...)} no Classic); sem
-     *                         ela, o bean {@code jakarta.jms.ConnectionFactory} da aplicação, sem pool por cima.
-     *                         No Artemis, ganha {@code consumerWindowSize=0} quando não define a janela
-     *                         RabbitMQ: URI AMQP ({@code amqp://host:5672/vhost}); sem ela, o bean
-     *                         {@code com.rabbitmq.client.ConnectionFactory}
-     * @param user             ActiveMQ e RabbitMQ: usuário da conexão
-     * @param password         ActiveMQ e RabbitMQ: senha de {@code user}
+     * Conexão com um provedor. Cada tipo tem o seu record, escolhido por {@code type}: o binding é estrito, então um
+     * campo de outro tipo derruba o startup. {@code type} é o primeiro componente de cada record só para a chave
+     * {@code type} do YAML ter onde ligar.
      */
-    public record Provider(Type type, String region, URI endpoint, String accessKey, String secretKey,
-                           String connectionString, String project, String emulatorHost, String brokerUrl,
-                           String user, String password) {
+    public sealed interface Provider permits AwsProvider, AzureProvider, GcpProvider, JmsProvider, RabbitProvider {
+
+        Type type();
+    }
+
+    /**
+     * @param region    região; sem ela, a cadeia padrão do SDK
+     * @param endpoint  endpoint alternativo (LocalStack)
+     * @param accessKey credencial estática; sem ela, a cadeia padrão do SDK
+     * @param secretKey par de {@code accessKey}
+     */
+    public record AwsProvider(Type type, String region, URI endpoint, String accessKey, String secretKey)
+            implements Provider {
+    }
+
+    /** @param connectionString connection string do namespace; sem ela, um bean {@code ServiceBusClientBuilder} */
+    public record AzureProvider(Type type, String connectionString) implements Provider {
+    }
+
+    /**
+     * @param project      projeto, usado para completar nomes curtos de tópico e subscription
+     * @param emulatorHost {@code host:porta} do emulator (canal sem TLS e sem credenciais)
+     */
+    public record GcpProvider(Type type, String project, String emulatorHost) implements Provider {
+    }
+
+    /**
+     * ActiveMQ Classic ({@code activemq-classic}) ou Artemis ({@code artemis}).
+     *
+     * @param brokerUrl URL do broker ({@code tcp://...}, {@code failover:(...)} no Classic); sem ela, o bean
+     *                  {@code jakarta.jms.ConnectionFactory} da aplicação, sem pool por cima. No Artemis, ganha
+     *                  {@code consumerWindowSize=0} quando não define a janela
+     * @param user      usuário da conexão
+     * @param password  senha de {@code user}
+     */
+    public record JmsProvider(Type type, String brokerUrl, String user, String password) implements Provider {
+    }
+
+    /**
+     * @param brokerUrl URI AMQP ({@code amqp://host:5672/vhost}); sem ela, o bean
+     *                  {@code com.rabbitmq.client.ConnectionFactory}
+     * @param user      usuário da conexão
+     * @param password  senha de {@code user}
+     */
+    public record RabbitProvider(Type type, String brokerUrl, String user, String password) implements Provider {
     }
 
     /** Capacidades que um destino pode exigir no startup ({@code options.require}). */

@@ -4,9 +4,14 @@ import com.example.messaging.Capabilities;
 import com.example.messaging.DestinationNotFoundException;
 import com.example.messaging.MessageReceiver;
 import com.example.messaging.MessageSender;
+import com.example.messaging.spring.MessagingProperties.AwsProvider;
+import com.example.messaging.spring.MessagingProperties.AzureProvider;
 import com.example.messaging.spring.MessagingProperties.Destination;
 import com.example.messaging.spring.MessagingProperties.Endpoint;
+import com.example.messaging.spring.MessagingProperties.GcpProvider;
+import com.example.messaging.spring.MessagingProperties.JmsProvider;
 import com.example.messaging.spring.MessagingProperties.Provider;
+import com.example.messaging.spring.MessagingProperties.RabbitProvider;
 import com.example.messaging.spring.MessagingProperties.Requirement;
 import com.example.messaging.spring.MessagingProperties.Type;
 import com.example.messaging.spring.aws.AwsProviderConnection;
@@ -292,9 +297,6 @@ public final class MessagingDestinations implements AutoCloseable {
             return null;
         }
         Provider p = properties.providers().get(name);
-        if (p.type() == null) {
-            return null; // validateProviders já reportou
-        }
         Destination d = Endpoints.resolve(key, name, p, endpoint, receive, problems);
         return d == null ? null : new Resolved(name, d);
     }
@@ -332,10 +334,7 @@ public final class MessagingDestinations implements AutoCloseable {
 
     private void validateProviders(List<String> problems) {
         properties.providers().forEach((name, provider) -> {
-            if (provider.type() == null) {
-                problems.add("messaging.providers." + name
-                        + ".type é obrigatório (aws, azure, gcp, activemq-classic, artemis ou rabbitmq)");
-            } else if (!ClassUtils.isPresent(ADAPTERS.get(provider.type()), getClass().getClassLoader())) {
+            if (!ClassUtils.isPresent(ADAPTERS.get(provider.type()), getClass().getClassLoader())) {
                 problems.add("messaging.providers." + name + ": adicione a dependência " + MODULES.get(provider.type()));
             } else if (BROKER_CLIENTS.containsKey(provider.type())
                     && !ClassUtils.isPresent(BROKER_CLIENTS.get(provider.type())[0], getClass().getClassLoader())) {
@@ -347,13 +346,19 @@ public final class MessagingDestinations implements AutoCloseable {
 
     private void connect(ListableBeanFactory beans) {
         // as classes de cada provedor só são carregadas aqui, depois da checagem do adapter em validateProviders
-        properties.providers().forEach((name, provider) -> connections.put(name, switch (provider.type()) {
-            case AWS -> new AwsProviderConnection(provider, beans);
-            case AZURE -> new AzureProviderConnection(name, provider, beans);
-            case GCP -> new GcpProviderConnection(name, provider);
-            case ACTIVEMQ_CLASSIC, ARTEMIS -> new JmsProviderConnection(name, provider, beans);
-            case RABBITMQ -> new RabbitProviderConnection(name, provider, beans);
+        properties.providers().forEach((name, provider) -> connections.put(name, switch (provider) {
+            case AwsProvider p -> new AwsProviderConnection(name, p, beans, onlyOfItsType(p));
+            case AzureProvider p -> new AzureProviderConnection(name, p, beans, onlyOfItsType(p));
+            case GcpProvider p -> new GcpProviderConnection(name, p);
+            case JmsProvider p -> new JmsProviderConnection(name, p, beans, onlyOfItsType(p));
+            case RabbitProvider p -> new RabbitProviderConnection(name, p, beans, onlyOfItsType(p));
         }));
+    }
+
+    /** Nenhum outro provider usa o mesmo módulo (e, portanto, o mesmo tipo de cliente nativo). */
+    private boolean onlyOfItsType(Provider provider) {
+        return properties.providers().values().stream()
+                .filter(p -> MODULES.get(p.type()).equals(MODULES.get(provider.type()))).count() == 1;
     }
 
     /** Um sender não tem como provar capacidade do lado de quem recebe: essas exigências são de receiver. */

@@ -29,12 +29,12 @@ import java.io.IOException;
  */
 public final class GcpProviderConnection implements ProviderConnection {
 
-    private final MessagingProperties.Provider provider;
+    private final MessagingProperties.GcpProvider provider;
     private final ManagedChannel emulatorChannel;
     private final TransportChannelProvider channel;
     private final TopicAdminClient admin;
 
-    public GcpProviderConnection(String providerName, MessagingProperties.Provider provider) {
+    public GcpProviderConnection(String providerName, MessagingProperties.GcpProvider provider) {
         this.provider = provider;
         if (provider.emulatorHost() != null) {
             emulatorChannel = ManagedChannelBuilder.forTarget(provider.emulatorHost()).usePlaintext().build();
@@ -56,9 +56,6 @@ public final class GcpProviderConnection implements ProviderConnection {
 
     @Override
     public MessageSender sender(String name, MessagingProperties.Destination destination) {
-        if (destination.topic() == null) {
-            return null;
-        }
         Publisher.Builder builder = Publisher.newBuilder(topicName(destination.topic()));
         if (channel != null) {
             builder.setChannelProvider(channel).setCredentialsProvider(NoCredentialsProvider.create());
@@ -69,9 +66,6 @@ public final class GcpProviderConnection implements ProviderConnection {
     @Override
     public MessageReceiver receiver(String name, MessagingProperties.Destination destination,
                                     MessageSender deadLetterSender) {
-        if (destination.subscription() == null) {
-            return null;
-        }
         PubSubMessageReceiver.Options options = PubSubMessageReceiver.Options.ackDeadline(destination.ackDeadline())
                 .withOrderedDelivery(destination.ordered())
                 .withExactlyOnce(destination.exactlyOnce())

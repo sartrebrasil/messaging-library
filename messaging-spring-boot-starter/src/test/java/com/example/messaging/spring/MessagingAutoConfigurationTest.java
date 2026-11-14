@@ -101,7 +101,7 @@ class MessagingAutoConfigurationTest {
                 .run(context -> assertThat(context).getFailure().rootCause()
                         .hasMessageContaining("messaging.senders.sem-provider.provider 'nao-existe' não existe")
                         .hasMessageContaining("messaging.senders.sem-endereco.destination é obrigatório")
-                        .hasMessageContaining("messaging.senders.sessions.options.sessions só vale para o Service Bus")
+                        .hasMessageContaining("messaging.senders.sessions.options.sessions não se aplica ao provedor aws")
                         .hasMessageContaining("messaging.senders.topico.kind: topic exige um ARN do SNS"));
     }
 
@@ -240,9 +240,51 @@ class MessagingAutoConfigurationTest {
 
     @Test
     void durationOptionsBind() {
-        runner.withPropertyValues("messaging.senders.pedidos.destination=" + QUEUE + "pedidos",
+        runner.withPropertyValues("messaging.providers.gcp.type=gcp", "messaging.providers.gcp.project=p",
+                        "messaging.providers.gcp.emulator-host=localhost:8085",
+                        "messaging.senders.pedidos.provider=gcp", "messaging.senders.pedidos.destination=pedidos",
                         "messaging.senders.pedidos.options.ack-deadline=5s")
                 .run(context -> assertThat(context.getBean(MessagingProperties.class).senders().get("pedidos")
                         .options().ackDeadline()).isEqualTo(Duration.ofSeconds(5)));
+    }
+
+    @Test
+    void providerFieldOfAnotherTypeFails() {
+        runner.withPropertyValues("messaging.providers.r.type=rabbitmq", "messaging.providers.r.region=us-east-1")
+                .run(context -> assertThat(context).getFailure().rootCause()
+                        .hasMessageContaining("messaging.providers.r.region"));
+    }
+
+    @Test
+    void providerWithoutTypeFails() {
+        runner.withPropertyValues("messaging.providers.x.region=us-east-1")
+                .run(context -> assertThat(context).getFailure().rootCause().hasMessageContaining(
+                        "messaging.providers.x.type é obrigatório (aws, azure, gcp, activemq-classic, artemis ou rabbitmq)"));
+    }
+
+    @Test
+    void providerNamesWithUppercaseAndUnderscoreBind() {
+        runner.withPropertyValues("messaging.providers.Aws_Prod.type=aws", "messaging.providers.Aws_Prod.region=sa-east-1")
+                .run(context -> assertThat(context.getBean(MessagingProperties.class).providers().values())
+                        .filteredOn(p -> p instanceof MessagingProperties.AwsProvider aws
+                                && "sa-east-1".equals(aws.region()))
+                        .hasSize(1));
+    }
+
+    @Test
+    void typedProviderBindsFromEnvironmentVariables() {
+        runner.withInitializer(c -> c.getEnvironment().getPropertySources().addFirst(
+                        new org.springframework.core.env.SystemEnvironmentPropertySource("test-systemEnvironment", java.util.Map.of(
+                                "MESSAGING_PROVIDERS_ENVAWS_TYPE", "aws", "MESSAGING_PROVIDERS_ENVAWS_REGION", "us-west-2"))))
+                .run(context -> assertThat(context.getBean(MessagingProperties.class).providers().get("envaws"))
+                        .isInstanceOfSatisfying(MessagingProperties.AwsProvider.class,
+                                aws -> assertThat(aws.region()).isEqualTo("us-west-2")));
+    }
+
+    @Test
+    void providerNameWithADotBinds() {
+        runner.withPropertyValues("messaging.providers[a.b].type=aws", "messaging.providers[a.b].region=sa-east-1")
+                .run(context -> assertThat(context.getBean(MessagingProperties.class).providers())
+                        .containsKey("a.b"));
     }
 }

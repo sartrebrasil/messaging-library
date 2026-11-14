@@ -2,14 +2,20 @@ package com.example.messaging.spring;
 
 import com.example.messaging.spring.MessagingProperties.Destination;
 import com.example.messaging.spring.MessagingProperties.Endpoint;
+import com.example.messaging.spring.MessagingProperties.GcpProvider;
 import com.example.messaging.spring.MessagingProperties.Kind;
 import com.example.messaging.spring.MessagingProperties.Options;
 import com.example.messaging.spring.MessagingProperties.Provider;
 import com.example.messaging.spring.MessagingProperties.Redelivery;
 import com.example.messaging.spring.MessagingProperties.Type;
 
+import java.lang.reflect.RecordComponent;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Traduz um {@link Endpoint} ({@code destination}, {@code subscription}, {@code kind}, {@code options}) nos campos
@@ -20,6 +26,25 @@ public final class Endpoints {
 
     private static final String VIRTUAL_TOPIC = "VirtualTopic.";
     private static final String SNS_ARN = "arn:aws:sns:";
+
+    /**
+     * Opção ({@code options.<nome>}, em kebab-case) → provedores que a aceitam. Opção definida fora da lista derruba o
+     * startup em vez de ser ignorada; todo componente de {@link Options} precisa estar aqui.
+     */
+    static final Map<String, Set<Type>> ACCEPTED = Map.ofEntries(
+            Map.entry("require", EnumSet.allOf(Type.class)),
+            Map.entry("max-message-bytes", EnumSet.of(Type.AWS, Type.AZURE, Type.ACTIVEMQ_CLASSIC, Type.ARTEMIS,
+                    Type.RABBITMQ)),
+            Map.entry("sessions", EnumSet.of(Type.AZURE)),
+            Map.entry("dead-letter-queue", EnumSet.of(Type.AZURE)),
+            Map.entry("redelivery", EnumSet.of(Type.AZURE, Type.ACTIVEMQ_CLASSIC, Type.ARTEMIS, Type.RABBITMQ)),
+            Map.entry("ack-deadline", EnumSet.of(Type.GCP)),
+            Map.entry("ordered", EnumSet.of(Type.GCP)),
+            Map.entry("exactly-once", EnumSet.of(Type.GCP)),
+            Map.entry("lease", EnumSet.of(Type.ACTIVEMQ_CLASSIC, Type.ARTEMIS, Type.RABBITMQ)),
+            Map.entry("routing-key", EnumSet.of(Type.RABBITMQ)),
+            Map.entry("routing-by-ordering-key", EnumSet.of(Type.RABBITMQ)),
+            Map.entry("confirm-timeout", EnumSet.of(Type.RABBITMQ)));
 
     private Endpoints() {
     }
@@ -94,7 +119,7 @@ public final class Endpoints {
                 } else {
                     topic = dest;
                 }
-                if (provider.project() == null && !dest.startsWith("projects/")) {
+                if (((GcpProvider) provider).project() == null && !dest.startsWith("projects/")) {
                     problems.add(key + ".destination: nome curto exige messaging.providers." + providerName
                             + ".project");
                 }
@@ -112,12 +137,33 @@ public final class Endpoints {
             }
         }
         Options o = e.options();
+        rejectNotAccepted(key + ".options", type, o, problems);
         Destination d = new Destination(queueUrl, topicArn, queue, topic, subscription, o.require(),
                 is(o.sessions()), o.redelivery(), o.maxMessageBytes(), o.ackDeadline(), is(o.ordered()),
                 is(o.exactlyOnce()), is(o.deadLetterQueue()), o.lease(), o.routingKey(),
                 is(o.routingByOrderingKey()), o.confirmTimeout());
         validateOptions(key + ".options", type, d, receive, problems);
         return d;
+    }
+
+    /** Só conta como definida a opção com valor diferente do padrão ({@code null}, {@code false}, vazio, {@code ABANDON}). */
+    private static void rejectNotAccepted(String prefix, Type type, Options options, List<String> problems) {
+        for (RecordComponent component : Options.class.getRecordComponents()) {
+            String name = component.getName().replaceAll("([A-Z])", "-$1").toLowerCase(Locale.ROOT);
+            Object value;
+            try {
+                value = component.getAccessor().invoke(options);
+            } catch (ReflectiveOperationException ex) {
+                throw new IllegalStateException(ex);
+            }
+            boolean set = value != null && !Boolean.FALSE.equals(value) && value != Redelivery.ABANDON
+                    && !(value instanceof Set<?> s && s.isEmpty());
+            Set<Type> accepted = ACCEPTED.get(name);
+            if (set && !accepted.contains(type)) {
+                problems.add(prefix + "." + name + " não se aplica ao provedor " + type.tag() + "; vale para: "
+                        + accepted.stream().map(Type::tag).sorted().collect(Collectors.joining(", ")));
+            }
+        }
     }
 
     private static void validateOptions(String prefix, Type type, Destination d, boolean receive,
@@ -147,29 +193,17 @@ public final class Endpoints {
         if (d.lease() != null && (d.lease().isNegative() || d.lease().isZero())) {
             problems.add(prefix + ".lease precisa ser positivo");
         }
-        if (d.routingKey() != null && (type != Type.RABBITMQ || d.topic() == null)) {
+        if (d.routingKey() != null && d.topic() == null) {
             problems.add(prefix + ".routing-key só vale para o RabbitMQ com kind: topic (exchange)");
         }
-        if (d.routingByOrderingKey() && (type != Type.RABBITMQ || d.topic() == null)) {
+        if (d.routingByOrderingKey() && d.topic() == null) {
             problems.add(prefix + ".routing-by-ordering-key só vale para o RabbitMQ com kind: topic (exchange)");
-        }
-        if (d.confirmTimeout() != null && type != Type.RABBITMQ) {
-            problems.add(prefix + ".confirm-timeout só vale para o RabbitMQ");
         }
         if (d.confirmTimeout() != null && (d.confirmTimeout().isNegative() || d.confirmTimeout().isZero())) {
             problems.add(prefix + ".confirm-timeout precisa ser positivo");
         }
         if (d.routingByOrderingKey() && d.routingKey() != null) {
             problems.add(prefix + ".routing-by-ordering-key não combina com routing-key");
-        }
-        if (d.lease() != null && type != Type.ACTIVEMQ_CLASSIC && type != Type.ARTEMIS && type != Type.RABBITMQ) {
-            problems.add(prefix + ".lease só vale para o ActiveMQ e o RabbitMQ; nos outros, o lease é do destino");
-        }
-        if (d.sessions() && type != Type.AZURE) {
-            problems.add(prefix + ".sessions só vale para o Service Bus");
-        }
-        if (d.deadLetterQueue() && type != Type.AZURE) {
-            problems.add(prefix + ".dead-letter-queue só vale para o Service Bus; nos outros, a DLQ é um destino comum");
         }
     }
 

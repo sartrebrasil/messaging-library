@@ -6,6 +6,7 @@ import com.example.messaging.MessageSender;
 import com.example.messaging.azure.ServiceBusMessageReceiver;
 import com.example.messaging.azure.ServiceBusMessageSender;
 import com.example.messaging.azure.ServiceBusSessionMessageReceiver;
+import com.example.messaging.spring.ClientBeans;
 import com.example.messaging.spring.MessagingProperties;
 import com.example.messaging.spring.ProviderConnection;
 import org.springframework.beans.factory.ListableBeanFactory;
@@ -13,21 +14,23 @@ import org.springframework.beans.factory.ListableBeanFactory;
 /**
  * Service Bus. Com {@code connection-string}, um {@link ServiceBusClientBuilder} por provider
  * (a conexão AMQP é compartilhada pelos clientes do builder); sem ela, o bean
- * {@code ServiceBusClientBuilder} da aplicação. Os clientes são fechados pelos próprios
+ * {@code ServiceBusClientBuilder} da aplicação ({@link ClientBeans}). Os clientes são fechados pelos próprios
  * senders e receivers ({@code for*}).
  */
 public final class AzureProviderConnection implements ProviderConnection {
 
     private final ServiceBusClientBuilder builder;
 
-    public AzureProviderConnection(String providerName, MessagingProperties.Provider provider, ListableBeanFactory beans) {
+    public AzureProviderConnection(String providerName, MessagingProperties.AzureProvider provider, ListableBeanFactory beans,
+                                   boolean onlyOfItsType) {
         if (provider.connectionString() != null) {
             builder = new ServiceBusClientBuilder().connectionString(provider.connectionString());
         } else {
-            builder = beans.getBeanProvider(ServiceBusClientBuilder.class).getIfAvailable();
+            builder = ClientBeans.find(beans, ServiceBusClientBuilder.class, providerName, onlyOfItsType);
             if (builder == null) {
                 throw new IllegalStateException("messaging.providers." + providerName
-                        + ": defina connection-string ou declare um bean ServiceBusClientBuilder");
+                        + ": defina connection-string ou declare um bean ServiceBusClientBuilder ("
+                        + ClientBeans.namingHint(providerName, ServiceBusClientBuilder.class) + ")");
             }
         }
     }
@@ -35,14 +38,10 @@ public final class AzureProviderConnection implements ProviderConnection {
     @Override
     public MessageSender sender(String name, MessagingProperties.Destination destination) {
         long max = maxMessageBytes(destination);
-        if (destination.deadLetterQueue()) {
-            return null;
-        }
         if (destination.topic() != null) {
             return ServiceBusMessageSender.forTopic(builder, destination.topic(), destination.sessions(), max);
         }
-        return destination.queue() == null ? null
-                : ServiceBusMessageSender.forQueue(builder, destination.queue(), destination.sessions(), max);
+        return ServiceBusMessageSender.forQueue(builder, destination.queue(), destination.sessions(), max);
     }
 
     @Override
@@ -61,9 +60,6 @@ public final class AzureProviderConnection implements ProviderConnection {
                     ? ServiceBusSessionMessageReceiver.forSubscription(builder, destination.topic(),
                     destination.subscription(), max)
                     : ServiceBusMessageReceiver.forSubscription(builder, destination.topic(), destination.subscription(), max);
-        }
-        if (destination.queue() == null) {
-            return null;
         }
         if (destination.sessions()) {
             return ServiceBusSessionMessageReceiver.forQueue(builder, destination.queue(), max);
