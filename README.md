@@ -283,7 +283,7 @@ falha, porque o `checkAccess` precisa da `ActiveMQConnection`. Nesse caso, use `
 - Clientes: beans `SqsClient`/`SnsClient` e `ServiceBusClientBuilder` da aplicação são
   reaproveitados; sem eles, o starter cria e fecha os seus. No GCP, credenciais padrão do Google,
   ou `emulator-host` para o emulator.
-- Métricas (com `MeterRegistry`): timers `messaging.send.duration`, `messaging.receive.duration`, `messaging.ack.duration`,
+- Métricas (com `MeterRegistry`; referência completa em [docs/metricas.md](docs/metricas.md)): timers `messaging.send.duration`, `messaging.receive.duration`, `messaging.ack.duration`,
   `messaging.nack.duration`, `messaging.dead.letter.duration` com `provider`, `destination`, `exception` (nome simples da classe lançada, ou `none`) e `outcome`
   (`success`, `error` e, em lote com falha parcial, `partial`; `send` e `ack` têm também `batch`), a
   distribuição `messaging.receive.messages`, o counter `messaging.messages.failed` (uma contagem por mensagem que

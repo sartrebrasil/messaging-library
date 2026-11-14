@@ -1,5 +1,7 @@
 # Backlog de métricas
 
+O estado atual de todas as métricas está em [metricas.md](metricas.md); este arquivo guarda o histórico das decisões.
+
 Saiu da revisão de 2026-11-13 das métricas do starter (`MicrometerConsumerObserver`, `MicrometerSupport`,
 `MeteredInboxRedrive`, `ObservedMessageSender`, `MeteredMessageReceiver`) contra o ADR-0007 da inbox e o ADR-0008 da
 messaging-lib. A ordem sugerida é: grupo 1 (nomes) primeiro, porque renomear depois das métricas novas dobra o

@@ -32,6 +32,9 @@ as registra.
 
 ### Métricas
 
+Referência completa, com o que cada meter mede, valores de tag, consultas e armadilhas:
+[docs/metricas.md](../../../docs/metricas.md). A tabela abaixo é a decisão; o arquivo é o estado atual.
+
 | Métrica | Tipo | Tags | Quando incrementa |
 |---|---|---|---|
 | `inbox_messages_received_total` | counter | `consumer`, `destination` | Toda mensagem entregue pelo broker, inclusive reentregas |

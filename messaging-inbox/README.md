@@ -468,6 +468,8 @@ que ele publicar continua o mesmo trace. Com o `DefaultMeterObservationHandler` 
 gera `inbox_consume_seconds` e `inbox_consume_active_seconds`, uma por execução do pipeline, com as tags `consumer`,
 `destination`, `level` e `outcome` dos meters acima (mais `error`, do próprio Micrometer); detalhes no ADR-0007.
 
+Referência completa de todas as métricas (inbox, transporte e observations): [docs/metricas.md](../docs/metricas.md).
+
 Alertas sugeridos: `inbox_messages_failed_total` crescendo; `inbox_last_receive_age_seconds` acima de alguns `poll-wait`;
 `inbox_effects_failed_total{effect="receive"}` crescendo; `inbox_failures_unexpected_total` acima de zero (era só log
 ERROR); `inbox_messages_processed_total{outcome="lease_expired"}` subindo (o `max-processing` ou o lease estão curtos
