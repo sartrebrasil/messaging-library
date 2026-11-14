@@ -56,9 +56,6 @@ public final class GcpProviderConnection implements ProviderConnection {
 
     @Override
     public MessageSender sender(String name, MessagingProperties.Destination destination) {
-        if (destination.topic() == null) {
-            return null;
-        }
         Publisher.Builder builder = Publisher.newBuilder(topicName(destination.topic()));
         if (channel != null) {
             builder.setChannelProvider(channel).setCredentialsProvider(NoCredentialsProvider.create());
@@ -69,9 +66,6 @@ public final class GcpProviderConnection implements ProviderConnection {
     @Override
     public MessageReceiver receiver(String name, MessagingProperties.Destination destination,
                                     MessageSender deadLetterSender) {
-        if (destination.subscription() == null) {
-            return null;
-        }
         PubSubMessageReceiver.Options options = PubSubMessageReceiver.Options.ackDeadline(destination.ackDeadline())
                 .withOrderedDelivery(destination.ordered())
                 .withExactlyOnce(destination.exactlyOnce())

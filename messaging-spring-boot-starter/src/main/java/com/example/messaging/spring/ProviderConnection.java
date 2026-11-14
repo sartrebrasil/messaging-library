@@ -10,11 +10,11 @@ import com.example.messaging.MessageSender;
  */
 public interface ProviderConnection extends AutoCloseable {
 
-    /** {@code destination} já validado por {@link Endpoints} para envio. */
+    /** {@code destination} já validado por {@link Endpoints} para envio; nunca devolve {@code null}. */
     MessageSender sender(String name, MessagingProperties.Destination destination);
 
     /**
-     * {@code destination} já validado por {@link Endpoints} para recebimento.
+     * {@code destination} já validado por {@link Endpoints} para recebimento; nunca devolve {@code null}.
      *
      * @param deadLetterSender sender do destino {@code dead-letter}; {@code null} sem DLQ
      */

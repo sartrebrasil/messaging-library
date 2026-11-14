@@ -37,14 +37,10 @@ public final class AzureProviderConnection implements ProviderConnection {
     @Override
     public MessageSender sender(String name, MessagingProperties.Destination destination) {
         long max = maxMessageBytes(destination);
-        if (destination.deadLetterQueue()) {
-            return null;
-        }
         if (destination.topic() != null) {
             return ServiceBusMessageSender.forTopic(builder, destination.topic(), destination.sessions(), max);
         }
-        return destination.queue() == null ? null
-                : ServiceBusMessageSender.forQueue(builder, destination.queue(), destination.sessions(), max);
+        return ServiceBusMessageSender.forQueue(builder, destination.queue(), destination.sessions(), max);
     }
 
     @Override
@@ -63,9 +59,6 @@ public final class AzureProviderConnection implements ProviderConnection {
                     ? ServiceBusSessionMessageReceiver.forSubscription(builder, destination.topic(),
                     destination.subscription(), max)
                     : ServiceBusMessageReceiver.forSubscription(builder, destination.topic(), destination.subscription(), max);
-        }
-        if (destination.queue() == null) {
-            return null;
         }
         if (destination.sessions()) {
             return ServiceBusSessionMessageReceiver.forQueue(builder, destination.queue(), max);

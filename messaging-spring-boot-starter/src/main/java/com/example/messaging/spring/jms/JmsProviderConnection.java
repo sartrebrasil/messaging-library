@@ -61,8 +61,7 @@ public final class JmsProviderConnection implements ProviderConnection {
         if (destination.topic() != null) {
             return JmsMessageSender.forTopic(connection, dialect, destination.topic(), max);
         }
-        return destination.queue() == null ? null
-                : JmsMessageSender.forQueue(connection, dialect, destination.queue(), max);
+        return JmsMessageSender.forQueue(connection, dialect, destination.queue(), max);
     }
 
     @Override
@@ -71,9 +70,6 @@ public final class JmsProviderConnection implements ProviderConnection {
         String queue = destination.subscription() != null
                 ? dialect.subscriptionQueue(destination.topic(), destination.subscription())
                 : destination.queue();
-        if (queue == null) {
-            return null;
-        }
         JmsMessageReceiver.Redelivery redelivery = destination.redelivery() == MessagingProperties.Redelivery.RESCHEDULE
                 ? JmsMessageReceiver.Redelivery.SCHEDULED : JmsMessageReceiver.Redelivery.IMMEDIATE;
         return new JmsMessageReceiver(connection, dialect, queue,
