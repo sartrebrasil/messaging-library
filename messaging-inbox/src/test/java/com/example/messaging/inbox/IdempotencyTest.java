@@ -190,6 +190,40 @@ class IdempotencyTest {
         assertEquals(new Outcome.Ack(Outcome.AckReason.DUPLICATE), p.handle(outbox("a"), "q", 0));
     }
 
+    @Test
+    void theObserverSeesTheHandlerAndEveryStoreCall() {
+        var seen = new java.util.ArrayList<String>();
+        var observer = new ConsumerObserver() {
+            @Override
+            public void handled(InboxMessage message, Duration duration, Throwable failure) {
+                seen.add(failure == null ? "handler" : "handler failed");
+            }
+
+            @Override
+            public void idempotency(InboxMessage message, StoreCall call, Duration duration, RuntimeException failure) {
+                seen.add(failure == null ? call.name() : call.name() + " failed");
+            }
+        };
+
+        pipeline(new InMemoryIdempotencyStore(CLOCK), m -> null).process(outbox("a"), "q", 0, observer);
+        assertEquals(List.of("RESERVE", "handler", "COMPLETE"), seen);
+
+        seen.clear();
+        pipeline(new InMemoryIdempotencyStore(CLOCK), m -> {
+            throw new Down();
+        }).process(outbox("a"), "q", 0, observer);
+        assertEquals(List.of("RESERVE", "handler failed", "RELEASE"), seen);
+
+        seen.clear();
+        pipeline(new Delegating(store) {
+            @Override
+            public Optional<IdempotencyRecord> reserve(IdempotencyRecord candidate) {
+                throw new Down();
+            }
+        }, m -> null).process(outbox("a"), "q", 0, observer);
+        assertEquals(List.of("RESERVE failed"), seen);
+    }
+
     private Pipeline<String> pipeline(IdempotencyStore s, InboxResultHandler<String> handler) {
         return new Pipeline<>("billing", new EnvelopeReader(EnvelopeMode.AUTO), (m, t) -> m.payloadAsString(),
                 String.class, m -> {

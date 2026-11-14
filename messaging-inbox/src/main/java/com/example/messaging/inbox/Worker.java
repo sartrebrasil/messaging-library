@@ -186,7 +186,7 @@ final class Worker implements Runnable {
     }
 
     /** Lanes never throw (handle catches everything but OutOfMemoryError); shutdown waits for them to finish. */
-    private static void await(Future<?> lane) {
+    private void await(Future<?> lane) {
         boolean interrupted = false;
         try {
             while (true) {
@@ -200,6 +200,7 @@ final class Worker implements Runnable {
                         throw oom;
                     }
                     LOG.log(System.Logger.Level.ERROR, "inbox lane failed", e.getCause());
+                    observer.unexpectedFailure(ConsumerObserver.Stage.LANE, e.getCause());
                     return;
                 }
             }
@@ -216,6 +217,7 @@ final class Worker implements Runnable {
         } catch (RuntimeException e) {
             LOG.log(System.Logger.Level.WARNING, "Consumer " + settings.consumer() + ": keepAlive of message "
                     + message.messageId() + " failed; processing without lease renewal", e);
+            observer.keepAliveFailed(message, e);
             return NO_LEASE;
         }
     }
@@ -261,6 +263,7 @@ final class Worker implements Runnable {
             // Errors too (StackOverflowError, AssertionError, NoClassDefFoundError): the worker must not die (T-88/B20)
             LOG.log(System.Logger.Level.ERROR, "Consumer " + settings.consumer() + ": unexpected failure on message "
                     + message.messageId() + "; released", t);
+            observer.unexpectedFailure(ConsumerObserver.Stage.DELIVERY, t);
             outcome = Outcome.RELEASE;
             applied = applier.release(receiver, message, Effect.RELEASED);
         }
@@ -291,7 +294,8 @@ final class Worker implements Runnable {
     private void report(ReceivedMessage message, InboxMessage inbox, Outcome outcome, OutcomeApplier.Applied applied,
                         long startNanos) {
         observer.delivered(new ConsumerObserver.Report(message, inbox, outcome, applied.effect(), strategy,
-                applied.retrySkipped(), applied.budgetExceeded(), Duration.ofNanos(System.nanoTime() - startNanos)));
+                applied.retrySkipped(), applied.budgetExceeded(), Duration.ofNanos(System.nanoTime() - startNanos),
+                applied.failedCall()));
     }
 
     private static final KeepAlive NO_LEASE = new KeepAlive() {
