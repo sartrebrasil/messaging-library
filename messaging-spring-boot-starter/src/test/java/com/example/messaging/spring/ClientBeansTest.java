@@ -9,6 +9,10 @@ import software.amazon.awssdk.services.sns.SnsClient;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.GetQueueUrlResponse;
 
+import jakarta.jms.Connection;
+import jakarta.jms.ConnectionFactory;
+import jakarta.jms.JMSException;
+
 import java.lang.reflect.Proxy;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -136,5 +140,46 @@ class ClientBeansTest {
         runner.withPropertyValues("messaging.providers.a.type=azure", "messaging.providers.a.connection-string=" + AZURE)
                 .withBean(ServiceBusClientBuilder.class, ServiceBusClientBuilder::new)
                 .run(context -> assertThat(context).hasNotFailed());
+    }
+
+    /** Uma fábrica JMS que falha com {@code failure} ({@code BEAN-USED} na mensagem) ou, sem ela, conecta num stub. */
+    private static ConnectionFactory jms(String failure) {
+        Connection connection = (Connection) Proxy.newProxyInstance(Connection.class.getClassLoader(),
+                new Class<?>[]{Connection.class}, (proxy, method, args) -> null);
+        return (ConnectionFactory) Proxy.newProxyInstance(ConnectionFactory.class.getClassLoader(),
+                new Class<?>[]{ConnectionFactory.class}, (proxy, method, args) -> {
+                    if (failure != null) {
+                        throw new JMSException(failure);
+                    }
+                    return connection;
+                });
+    }
+
+    @Test
+    void jmsNamedBeanIsUsedWithTwoProviders() {
+        runner.withPropertyValues("messaging.providers.j1.type=artemis", "messaging.providers.j2.type=activemq-classic")
+                .withBean("j1", ConnectionFactory.class, () -> jms("BEAN-USED"))
+                .withBean("j2", ConnectionFactory.class, () -> jms(null))
+                .run(context -> assertThat(context).getFailure().rootCause().isNotNull()
+                        .hasMessageContaining("BEAN-USED"));
+    }
+
+    @Test
+    void jmsUnnamedBeanIsIgnoredWithTwoProviders() {
+        runner.withPropertyValues("messaging.providers.j1.type=artemis", "messaging.providers.j2.type=activemq-classic")
+                .withBean(ConnectionFactory.class, () -> jms("BEAN-USED"))
+                .withBean("j2", ConnectionFactory.class, () -> jms(null))
+                .run(context -> assertThat(context).getFailure().rootCause()
+                        .hasMessageContaining("messaging.providers.j1: defina broker-url ou declare um bean"));
+    }
+
+    @Test
+    void jmsBrokerUrlWinsOverAnUnnamedBean() {
+        runner.withPropertyValues("messaging.providers.j.type=activemq-classic",
+                        "messaging.providers.j.broker-url=tcp://localhost:1?connectionTimeout=500")
+                .withBean(ConnectionFactory.class, () -> jms("BEAN-USED"))
+                .run(context -> assertThat(context).getFailure()
+                        .hasStackTraceContaining("não conectou ao broker")
+                        .satisfies(e -> assertThat(e.toString()).doesNotContain("BEAN-USED")));
     }
 }

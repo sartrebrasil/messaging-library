@@ -5,6 +5,7 @@ import com.example.messaging.MessageSender;
 import com.example.messaging.jms.JmsDialect;
 import com.example.messaging.jms.JmsMessageReceiver;
 import com.example.messaging.jms.JmsMessageSender;
+import com.example.messaging.spring.ClientBeans;
 import com.example.messaging.spring.MessagingProperties;
 import com.example.messaging.spring.ProviderConnection;
 import jakarta.jms.Connection;
@@ -15,7 +16,7 @@ import org.springframework.beans.factory.ListableBeanFactory;
 /**
  * ActiveMQ Classic e Artemis (ADR-0009). Uma {@link Connection} por provider, compartilhada pelos
  * senders e receivers, criada com {@code broker-url} ou com o bean {@link ConnectionFactory} da
- * aplicação. A conexão é aberta no startup e fechada no {@link #close()}.
+ * aplicação (regra de {@link ClientBeans}). A conexão é aberta no startup e fechada no {@link #close()}.
  *
  * <ul>
  *   <li>No Artemis, {@code broker-url} ganha {@code consumerWindowSize=0} quando não define a
@@ -30,12 +31,13 @@ public final class JmsProviderConnection implements ProviderConnection {
     private final JmsDialect dialect;
     private final Connection connection;
 
-    public JmsProviderConnection(String providerName, MessagingProperties.Provider provider, ListableBeanFactory beans) {
+    public JmsProviderConnection(String providerName, MessagingProperties.Provider provider, ListableBeanFactory beans,
+                                 boolean onlyOfItsType) {
         this.dialect = provider.type() == MessagingProperties.Type.ARTEMIS
                 ? JmsDialect.ARTEMIS : JmsDialect.ACTIVEMQ_CLASSIC;
         ConnectionFactory factory = provider.brokerUrl() != null
                 ? dialect.connectionFactory(provider.brokerUrl())
-                : beans.getBeanProvider(ConnectionFactory.class).getIfAvailable();
+                : ClientBeans.find(beans, ConnectionFactory.class, providerName, onlyOfItsType);
         if (factory == null) {
             throw new IllegalStateException("messaging.providers." + providerName
                     + ": defina broker-url ou declare um bean jakarta.jms.ConnectionFactory");
