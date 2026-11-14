@@ -23,7 +23,7 @@ class EndpointsTest {
     private final List<String> problems = new ArrayList<>();
 
     private static Provider provider(Type type) {
-        return new Provider(type, null, null, null, null, null, "p", null, null, null, null);
+        return TestProviders.of(type);
     }
 
     private Destination receive(Type type, String destination, String subscription) {

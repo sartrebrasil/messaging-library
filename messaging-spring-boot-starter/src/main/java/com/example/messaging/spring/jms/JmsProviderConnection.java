@@ -31,7 +31,7 @@ public final class JmsProviderConnection implements ProviderConnection {
     private final JmsDialect dialect;
     private final Connection connection;
 
-    public JmsProviderConnection(String providerName, MessagingProperties.Provider provider, ListableBeanFactory beans,
+    public JmsProviderConnection(String providerName, MessagingProperties.JmsProvider provider, ListableBeanFactory beans,
                                  boolean onlyOfItsType) {
         this.dialect = provider.type() == MessagingProperties.Type.ARTEMIS
                 ? JmsDialect.ARTEMIS : JmsDialect.ACTIVEMQ_CLASSIC;

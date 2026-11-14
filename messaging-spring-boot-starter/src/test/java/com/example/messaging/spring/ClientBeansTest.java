@@ -63,7 +63,19 @@ class ClientBeansTest {
                 .withBean(SnsClient.class, () -> counting(SnsClient.class, calls))
                 .run(context -> assertThat(context).getFailure().rootCause()
                         .hasMessageContaining("messaging.providers.aws")
-                        .hasMessageContaining("SqsClient"));
+                        .hasMessageContaining("SqsClient e SnsClient"));
+    }
+
+    @Test
+    void awsBeanForOneClientLeavesThePropertiesToTheOther() {
+        List<String> calls = new CopyOnWriteArrayList<>();
+        runner.withPropertyValues("messaging.providers.aws.type=aws", "messaging.providers.aws.region=us-east-1")
+                .withBean(SqsClient.class, () -> counting(SqsClient.class, calls))
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    context.getBean(MessagingDestinations.class).sender("s", null, named("nome-da-fila"));
+                    assertThat(calls).contains("getQueueUrl");
+                });
     }
 
     @Test

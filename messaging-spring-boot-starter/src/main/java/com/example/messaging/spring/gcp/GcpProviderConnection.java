@@ -29,12 +29,12 @@ import java.io.IOException;
  */
 public final class GcpProviderConnection implements ProviderConnection {
 
-    private final MessagingProperties.Provider provider;
+    private final MessagingProperties.GcpProvider provider;
     private final ManagedChannel emulatorChannel;
     private final TransportChannelProvider channel;
     private final TopicAdminClient admin;
 
-    public GcpProviderConnection(String providerName, MessagingProperties.Provider provider) {
+    public GcpProviderConnection(String providerName, MessagingProperties.GcpProvider provider) {
         this.provider = provider;
         if (provider.emulatorHost() != null) {
             emulatorChannel = ManagedChannelBuilder.forTarget(provider.emulatorHost()).usePlaintext().build();

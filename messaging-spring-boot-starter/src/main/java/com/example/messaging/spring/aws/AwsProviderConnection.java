@@ -40,15 +40,12 @@ public final class AwsProviderConnection implements ProviderConnection {
     /** URL de cada nome de fila, resolvida uma vez ({@code GetQueueUrl}). */
     private final Map<String, String> queueUrls = new ConcurrentHashMap<>();
 
-    public AwsProviderConnection(String providerName, MessagingProperties.Provider provider, ListableBeanFactory beans,
+    public AwsProviderConnection(String providerName, MessagingProperties.AwsProvider provider, ListableBeanFactory beans,
                                  boolean onlyOfItsType) {
         SqsClient userSqs = ClientBeans.find(beans, SqsClient.class, providerName, onlyOfItsType);
         SnsClient userSns = ClientBeans.find(beans, SnsClient.class, providerName, onlyOfItsType);
-        if (userSqs != null) {
-            rejectConnectionFields(providerName, provider, "SqsClient");
-        }
-        if (userSns != null) {
-            rejectConnectionFields(providerName, provider, "SnsClient");
+        if (userSqs != null && userSns != null) {
+            rejectConnectionFields(providerName, provider);
         }
         this.ownsSqs = userSqs == null;
         this.ownsSns = userSns == null;
@@ -56,17 +53,20 @@ public final class AwsProviderConnection implements ProviderConnection {
         this.sns = ownsSns ? configure(SnsClient.builder(), provider).build() : userSns;
     }
 
-    /** O bean da aplicação vence; as properties de conexão seriam ignoradas em silêncio. */
-    private static void rejectConnectionFields(String providerName, MessagingProperties.Provider provider, String bean) {
+    /**
+     * Com os dois beans da aplicação, as properties de conexão não configurariam nenhum cliente e seriam ignoradas
+     * em silêncio. Com um só, elas ainda configuram o outro cliente (o {@code SnsClient} precisa de região).
+     */
+    private static void rejectConnectionFields(String providerName, MessagingProperties.AwsProvider provider) {
         if (provider.region() != null || provider.endpoint() != null || provider.accessKey() != null
                 || provider.secretKey() != null) {
             throw new IllegalStateException("messaging.providers." + providerName + ": defina region, endpoint, "
-                    + "access-key e secret-key ou o bean " + bean + ", não os dois");
+                    + "access-key e secret-key ou os beans SqsClient e SnsClient, não os dois");
         }
     }
 
     private static <B extends AwsClientBuilder<B, C> & AwsSyncClientBuilder<B, C>, C> B configure(
-            B builder, MessagingProperties.Provider provider) {
+            B builder, MessagingProperties.AwsProvider provider) {
         builder.credentialsProvider(credentials(provider))
                 .httpClientBuilder(ApacheHttpClient.builder().socketTimeout(Duration.ofSeconds(30)));
         if (provider.region() != null) {
@@ -78,7 +78,7 @@ public final class AwsProviderConnection implements ProviderConnection {
         return builder;
     }
 
-    private static AwsCredentialsProvider credentials(MessagingProperties.Provider provider) {
+    private static AwsCredentialsProvider credentials(MessagingProperties.AwsProvider provider) {
         return provider.accessKey() != null
                 ? StaticCredentialsProvider.create(AwsBasicCredentials.create(provider.accessKey(), provider.secretKey()))
                 : DefaultCredentialsProvider.builder().build();

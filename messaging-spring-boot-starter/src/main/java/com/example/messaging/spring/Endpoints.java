@@ -2,6 +2,7 @@ package com.example.messaging.spring;
 
 import com.example.messaging.spring.MessagingProperties.Destination;
 import com.example.messaging.spring.MessagingProperties.Endpoint;
+import com.example.messaging.spring.MessagingProperties.GcpProvider;
 import com.example.messaging.spring.MessagingProperties.Kind;
 import com.example.messaging.spring.MessagingProperties.Options;
 import com.example.messaging.spring.MessagingProperties.Provider;
@@ -94,7 +95,7 @@ public final class Endpoints {
                 } else {
                     topic = dest;
                 }
-                if (provider.project() == null && !dest.startsWith("projects/")) {
+                if (((GcpProvider) provider).project() == null && !dest.startsWith("projects/")) {
                     problems.add(key + ".destination: nome curto exige messaging.providers." + providerName
                             + ".project");
                 }

@@ -26,7 +26,7 @@ public final class RabbitProviderConnection implements ProviderConnection {
 
     private final Connection connection;
 
-    public RabbitProviderConnection(String providerName, MessagingProperties.Provider provider, ListableBeanFactory beans,
+    public RabbitProviderConnection(String providerName, MessagingProperties.RabbitProvider provider, ListableBeanFactory beans,
                                     boolean onlyOfItsType) {
         ConnectionFactory factory = provider.brokerUrl() != null
                 ? new ConnectionFactory()

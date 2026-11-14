@@ -21,7 +21,7 @@ public final class AzureProviderConnection implements ProviderConnection {
 
     private final ServiceBusClientBuilder builder;
 
-    public AzureProviderConnection(String providerName, MessagingProperties.Provider provider, ListableBeanFactory beans,
+    public AzureProviderConnection(String providerName, MessagingProperties.AzureProvider provider, ListableBeanFactory beans,
                                    boolean onlyOfItsType) {
         if (provider.connectionString() != null) {
             builder = new ServiceBusClientBuilder().connectionString(provider.connectionString());
