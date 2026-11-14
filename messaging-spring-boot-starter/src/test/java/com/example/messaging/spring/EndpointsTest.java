@@ -5,6 +5,7 @@ import com.example.messaging.spring.MessagingProperties.Endpoint;
 import com.example.messaging.spring.MessagingProperties.Kind;
 import com.example.messaging.spring.MessagingProperties.Options;
 import com.example.messaging.spring.MessagingProperties.Provider;
+import com.example.messaging.spring.MessagingProperties.Redelivery;
 import com.example.messaging.spring.MessagingProperties.Type;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -139,7 +140,7 @@ class EndpointsTest {
     void optionsAreValidatedByProviderType() {
         Endpoints.resolve(KEY, "p", provider(Type.AWS), new Endpoint("q", null, null,
                 new Options(null, true, null, null, null, null, null, null, null, null, null, null)), true, problems);
-        assertThat(problems).anyMatch(p -> p.contains(KEY + ".options.sessions só vale para o Service Bus"));
+        assertThat(problems).anyMatch(p -> p.contains(KEY + ".options.sessions não se aplica ao provedor aws"));
     }
 
     @Test
@@ -167,5 +168,58 @@ class EndpointsTest {
     void unknownProvider() {
         Endpoints.provider(KEY, "x", null, Map.of("aws", provider(Type.AWS)), problems);
         assertThat(problems).containsExactly(KEY + ".provider 'x' não existe em messaging.providers");
+    }
+
+    private static Options options(Boolean sessions, Redelivery redelivery, Long maxMessageBytes, Duration ackDeadline,
+                                   Duration lease, Duration confirmTimeout) {
+        return new Options(null, sessions, redelivery, maxMessageBytes, ackDeadline, null, null, null, lease, null,
+                null, confirmTimeout);
+    }
+
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> notAccepted() {
+        Duration d = Duration.ofSeconds(5);
+        return java.util.stream.Stream.of(
+                org.junit.jupiter.params.provider.Arguments.of(Type.AWS, "sessions", options(true, null, null, null, null, null)),
+                org.junit.jupiter.params.provider.Arguments.of(Type.GCP, "redelivery", options(null, Redelivery.RESCHEDULE, null, d, null, null)),
+                org.junit.jupiter.params.provider.Arguments.of(Type.AZURE, "ack-deadline", options(null, null, null, d, null, null)),
+                org.junit.jupiter.params.provider.Arguments.of(Type.GCP, "max-message-bytes", options(null, null, 1L, d, null, null)),
+                org.junit.jupiter.params.provider.Arguments.of(Type.AZURE, "lease", options(null, null, null, null, d, null)),
+                org.junit.jupiter.params.provider.Arguments.of(Type.ARTEMIS, "confirm-timeout", options(null, null, null, null, null, d)));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("notAccepted")
+    void optionNotAcceptedByTheProviderFails(Type type, String option, Options options) {
+        Endpoints.resolve(KEY, "p", provider(type), new Endpoint("q", null, null, options), true, problems);
+        assertThat(problems).anyMatch(p -> p.contains(KEY + ".options." + option + " não se aplica ao provedor "
+                + type.tag()));
+    }
+
+    /** O provider vem de receiver-defaults: a opção é conferida contra o provider resolvido. */
+    @Test
+    void optionNotAcceptedByTheResolvedProviderFails() {
+        Map<String, Provider> two = Map.of("a", provider(Type.AWS), "b", provider(Type.AWS));
+        String resolved = Endpoints.provider(KEY, null, "b", two, problems);
+        Endpoints.resolve(KEY, resolved, two.get(resolved), new Endpoint("q", null, null,
+                options(true, null, null, null, null, null)), true, problems);
+        assertThat(problems).containsExactly(KEY + ".options.sessions não se aplica ao provedor aws; vale para: azure");
+    }
+
+    @Test
+    void falseAndEmptyOptionsAreNotSet() {
+        Endpoints.resolve(KEY, "p", provider(Type.AWS), new Endpoint("q", null, null,
+                options(false, Redelivery.ABANDON, null, null, null, null)), true, problems);
+        Endpoints.resolve(KEY, "p", provider(Type.GCP), new Endpoint("s", null, null,
+                new Options(java.util.Set.of(), null, null, null, Duration.ofSeconds(30), null, null, null, null, null,
+                        null, null)), true, problems);
+        assertThat(problems).isEmpty();
+    }
+
+    @Test
+    void everyOptionIsInTheTable() {
+        for (var component : Options.class.getRecordComponents()) {
+            String kebab = component.getName().replaceAll("([A-Z])", "-$1").toLowerCase();
+            assertThat(Endpoints.ACCEPTED).as(kebab).containsKey(kebab);
+        }
     }
 }

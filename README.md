@@ -249,7 +249,10 @@ receber de um tópico, `kind: topic` para enviar a um, e `options` com as opçõ
 `dead-letter-queue` (Service Bus; esta só para receber, da DLQ nativa), `redelivery: abandon |
 reschedule` (Service Bus e ActiveMQ), `ack-deadline`, `ordered` e `exactly-once` (Pub/Sub), `lease`
 (ActiveMQ e RabbitMQ, padrão 60 s), `routing-key`, `routing-by-ordering-key` e `confirm-timeout`
-(RabbitMQ, padrão 30 s). No RabbitMQ, `broker-url` é a URI AMQP (`amqp://host:5672/vhost`); com
+(RabbitMQ, padrão 30 s). Cada opção vale só para os provedores listados; uma opção definida num
+provedor que não a aceita derruba o startup (`messaging.receivers.<n>.options.<opção> não se aplica ao
+provedor <tipo>; vale para: ...`). `false`, `abandon` e conjunto vazio contam como não definidos. No RabbitMQ,
+`broker-url` é a URI AMQP (`amqp://host:5672/vhost`); com
 `routing-by-ordering-key: true`, a routing key de cada envio é o `orderingKey` da mensagem, e o
 `deduplicationId`, quando existe, vira o `message-id`; `redelivery: reschedule` é recusado no
 startup. No Artemis, a `broker-url` ganha `consumerWindowSize=0` quando não define a janela.

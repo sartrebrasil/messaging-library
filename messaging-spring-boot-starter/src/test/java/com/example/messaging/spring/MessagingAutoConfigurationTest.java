@@ -101,7 +101,7 @@ class MessagingAutoConfigurationTest {
                 .run(context -> assertThat(context).getFailure().rootCause()
                         .hasMessageContaining("messaging.senders.sem-provider.provider 'nao-existe' não existe")
                         .hasMessageContaining("messaging.senders.sem-endereco.destination é obrigatório")
-                        .hasMessageContaining("messaging.senders.sessions.options.sessions só vale para o Service Bus")
+                        .hasMessageContaining("messaging.senders.sessions.options.sessions não se aplica ao provedor aws")
                         .hasMessageContaining("messaging.senders.topico.kind: topic exige um ARN do SNS"));
     }
 
@@ -240,7 +240,9 @@ class MessagingAutoConfigurationTest {
 
     @Test
     void durationOptionsBind() {
-        runner.withPropertyValues("messaging.senders.pedidos.destination=" + QUEUE + "pedidos",
+        runner.withPropertyValues("messaging.providers.gcp.type=gcp", "messaging.providers.gcp.project=p",
+                        "messaging.providers.gcp.emulator-host=localhost:8085",
+                        "messaging.senders.pedidos.provider=gcp", "messaging.senders.pedidos.destination=pedidos",
                         "messaging.senders.pedidos.options.ack-deadline=5s")
                 .run(context -> assertThat(context.getBean(MessagingProperties.class).senders().get("pedidos")
                         .options().ackDeadline()).isEqualTo(Duration.ofSeconds(5)));
