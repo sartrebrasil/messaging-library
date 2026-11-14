@@ -99,9 +99,31 @@ Duas mudanças, sem alterar o formato do YAML:
 - Quem usa só YAML não muda nada, a não ser pelos erros novos acima.
 - Quem usa a API Java (`MessagingProperties.Provider` e os construtores dos `*ProviderConnection`) tem uma quebra de
   compilação. Não verificamos se há consumidor externo; a biblioteca ainda não tem versão publicada estável.
-- Adicionar um provider passa a ser: um record de provider, um de options e um `ProviderConnection`, mais a linha no
-  `switch` de `connect`.
-- Os testes de `*AutoConfigurationTest` precisam de casos novos: properties com bean, campo de outro tipo, dois providers
-  `aws` com beans nomeados.
-- O README e `docs/` que descrevem `messaging.providers` precisam ser atualizados junto, e o `DocumentedConfigTest`
-  deve cobrir as chaves novas.
+- Adicionar um provider passa a ser: um record de provider, as linhas dele na tabela `Endpoints.ACCEPTED` e um
+  `ProviderConnection`, mais o `case` no `switch` de `connect`.
+
+## Implementação (2026-11-14)
+
+Entregue em `feat/providers-tipados` (merge `51c2831`). Diferenças em relação ao texto acima, decididas na
+implementação:
+
+- O nome do bean pode ser `<provider>` ou `<provider><Tipo>` (`aws`, `awsSnsClient`), porque um provider AWS tem dois
+  clientes e dois beans não têm o mesmo nome.
+- O conflito no AWS só falha com os dois beans. Com um só, as properties configuram o outro cliente.
+- Um bean que o starter não usa (AWS, mais de um provider) gera um aviso; Azure, JMS e RabbitMQ falham com uma
+  mensagem que diz como nomear o bean.
+- Na tabela de opções, `false`, conjunto vazio e `redelivery: abandon` contam como não definidos.
+
+### Pendências conhecidas
+
+Achados de revisão deixados de fora, nenhum é regressão em relação ao comportamento anterior, exceto onde indicado:
+
+- Variável de ambiente de provider sem `type` aponta o nome errado na mensagem (`MESSAGING_PROVIDERS_AWS_PROD_TYPE`
+  vira `aws.prod`). Regressão de mensagem; o comportamento é o mesmo.
+- Provider sem `type` aborta o bind no primeiro erro, em vez de entrar na lista de todos os problemas.
+- A tabela de opções é por provider, não por direção: `max-message-bytes` num sender SQS e `confirm-timeout` num
+  receiver RabbitMQ continuam ignorados em silêncio.
+- `routing-key` e `routing-by-ordering-key` fora do RabbitMQ geram dois erros (um da tabela, um de combinação).
+- Records de provider criados na API Java aceitam `type` inconsistente (`new AwsProvider(Type.GCP, ...)`) e falham
+  com `ClassCastException` ou NPE; falta validar `type` no construtor compacto.
+- Providers `aws-prod` (YAML) e `awsprod` (variável de ambiente) viram dois providers. Já era assim antes.

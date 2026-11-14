@@ -175,7 +175,7 @@ Para o que não dá para expressar em properties, existe o bean
 `InboxKafkaContainerCustomizer`, que recebe o nome do consumer e o container
 nativo, e roda depois da aplicação de `configuration`. O broker `messaging`
 não tem container; o que for do provedor se ajusta no cliente nativo, que a
-messaging-lib aceita como bean do usuário.
+messaging-lib aceita como bean do usuário (regra de nomes e conflitos na ADR-0010 da messaging-lib).
 
 ## Revisão de 2026-11-05: implementação
 

@@ -267,8 +267,11 @@ Receivers (`messaging.receivers`) são consumidos pela messaging-inbox: retry em
 idempotência, redrive e métricas. Guia completo, com exemplos de configuração e diagramas, em
 [`messaging-inbox/README.md`](messaging-inbox/README.md).
 
-Chave desconhecida em `providers`, `senders`, `receivers` ou `receiver-defaults` derruba o startup,
-assim como as chaves removidas `messaging.destinations` e `inbox.*` (ADR-0008 da messaging-inbox).
+Cada tipo de provider aceita só os seus campos: `aws` (`region`, `endpoint`, `access-key`, `secret-key`), `azure`
+(`connection-string`), `gcp` (`project`, `emulator-host`), `activemq-classic`, `artemis` e `rabbitmq` (`broker-url`,
+`user`, `password`). `type` é obrigatório. Chave desconhecida em `providers`, `senders`, `receivers` ou
+`receiver-defaults`, ou campo de outro tipo (`region` num provider `rabbitmq`), derruba o startup, assim como as
+chaves removidas `messaging.destinations` e `inbox.*` (ADR-0008 da messaging-inbox; ADR-0010).
 
 No ActiveMQ, o starter abre uma conexão por provider no startup e a fecha no shutdown. A lib não
 recria a conexão: a reconexão vem da URL. Com `broker-url`, o `JmsDialect` cuida disso:
@@ -289,8 +292,11 @@ falha, porque o `checkAccess` precisa da `ActiveMQConnection`. Nesse caso, use `
   conexão, e o starter não o fecha. O bean é o do tipo, qualquer que seja o nome, só quando nenhum outro provider
   usa o mesmo tipo de cliente (`activemq-classic` e `artemis` contam como um); com vários, só vale o bean com o
   nome do provider (`aws`) ou `<provider><Tipo>` (`awsSnsClient`; um provider AWS tem dois clientes). No AWS,
-  bean junto com `region`, `endpoint` ou credenciais derruba o startup; no Azure, JMS e RabbitMQ,
-  `connection-string` e `broker-url` vencem o bean. No GCP não há bean: credenciais padrão do Google, ou
+  os dois beans (`SqsClient` e `SnsClient`) junto com `region`, `endpoint` ou credenciais derrubam o startup (as
+  properties não configurariam cliente nenhum); com um bean só, as properties configuram o outro cliente. No AWS,
+  um bean que o starter não usa (há mais de um provider `aws` e ele não tem o nome de nenhum) gera um aviso no log.
+  No Azure, JMS e RabbitMQ, `connection-string` e `broker-url` vencem o bean, e a mensagem de "defina ... ou declare
+  um bean" diz como nomeá-lo. No GCP não há bean: credenciais padrão do Google, ou
   `emulator-host` para o emulator.
 - Métricas (com `MeterRegistry`; referência completa em [docs/metricas.md](docs/metricas.md)): timers `messaging.send.duration`, `messaging.receive.duration`, `messaging.ack.duration`,
   `messaging.nack.duration`, `messaging.dead.letter.duration` com `provider`, `destination`, `exception` (nome simples da classe lançada, ou `none`) e `outcome`

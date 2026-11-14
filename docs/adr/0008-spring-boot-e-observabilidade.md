@@ -144,3 +144,8 @@ dependências):
 endereço para a inbox. No AWS, `destination` aceita o nome da fila, resolvido com `GetQueueUrl`.
 Cada raiz faz binding estrito, e chaves removidas derrubam o startup. Detalhes na ADR-0008 da
 messaging-inbox (revisão de 2026-11-06).
+
+## Revisão (2026-11-14): providers tipados e bean de cliente
+
+O trecho "o cliente nativo pode vir de um bean do usuário" passou a ter uma regra única por provider, e cada tipo de
+provider aceita só os seus campos e opções. Veja a [ADR-0010](0010-configuracao-tipada-dos-providers.md).

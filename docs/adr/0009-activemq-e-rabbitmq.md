@@ -169,7 +169,8 @@ Os achados que mudaram esta seção estão no [spike F9](../spikes/f9-rabbitmq.m
   inexistente roda.
 - No starter, os tipos de provedor são `activemq-classic`, `artemis` e
   `rabbitmq`. A conexão vem de um bean da aplicação (`ConnectionFactory` JMS,
-  `com.rabbitmq.client.ConnectionFactory`) ou da configuração.
+  `com.rabbitmq.client.ConnectionFactory`) ou da configuração; `broker-url` vence o bean, e com mais de um provider
+  do mesmo tipo o bean precisa ter o nome do provider ([ADR-0010](0010-configuracao-tipada-dos-providers.md)).
 - Dependências: `messaging-jms` só depende de `jakarta.jms:jakarta.jms-api`; o
   cliente do broker (`activemq-client` ou `artemis-jakarta-client`) é opcional e
   fica com quem usa. `messaging-rabbitmq` depende de
