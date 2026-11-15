@@ -23,7 +23,7 @@ lib: desde 2026-11-05, o módulo `messaging-inbox` deste repo, que consome pelo
 | Confirmação | `ack`, `nack(delay)`, `extendLease`, `deadLetter` com fallback explícito | [0005](adr/0005-ack-nack-lease-dead-letter.md) |
 | Ordem e duplicidade | `orderingKey` e `deduplicationId` opcionais; garantia informada por capability; sessions do Service Bus na v1 | [0006](adr/0006-ordenacao-e-deduplicacao.md) |
 | Capabilities e erros | `Capabilities` por receiver/sender; hierarquia `MessagingException` | [0007](adr/0007-capabilities-e-erros.md) |
-| Spring e observabilidade | Starter monta clientes e destinos por nome; métricas e tracing como decorators | [0008](adr/0008-spring-boot-e-observabilidade.md) |
+| Spring e observabilidade | Starter monta destinos por nome sobre os clientes nativos da aplicação; métricas e tracing como decorators | [0008](adr/0008-spring-boot-e-observabilidade.md), [0011](adr/0011-clientes-nativos-da-aplicacao.md) |
 | Coordenadas | `com.example:messaging-*`, pacote `com.example.messaging`, Java 21, Spring Boot 4.x | este plano |
 | Distribuição | Igual à storage-lib: `mvn install` local; publicação decidida depois | este plano |
 | SDKs | SDK oficial de cada provedor, sem Spring Cloud AWS/Azure/GCP/OCI | [0001](adr/0001-escopo.md) |

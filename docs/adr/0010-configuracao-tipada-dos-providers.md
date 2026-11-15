@@ -1,6 +1,6 @@
 # ADR-0010: Configuração tipada dos providers no starter
 
-- Status: aceito
+- Status: aceito; a seção 1 ("Uma regra única para o bean da aplicação") foi substituída pelo [ADR-0011](0011-clientes-nativos-da-aplicacao.md)
 - Data: 2026-11-14
 - Relacionada: [ADR-0008](0008-spring-boot-e-observabilidade.md), [ADR-0009](0009-activemq-e-rabbitmq.md)
 
