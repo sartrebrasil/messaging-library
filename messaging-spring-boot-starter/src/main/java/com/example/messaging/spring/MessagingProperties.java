@@ -95,7 +95,7 @@ public record MessagingProperties(Map<String, Provider> providers, Map<String, S
     /** Lê {@code type} de cada provider e liga o resto ao record daquele tipo, em modo estrito. */
     private static Map<String, Provider> bindProviders(Binder binder, BindHandler strict) {
         Map<String, Provider> providers = new LinkedHashMap<>();
-        List<String> removed = new ArrayList<>();
+        List<String> problems = new ArrayList<>();
         Map<String, TypeOnly> types = binder.bind("messaging.providers", Bindable.mapOf(String.class, TypeOnly.class))
                 .orElse(Map.of());
         // os nomes vêm de um mapa sem tipo de valor: um provider sem type não aparece em types
@@ -112,28 +112,39 @@ public record MessagingProperties(Map<String, Provider> providers, Map<String, S
                             ? ConfigurationPropertyName.of("messaging.providers[" + name + "]")
                             : ConfigurationPropertyName.adapt("messaging.providers." + name, '.');
                     // a chave removida seria "desconhecida" no binding estrito: aqui a mensagem diz o que fazer
+                    int before = problems.size();
                     new TreeSet<>(binder.bind(node, Bindable.mapOf(String.class, Object.class)).orElse(Map.of()).keySet())
                             .forEach(key -> {
                                 String known = REMOVED.get(key.replace("-", "").toLowerCase(java.util.Locale.ROOT));
                                 if (known != null) {
-                                    removed.add("messaging.providers." + name + "." + known + " foi removida (ADR-0011): "
+                                    problems.add("messaging.providers." + name + "." + known + " foi removida (ADR-0011): "
                                             + "configure " + replacement(typeOnly.type()) + " na aplicação");
                                 }
                             });
-                    if (!removed.isEmpty()) {
+                    if (problems.size() > before) {
                         return;
                     }
-                    providers.put(name, switch (typeOnly.type()) {
-                        case AWS -> binder.bind(node, Bindable.of(AwsProvider.class), strict).get();
-                        case AZURE -> binder.bind(node, Bindable.of(AzureProvider.class), strict).get();
-                        case GCP -> binder.bind(node, Bindable.of(GcpProvider.class), strict).get();
-                        case ACTIVEMQ_CLASSIC, ARTEMIS -> binder.bind(node, Bindable.of(JmsProvider.class), strict).get();
-                        case RABBITMQ -> binder.bind(node, Bindable.of(RabbitProvider.class), strict).get();
-                    });
+                    try {
+                        providers.put(name, switch (typeOnly.type()) {
+                            case AWS -> binder.bind(node, Bindable.of(AwsProvider.class), strict).get();
+                            case AZURE -> binder.bind(node, Bindable.of(AzureProvider.class), strict).get();
+                            case GCP -> binder.bind(node, Bindable.of(GcpProvider.class), strict).get();
+                            case ACTIVEMQ_CLASSIC, ARTEMIS ->
+                                    binder.bind(node, Bindable.of(JmsProvider.class), strict).get();
+                            case RABBITMQ -> binder.bind(node, Bindable.of(RabbitProvider.class), strict).get();
+                        });
+                    } catch (RuntimeException e) {
+                        // junto dos outros problemas: o usuário corrige tudo de uma vez
+                        Throwable root = e;
+                        while (root.getCause() != null) {
+                            root = root.getCause();
+                        }
+                        problems.add(root.getMessage());
+                    }
                 });
-        if (!removed.isEmpty()) {
+        if (!problems.isEmpty()) {
             throw new IllegalStateException("Configuração inválida de messaging.providers:\n - "
-                    + String.join("\n - ", removed));
+                    + String.join("\n - ", problems));
         }
         return providers;
     }

@@ -309,8 +309,13 @@ class MessagingClients {
 
     @Bean
     jakarta.jms.ConnectionFactory jmsConnectionFactory() {
-        // reconexão (e, no Artemis, consumerWindowSize=0); usuário e senha, na própria factory
-        return JmsDialect.ARTEMIS.connectionFactory("tcp://artemis:61616");
+        // reconexão e, no Artemis, consumerWindowSize=0; a factory devolvida é a do cliente do broker
+        org.apache.activemq.artemis.jms.client.ActiveMQConnectionFactory factory =
+                (org.apache.activemq.artemis.jms.client.ActiveMQConnectionFactory)
+                        JmsDialect.ARTEMIS.connectionFactory("tcp://artemis:61616");
+        factory.setUser("...");              // no Classic: org.apache.activemq.ActiveMQConnectionFactory.setUserName
+        factory.setPassword("...");
+        return factory;
     }
 
     @Bean
@@ -342,7 +347,7 @@ O que passa a ser da aplicação, e a lib não consegue validar:
   comportamento do Boot 4.1 aqui não foi verificado.
 - **Artemis, janela do consumer.** A factory precisa de `consumerWindowSize=0`; sem ela, `receiver(nome)` lança
   `IllegalArgumentException`. `JmsDialect.ARTEMIS.connectionFactory(url)` já aplica.
-- **Reconexão e credenciais** de JMS e RabbitMQ são da factory. `JmsDialect.<X>.connectionFactory(url)` cuida da
+- **Reconexão e credenciais** de JMS e RabbitMQ são da factory: o starter chama `createConnection()` sem usuário nem senha. `JmsDialect.<X>.connectionFactory(url)` cuida da
   reconexão: no Classic, embrulha a URL em `failover:(...)`, salvo `failover:` e `vm:`; no Artemis, acrescenta
   `reconnectAttempts=-1`. Nos dois, o startup ainda falha com o broker fora.
 

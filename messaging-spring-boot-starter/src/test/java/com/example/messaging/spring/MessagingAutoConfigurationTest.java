@@ -322,4 +322,30 @@ class MessagingAutoConfigurationTest {
         assertThat(MessagingProperties.bind(binder).providers().get("gcp"))
                 .isEqualTo(new MessagingProperties.GcpProvider(MessagingProperties.Type.GCP, "p"));
     }
+
+    @Test
+    void removedKeyDoesNotHideAnotherProvidersProblems() {
+        bare.withPropertyValues("messaging.providers.aws.type=aws", "messaging.providers.aws.region=sa-east-1",
+                        "messaging.providers.r.type=rabbitmq", "messaging.providers.r.project=p")
+                .run(context -> assertThat(context).getFailure().rootCause()
+                        .hasMessageContaining("messaging.providers.aws.region foi removida (ADR-0011)")
+                        .hasMessageContaining("messaging.providers.r.project"));
+    }
+
+    @Test
+    void removedKeyOnProviderNameWithADotIsReported() {
+        bare.withPropertyValues("messaging.providers[a.b].type=aws", "messaging.providers[a.b].region=sa-east-1")
+                .run(context -> assertThat(context).getFailure().rootCause()
+                        .hasMessageContaining("messaging.providers.a.b.region foi removida (ADR-0011)"));
+    }
+
+    @Test
+    void removedKeyFromEnvironmentVariableIsReported() {
+        bare.withInitializer(c -> c.getEnvironment().getPropertySources().addFirst(
+                        new org.springframework.core.env.SystemEnvironmentPropertySource("test-systemEnvironment", Map.of(
+                                "MESSAGING_PROVIDERS_ENVR_TYPE", "rabbitmq",
+                                "MESSAGING_PROVIDERS_ENVR_BROKERURL", "amqp://x"))))
+                .run(context -> assertThat(context).getFailure().rootCause()
+                        .hasMessageContaining("messaging.providers.envr.broker-url foi removida (ADR-0011)"));
+    }
 }
