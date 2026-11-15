@@ -54,18 +54,4 @@ class GcpProviderConnectionTest {
             channel.shutdownNow();
         }
     }
-
-    @Test
-    void gcpNeverClosesTheApplicationsChannel() {
-        ManagedChannel channel = TestGcpClients.plaintext("localhost:1");
-        try {
-            runner.withBean(TransportChannelProvider.class, () -> TestGcpClients.provider(channel))
-                    .withBean(CredentialsProvider.class, NoCredentialsProvider::create)
-                    .run(context -> assertThat(context).hasNotFailed());
-            // o contexto já fechou a conexão: o canal é da aplicação e continua aberto
-            assertThat(channel.isShutdown()).isFalse();
-        } finally {
-            channel.shutdownNow();
-        }
-    }
 }

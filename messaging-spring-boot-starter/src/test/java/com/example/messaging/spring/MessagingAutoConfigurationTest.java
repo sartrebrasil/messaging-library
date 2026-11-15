@@ -308,7 +308,7 @@ class MessagingAutoConfigurationTest {
                         "messaging.providers.r.user=u")
                 .run(context -> assertThat(context).getFailure().rootCause()
                         .hasMessageContaining("messaging.providers.aws.region foi removida (ADR-0011): "
-                                + "configure os beans SqsClient e SnsClient na aplicação")
+                                + "configure o bean SqsClient (e o SnsClient, se enviar ao SNS) na aplicação")
                         .hasMessageContaining("messaging.providers.r.broker-url foi removida (ADR-0011): "
                                 + "configure o bean com.rabbitmq.client.ConnectionFactory na aplicação")
                         .hasMessageContaining("messaging.providers.r.user foi removida (ADR-0011)"));

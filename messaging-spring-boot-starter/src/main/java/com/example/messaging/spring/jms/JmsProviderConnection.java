@@ -34,13 +34,27 @@ public final class JmsProviderConnection implements ProviderConnection {
         this.dialect = provider.type() == MessagingProperties.Type.ARTEMIS
                 ? JmsDialect.ARTEMIS : JmsDialect.ACTIVEMQ_CLASSIC;
         ConnectionFactory factory = ClientBeans.require(beans, ConnectionFactory.class, providerName);
+        Connection opened = null;
         try {
-            connection = factory.createConnection();
+            opened = factory.createConnection();
             // com failover:, o Classic só conecta no primeiro uso; o start faz o startup falhar com o broker fora
-            connection.start();
+            opened.start();
         } catch (JMSException e) {
+            closeQuietly(opened);
             throw new IllegalStateException("messaging.providers." + providerName + ": não conectou ao broker: "
                     + e.getMessage(), e);
+        }
+        this.connection = opened;
+    }
+
+    private static void closeQuietly(Connection connection) {
+        if (connection == null) {
+            return;
+        }
+        try {
+            connection.close();
+        } catch (JMSException ignored) {
+            // a conexão pode já ter caído
         }
     }
 
@@ -69,10 +83,6 @@ public final class JmsProviderConnection implements ProviderConnection {
 
     @Override
     public void close() {
-        try {
-            connection.close();
-        } catch (JMSException ignored) {
-            // a conexão pode já ter caído
-        }
+        closeQuietly(connection);
     }
 }

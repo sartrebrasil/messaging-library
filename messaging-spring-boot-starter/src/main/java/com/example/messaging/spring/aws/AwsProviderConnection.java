@@ -36,6 +36,7 @@ public final class AwsProviderConnection implements ProviderConnection {
         this.beans = beans;
     }
 
+    // Sem lock de propósito: duas threads podem resolver o bean ao mesmo tempo, e as duas recebem o mesmo singleton.
     private SqsClient sqs() {
         SqsClient client = sqs;
         if (client == null) {

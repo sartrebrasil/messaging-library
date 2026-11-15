@@ -203,4 +203,26 @@ class ClientBeansTest {
 
         assertThat(calls).contains("close");
     }
+
+    @Test
+    void jmsConnectionIsClosedWhenStartFails() {
+        List<String> calls = new CopyOnWriteArrayList<>();
+        Connection connection = (Connection) Proxy.newProxyInstance(Connection.class.getClassLoader(),
+                new Class<?>[]{Connection.class}, (proxy, method, args) -> {
+                    calls.add(method.getName());
+                    if (method.getName().equals("start")) {
+                        throw new jakarta.jms.JMSException("sem broker");
+                    }
+                    return null;
+                });
+        ConnectionFactory factory = (ConnectionFactory) Proxy.newProxyInstance(
+                ConnectionFactory.class.getClassLoader(), new Class<?>[]{ConnectionFactory.class},
+                (proxy, method, args) -> connection);
+
+        runner.withPropertyValues("messaging.providers.j.type=activemq-classic")
+                .withBean(ConnectionFactory.class, () -> factory)
+                .run(context -> assertThat(context).getFailure().hasStackTraceContaining("não conectou ao broker"));
+
+        assertThat(calls).contains("start", "close");
+    }
 }

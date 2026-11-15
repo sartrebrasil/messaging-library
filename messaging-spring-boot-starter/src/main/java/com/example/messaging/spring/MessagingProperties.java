@@ -80,7 +80,7 @@ public record MessagingProperties(Map<String, Provider> providers, Map<String, S
     /** O que a aplicação declara no lugar das chaves removidas de cada tipo. */
     private static String replacement(Type type) {
         return switch (type) {
-            case AWS -> "os beans SqsClient e SnsClient";
+            case AWS -> "o bean SqsClient (e o SnsClient, se enviar ao SNS)";
             case AZURE -> "o bean ServiceBusClientBuilder";
             case GCP -> "os beans TransportChannelProvider e CredentialsProvider";
             case ACTIVEMQ_CLASSIC, ARTEMIS -> "o bean jakarta.jms.ConnectionFactory";

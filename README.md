@@ -283,6 +283,9 @@ da aplicação, junto do resto da infraestrutura dela.
 | `activemq-classic`, `artemis` | `jakarta.jms.ConnectionFactory` | Sim |
 | `rabbitmq` | `com.rabbitmq.client.ConnectionFactory` | Sim |
 
+No GCP, o starter cria o cliente de administração de tópicos no startup: sem `CredentialsProvider` e sem
+Application Default Credentials na máquina, o startup falha mesmo que o provider ainda não tenha destinos.
+
 Sem o bean obrigatório, o startup falha com a chave do provider e o tipo do bean. Com mais de um bean do mesmo tipo,
 vale o `@Primary`. Só pode haver um provider por tipo de cliente (`activemq-classic` e `artemis` contam como um); um
 provider de outro tipo convive normalmente (AWS e Azure durante uma migração). O starter fecha só o que criou: a
