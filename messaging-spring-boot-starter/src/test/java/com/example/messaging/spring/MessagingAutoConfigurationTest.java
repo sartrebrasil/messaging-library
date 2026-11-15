@@ -5,6 +5,10 @@ import com.example.messaging.MessageSender;
 import com.example.messaging.aws.SnsMessageSender;
 import com.example.messaging.spring.MessagingProperties.Endpoint;
 import com.example.messaging.spring.MessagingProperties.Options;
+import com.azure.messaging.servicebus.ServiceBusClientBuilder;
+import com.google.api.gax.core.CredentialsProvider;
+import com.google.api.gax.core.NoCredentialsProvider;
+import com.google.api.gax.rpc.TransportChannelProvider;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.health.contributor.HealthIndicator;
@@ -194,11 +198,10 @@ class MessagingAutoConfigurationTest {
 
     @Test
     void azureAndGcpRulesAreValidated() {
-        runner.withPropertyValues(
-                        "messaging.providers.azure.type=azure",
-                        "messaging.providers.azure.connection-string=" + AZURE,
-                        "messaging.providers.gcp.type=gcp",
-                        "messaging.providers.gcp.emulator-host=localhost:8085")
+        runner.withPropertyValues("messaging.providers.azure.type=azure", "messaging.providers.gcp.type=gcp")
+                .withBean(ServiceBusClientBuilder.class, () -> new ServiceBusClientBuilder().connectionString(AZURE))
+                .withBean(TransportChannelProvider.class, () -> TestGcpClients.provider(TestGcpClients.plaintext("localhost:8085")))
+                .withBean(CredentialsProvider.class, NoCredentialsProvider::create)
                 .run(context -> {
                     MessagingDestinations destinations = context.getBean(MessagingDestinations.class);
                     assertThat(destinations.validate("messaging.receivers.sb", "azure", new Endpoint("pedidos", null,
@@ -217,8 +220,8 @@ class MessagingAutoConfigurationTest {
     void azureDeadLetterQueueIsReceiveOnly() {
         ApplicationContextRunner azure = new ApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(MessagingAutoConfiguration.class))
-                .withPropertyValues("messaging.providers.azure.type=azure",
-                        "messaging.providers.azure.connection-string=" + AZURE);
+                .withBean(ServiceBusClientBuilder.class, () -> new ServiceBusClientBuilder().connectionString(AZURE))
+                .withPropertyValues("messaging.providers.azure.type=azure");
         Options dlq = new Options(null, null, null, null, null, null, null, true, null, null, null, null);
         Options sessionsDlq = new Options(null, true, null, null, null, null, null, true, null, null, null, null);
 
@@ -249,8 +252,9 @@ class MessagingAutoConfigurationTest {
 
     @Test
     void durationOptionsBind() {
-        runner.withPropertyValues("messaging.providers.gcp.type=gcp", "messaging.providers.gcp.project=p",
-                        "messaging.providers.gcp.emulator-host=localhost:8085",
+        runner.withBean(TransportChannelProvider.class, () -> TestGcpClients.provider(TestGcpClients.plaintext("localhost:8085")))
+                .withBean(CredentialsProvider.class, NoCredentialsProvider::create)
+                .withPropertyValues("messaging.providers.gcp.type=gcp", "messaging.providers.gcp.project=p",
                         "messaging.senders.pedidos.provider=gcp", "messaging.senders.pedidos.destination=pedidos",
                         "messaging.senders.pedidos.options.ack-deadline=5s")
                 .run(context -> assertThat(context.getBean(MessagingProperties.class).senders().get("pedidos")

@@ -5,11 +5,10 @@ import com.example.messaging.MessageSender;
 import com.example.messaging.MessagingException;
 import com.example.messaging.gcp.PubSubMessageReceiver;
 import com.example.messaging.gcp.PubSubMessageSender;
+import com.example.messaging.spring.ClientBeans;
 import com.example.messaging.spring.MessagingProperties;
 import com.example.messaging.spring.ProviderConnection;
-import com.google.api.gax.core.NoCredentialsProvider;
-import com.google.api.gax.grpc.GrpcTransportChannel;
-import com.google.api.gax.rpc.FixedTransportChannelProvider;
+import com.google.api.gax.core.CredentialsProvider;
 import com.google.api.gax.rpc.TransportChannelProvider;
 import com.google.cloud.pubsub.v1.Publisher;
 import com.google.cloud.pubsub.v1.TopicAdminClient;
@@ -17,36 +16,35 @@ import com.google.cloud.pubsub.v1.TopicAdminSettings;
 import com.google.cloud.pubsub.v1.stub.SubscriberStubSettings;
 import com.google.pubsub.v1.ProjectSubscriptionName;
 import com.google.pubsub.v1.TopicName;
-import io.grpc.ManagedChannel;
-import io.grpc.ManagedChannelBuilder;
+import org.springframework.beans.factory.ListableBeanFactory;
 
 import java.io.IOException;
 
 /**
- * Pub/Sub. Credenciais e canal padrão do SDK (Application Default Credentials); com
- * {@code emulator-host}, canal sem TLS e sem credenciais. Nomes curtos de tópico e subscription
- * são completados com {@code project}.
+ * Pub/Sub. O {@link TransportChannelProvider} e o {@link CredentialsProvider} da aplicação, quando declarados (ADR-0011),
+ * valem para o admin, os publishers e os subscribers; sem eles, o padrão do SDK (Application Default Credentials). O
+ * canal é da aplicação e nunca é fechado aqui. Nomes curtos de tópico e subscription são completados com
+ * {@code project}.
  */
 public final class GcpProviderConnection implements ProviderConnection {
 
     private final MessagingProperties.GcpProvider provider;
-    private final ManagedChannel emulatorChannel;
     private final TransportChannelProvider channel;
+    private final CredentialsProvider credentials;
     private final TopicAdminClient admin;
 
-    public GcpProviderConnection(String providerName, MessagingProperties.GcpProvider provider) {
+    public GcpProviderConnection(String providerName, MessagingProperties.GcpProvider provider,
+                                 ListableBeanFactory beans) {
         this.provider = provider;
-        if (provider.emulatorHost() != null) {
-            emulatorChannel = ManagedChannelBuilder.forTarget(provider.emulatorHost()).usePlaintext().build();
-            channel = FixedTransportChannelProvider.create(GrpcTransportChannel.create(emulatorChannel));
-        } else {
-            emulatorChannel = null;
-            channel = null;
-        }
+        this.channel = ClientBeans.optional(beans, TransportChannelProvider.class, providerName);
+        this.credentials = ClientBeans.optional(beans, CredentialsProvider.class, providerName);
         try {
             TopicAdminSettings.Builder settings = TopicAdminSettings.newBuilder();
             if (channel != null) {
-                settings.setTransportChannelProvider(channel).setCredentialsProvider(NoCredentialsProvider.create());
+                settings.setTransportChannelProvider(channel);
+            }
+            if (credentials != null) {
+                settings.setCredentialsProvider(credentials);
             }
             admin = TopicAdminClient.create(settings.build());
         } catch (IOException e) {
@@ -58,7 +56,10 @@ public final class GcpProviderConnection implements ProviderConnection {
     public MessageSender sender(String name, MessagingProperties.Destination destination) {
         Publisher.Builder builder = Publisher.newBuilder(topicName(destination.topic()));
         if (channel != null) {
-            builder.setChannelProvider(channel).setCredentialsProvider(NoCredentialsProvider.create());
+            builder.setChannelProvider(channel);
+        }
+        if (credentials != null) {
+            builder.setCredentialsProvider(credentials);
         }
         return PubSubMessageSender.create(builder, admin);
     }
@@ -73,7 +74,10 @@ public final class GcpProviderConnection implements ProviderConnection {
         try {
             SubscriberStubSettings.Builder settings = SubscriberStubSettings.newBuilder();
             if (channel != null) {
-                settings.setTransportChannelProvider(channel).setCredentialsProvider(NoCredentialsProvider.create());
+                settings.setTransportChannelProvider(channel);
+            }
+            if (credentials != null) {
+                settings.setCredentialsProvider(credentials);
             }
             return PubSubMessageReceiver.create(settings.build(), subscriptionName(destination.subscription()), options);
         } catch (IOException e) {
@@ -93,8 +97,5 @@ public final class GcpProviderConnection implements ProviderConnection {
     @Override
     public void close() {
         admin.close();
-        if (emulatorChannel != null) {
-            emulatorChannel.shutdown();
-        }
     }
 }

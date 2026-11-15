@@ -73,13 +73,6 @@ class ClientBeansTest {
     private static final String AZURE = "Endpoint=sb://localhost;SharedAccessKeyName=k;SharedAccessKey=v;"
             + "UseDevelopmentEmulator=true;";
 
-    @Test
-    void azureConnectionStringWinsOverTheBean() {
-        runner.withPropertyValues("messaging.providers.a.type=azure", "messaging.providers.a.connection-string=" + AZURE)
-                .withBean(ServiceBusClientBuilder.class, ServiceBusClientBuilder::new)
-                .run(context -> assertThat(context).hasNotFailed());
-    }
-
     /** Uma fábrica JMS que falha com {@code failure} ({@code BEAN-USED} na mensagem) ou, sem ela, conecta num stub. */
     private static ConnectionFactory jms(String failure) {
         Connection connection = (Connection) Proxy.newProxyInstance(Connection.class.getClassLoader(),
@@ -197,5 +190,13 @@ class ClientBeansTest {
                 .withBean(SnsClient.class, () -> counting(SnsClient.class, calls))
                 .withBean(ServiceBusClientBuilder.class, ServiceBusClientBuilder::new)
                 .run(context -> assertThat(context).hasNotFailed());
+    }
+
+    @Test
+    void azureWithoutBuilderFails() {
+        runner.withPropertyValues("messaging.providers.azure.type=azure")
+                .run(context -> assertThat(context).getFailure().rootCause().hasMessageContaining(
+                        "messaging.providers.azure: declare um bean "
+                                + "com.azure.messaging.servicebus.ServiceBusClientBuilder (ADR-0011)"));
     }
 }

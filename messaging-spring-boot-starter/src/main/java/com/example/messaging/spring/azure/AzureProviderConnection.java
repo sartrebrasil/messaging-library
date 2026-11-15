@@ -12,25 +12,16 @@ import com.example.messaging.spring.ProviderConnection;
 import org.springframework.beans.factory.ListableBeanFactory;
 
 /**
- * Service Bus. Com {@code connection-string}, um {@link ServiceBusClientBuilder} por provider
- * (a conexão AMQP é compartilhada pelos clientes do builder); sem ela, o bean
- * {@code ServiceBusClientBuilder} da aplicação ({@link ClientBeans}). Os clientes são fechados pelos próprios
- * senders e receivers ({@code for*}).
+ * Service Bus sobre o bean {@link ServiceBusClientBuilder} da aplicação (ADR-0011): a conexão AMQP é compartilhada
+ * pelos clientes do builder. Os clientes de cada fila ou subscription são fechados pelos próprios senders e
+ * receivers ({@code for*}); o builder é da aplicação.
  */
 public final class AzureProviderConnection implements ProviderConnection {
 
     private final ServiceBusClientBuilder builder;
 
-    public AzureProviderConnection(String providerName, MessagingProperties.AzureProvider provider, ListableBeanFactory beans) {
-        if (provider.connectionString() != null) {
-            builder = new ServiceBusClientBuilder().connectionString(provider.connectionString());
-        } else {
-            builder = ClientBeans.optional(beans, ServiceBusClientBuilder.class, providerName);
-            if (builder == null) {
-                throw new IllegalStateException("messaging.providers." + providerName
-                        + ": defina connection-string ou declare um bean ServiceBusClientBuilder");
-            }
-        }
+    public AzureProviderConnection(String providerName, ListableBeanFactory beans) {
+        this.builder = ClientBeans.require(beans, ServiceBusClientBuilder.class, providerName);
     }
 
     @Override
