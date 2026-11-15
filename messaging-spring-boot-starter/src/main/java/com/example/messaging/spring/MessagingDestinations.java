@@ -355,7 +355,7 @@ public final class MessagingDestinations implements AutoCloseable {
     private void connect(ListableBeanFactory beans) {
         // as classes de cada provedor só são carregadas aqui, depois da checagem do adapter em validateProviders
         properties.providers().forEach((name, provider) -> connections.put(name, switch (provider) {
-            case AwsProvider p -> new AwsProviderConnection(name, p, beans);
+            case AwsProvider p -> new AwsProviderConnection(name, beans);
             case AzureProvider p -> new AzureProviderConnection(name, p, beans);
             case GcpProvider p -> new GcpProviderConnection(name, p);
             case JmsProvider p -> new JmsProviderConnection(name, p, beans);

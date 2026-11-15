@@ -9,7 +9,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import software.amazon.awssdk.services.sns.SnsClient;
+import software.amazon.awssdk.services.sqs.SqsClient;
 
+import java.net.URI;
 import java.time.Duration;
 import java.util.Set;
 
@@ -27,8 +30,9 @@ class MessagingAutoConfigurationTest {
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(MessagingAutoConfiguration.class,
                     MessagingHealthAutoConfiguration.class))
-            .withPropertyValues(AWS + "type=aws", AWS + "region=us-east-1", AWS + "endpoint=http://localhost:4566",
-                    AWS + "access-key=test", AWS + "secret-key=test");
+            .withPropertyValues(AWS + "type=aws")
+            .withBean(SqsClient.class, () -> TestAwsClients.sqs(URI.create("http://localhost:4566")))
+            .withBean(SnsClient.class, () -> TestAwsClients.sns(URI.create("http://localhost:4566")));
 
     /** Sem o provider {@code aws} do {@link #runner}: os testes de nome de provider declaram o único provider AWS. */
     private final ApplicationContextRunner bare = new ApplicationContextRunner()
