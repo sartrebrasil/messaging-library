@@ -71,7 +71,7 @@ class SqsLocalStackTest {
                 .withConfiguration(AutoConfigurations.of(JacksonAutoConfiguration.class, MessagingAutoConfiguration.class,
                         InboxAutoConfiguration.class))
                 .withUserConfiguration(Handler.class)
-                .withPropertyValues("messaging.providers.aws.type=aws", "messaging.providers.aws.region=us-east-1",
+                .withPropertyValues("messaging.providers.aws.type=aws",
                         "messaging.receivers.orders.destination=" + main,
                         "messaging.receivers.orders.dead-letter=orders-dlq",
                         "messaging.receivers.orders.failed=" + failed, "messaging.receivers.orders.key-lanes=4",
@@ -104,7 +104,7 @@ class SqsLocalStackTest {
                 .withConfiguration(AutoConfigurations.of(JacksonAutoConfiguration.class, MessagingAutoConfiguration.class,
                         InboxAutoConfiguration.class))
                 .withUserConfiguration(Handler.class)
-                .withPropertyValues("messaging.providers.aws.type=aws", "messaging.providers.aws.region=us-east-1",
+                .withPropertyValues("messaging.providers.aws.type=aws",
                         "messaging.receivers.orders.destination=nao-existe",
                         "messaging.receivers.orders.failed=" + failed)
                 .run(context -> assertThat(context).hasFailed().getFailure().hasStackTraceContaining(
@@ -140,10 +140,9 @@ class SqsLocalStackTest {
     private static ApplicationContextRunner messagingOnly() {
         return new ApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(MessagingAutoConfiguration.class))
-                .withPropertyValues("messaging.providers.aws.type=aws", "messaging.providers.aws.region=us-east-1",
-                        "messaging.providers.aws.endpoint=http://" + LOCALSTACK.getHost() + ":"
-                                + LOCALSTACK.getMappedPort(4566),
-                        "messaging.providers.aws.access-key=test", "messaging.providers.aws.secret-key=test");
+                // o SqsClient é compartilhado pela classe: o contexto não pode fechá-lo
+                .withBean(SqsClient.class, () -> sqs, definition -> definition.setDestroyMethodName(""))
+                .withPropertyValues("messaging.providers.aws.type=aws");
     }
 
     private static String queue(String name) {

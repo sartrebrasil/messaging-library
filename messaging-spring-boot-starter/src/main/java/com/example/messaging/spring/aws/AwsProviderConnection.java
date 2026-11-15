@@ -10,99 +10,47 @@ import com.example.messaging.spring.ClientBeans;
 import com.example.messaging.spring.MessagingProperties;
 import com.example.messaging.spring.ProviderConnection;
 import org.springframework.beans.factory.ListableBeanFactory;
-import software.amazon.awssdk.awscore.client.builder.AwsClientBuilder;
-import software.amazon.awssdk.awscore.client.builder.AwsSyncClientBuilder;
-import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
-import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
-import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
-import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
-import software.amazon.awssdk.http.apache.ApacheHttpClient;
-import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.sns.SnsClient;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.QueueDoesNotExistException;
 
-import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * SQS e SNS. Beans {@code SqsClient}/{@code SnsClient} da aplicação valem pela regra de {@link ClientBeans}, e só
- * para um provider sem {@code region}, {@code endpoint} nem credenciais; sem eles, um cliente por provider com {@code apache-client} e read
- * timeout de 30 s (acima dos 20 s do long poll).
+ * SQS e SNS sobre os beans {@code SqsClient} e {@code SnsClient} da aplicação (ADR-0011). Cada um é resolvido no
+ * primeiro sender ou receiver que o usa: quem só publica no SNS não declara {@code SqsClient}. O starter não cria nem
+ * fecha cliente algum; região, credenciais e o read timeout acima dos 20 s do long poll são da aplicação.
  */
 public final class AwsProviderConnection implements ProviderConnection {
 
-    private static final System.Logger LOG = System.getLogger(AwsProviderConnection.class.getName());
-
-    private final SqsClient sqs;
-    private final SnsClient sns;
-    private final boolean ownsSqs;
-    private final boolean ownsSns;
+    private final String providerName;
+    private final ListableBeanFactory beans;
+    private volatile SqsClient sqs;
+    private volatile SnsClient sns;
     /** URL de cada nome de fila, resolvida uma vez ({@code GetQueueUrl}). */
     private final Map<String, String> queueUrls = new ConcurrentHashMap<>();
 
-    public AwsProviderConnection(String providerName, MessagingProperties.AwsProvider provider, ListableBeanFactory beans,
-                                 boolean onlyOfItsType) {
-        SqsClient userSqs = ClientBeans.find(beans, SqsClient.class, providerName, onlyOfItsType);
-        SnsClient userSns = ClientBeans.find(beans, SnsClient.class, providerName, onlyOfItsType);
-        if (userSqs != null && userSns != null) {
-            rejectConnectionFields(providerName, provider);
-        }
-        warnIgnoredBean(beans, SqsClient.class, providerName, userSqs, provider);
-        warnIgnoredBean(beans, SnsClient.class, providerName, userSns, provider);
-        this.ownsSqs = userSqs == null;
-        this.ownsSns = userSns == null;
-        this.sqs = ownsSqs ? configure(SqsClient.builder(), provider).build() : userSqs;
-        this.sns = ownsSns ? configure(SnsClient.builder(), provider).build() : userSns;
+    public AwsProviderConnection(String providerName, ListableBeanFactory beans) {
+        this.providerName = providerName;
+        this.beans = beans;
     }
 
-    /**
-     * Existe um bean do tipo e o starter não o usa para este provider (há mais de um provider AWS e o bean não tem o
-     * nome de nenhum deles): o cliente é criado pelas properties e pela cadeia padrão do SDK. É fácil de não perceber.
-     */
-    private static void warnIgnoredBean(ListableBeanFactory beans, Class<?> type, String providerName, Object found,
-                                        MessagingProperties.AwsProvider provider) {
-        if (found == null && beans.getBeanNamesForType(type).length > 0) {
-            LOG.log(System.Logger.Level.WARNING, "messaging.providers.{0}: o bean {1} da aplicação não é usado por este "
-                    + "provider e ele cria o cliente pela cadeia padrão do SDK ({2})", providerName,
-                    type.getSimpleName(), ClientBeans.namingHint(providerName, type));
+    // Sem lock de propósito: duas threads podem resolver o bean ao mesmo tempo, e as duas recebem o mesmo singleton.
+    private SqsClient sqs() {
+        SqsClient client = sqs;
+        if (client == null) {
+            sqs = client = ClientBeans.require(beans, SqsClient.class, providerName);
         }
+        return client;
     }
 
-    private static boolean hasConnectionFields(MessagingProperties.AwsProvider provider) {
-        return provider.region() != null || provider.endpoint() != null || provider.accessKey() != null
-                || provider.secretKey() != null;
-    }
-
-    /**
-     * Com os dois beans da aplicação, as properties de conexão não configurariam nenhum cliente e seriam ignoradas
-     * em silêncio. Com um só, elas ainda configuram o outro cliente (o {@code SnsClient} precisa de região).
-     */
-    private static void rejectConnectionFields(String providerName, MessagingProperties.AwsProvider provider) {
-        if (hasConnectionFields(provider)) {
-            throw new IllegalStateException("messaging.providers." + providerName + ": defina region, endpoint, "
-                    + "access-key e secret-key ou os beans SqsClient e SnsClient, não os dois");
+    private SnsClient sns() {
+        SnsClient client = sns;
+        if (client == null) {
+            sns = client = ClientBeans.require(beans, SnsClient.class, providerName);
         }
-    }
-
-    private static <B extends AwsClientBuilder<B, C> & AwsSyncClientBuilder<B, C>, C> B configure(
-            B builder, MessagingProperties.AwsProvider provider) {
-        builder.credentialsProvider(credentials(provider))
-                .httpClientBuilder(ApacheHttpClient.builder().socketTimeout(Duration.ofSeconds(30)));
-        if (provider.region() != null) {
-            builder.region(Region.of(provider.region()));
-        }
-        if (provider.endpoint() != null) {
-            builder.endpointOverride(provider.endpoint());
-        }
-        return builder;
-    }
-
-    private static AwsCredentialsProvider credentials(MessagingProperties.AwsProvider provider) {
-        return provider.accessKey() != null
-                ? StaticCredentialsProvider.create(AwsBasicCredentials.create(provider.accessKey(), provider.secretKey()))
-                : DefaultCredentialsProvider.builder().build();
+        return client;
     }
 
     @Override
@@ -110,15 +58,15 @@ public final class AwsProviderConnection implements ProviderConnection {
         if (destination.topicArn() != null) {
             long max = destination.maxMessageBytes() != null
                     ? destination.maxMessageBytes() : SnsMessageSender.DEFAULT_MAX_MESSAGE_BYTES;
-            return new SnsMessageSender(sns, destination.topicArn(), max);
+            return new SnsMessageSender(sns(), destination.topicArn(), max);
         }
-        return new SqsMessageSender(sqs, queueUrl(destination));
+        return new SqsMessageSender(sqs(), queueUrl(destination));
     }
 
     @Override
     public MessageReceiver receiver(String name, MessagingProperties.Destination destination,
                                     MessageSender deadLetterSender) {
-        return new SqsMessageReceiver(sqs, queueUrl(destination), deadLetterSender);
+        return new SqsMessageReceiver(sqs(), queueUrl(destination), deadLetterSender);
     }
 
     /** {@code queue-url}, ou o nome da fila resolvido no primeiro uso; exige {@code sqs:GetQueueUrl}. */
@@ -128,7 +76,7 @@ public final class AwsProviderConnection implements ProviderConnection {
         }
         return queueUrls.computeIfAbsent(destination.queue(), name -> {
             try {
-                return sqs.getQueueUrl(r -> r.queueName(name)).queueUrl();
+                return sqs().getQueueUrl(r -> r.queueName(name)).queueUrl();
             } catch (QueueDoesNotExistException e) {
                 throw new DestinationNotFoundException("aws", "fila SQS '" + name + "' não existe", e);
             }
@@ -137,11 +85,6 @@ public final class AwsProviderConnection implements ProviderConnection {
 
     @Override
     public void close() {
-        if (ownsSqs) {
-            sqs.close();
-        }
-        if (ownsSns) {
-            sns.close();
-        }
+        // os clientes são beans da aplicação: quem os declarou os fecha
     }
 }

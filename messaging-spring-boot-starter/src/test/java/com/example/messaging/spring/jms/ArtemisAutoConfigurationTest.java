@@ -11,7 +11,9 @@ import com.example.messaging.spring.MessagingProperties.Options;
 import com.example.messaging.spring.MessagingProperties.Redelivery;
 import com.example.messaging.spring.MessagingProperties.Requirement;
 import java.util.Set;
+import com.example.messaging.jms.JmsDialect;
 import jakarta.jms.Connection;
+import jakarta.jms.ConnectionFactory;
 import jakarta.jms.Session;
 import org.apache.activemq.artemis.api.core.QueueConfiguration;
 import org.apache.activemq.artemis.api.core.RoutingType;
@@ -66,8 +68,16 @@ class ArtemisAutoConfigurationTest {
         return new ApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(MessagingAutoConfiguration.class,
                         MessagingHealthAutoConfiguration.class))
-                .withPropertyValues(ART + "type=artemis", ART + "broker-url=" + url(), ART + "user=artemis",
-                        ART + "password=artemis");
+                .withBean(ConnectionFactory.class, ArtemisAutoConfigurationTest::factory)
+                .withPropertyValues(ART + "type=artemis");
+    }
+
+    /** O que a aplicação declararia (ADR-0011): URL com reconexão e janela 0, e as credenciais do broker. */
+    private static ConnectionFactory factory() {
+        ActiveMQConnectionFactory factory = (ActiveMQConnectionFactory) JmsDialect.ARTEMIS.connectionFactory(url());
+        factory.setUser("artemis");
+        factory.setPassword("artemis");
+        return factory;
     }
 
     @Test

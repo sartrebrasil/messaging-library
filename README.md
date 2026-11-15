@@ -198,21 +198,16 @@ Adicione o starter e os adapters dos provedores usados:
 
 ```yaml
 messaging:
-  providers:
+  providers:                   # só o tipo: o cliente de cada um é um bean da aplicação (veja "Clientes nativos")
     aws:
       type: aws                # aws | azure | gcp | activemq-classic | artemis | rabbitmq
-      region: sa-east-1
     azure:
       type: azure
-      connection-string: ${SERVICEBUS_CONNECTION_STRING}
     gcp:
       type: gcp
-      project: meu-projeto
+      project: meu-projeto     # completa nomes curtos de tópico e subscription
     amq:
-      type: activemq-classic   # sem broker-url, usa o bean jakarta.jms.ConnectionFactory
-      broker-url: failover:(tcp://amq-1:61616,tcp://amq-2:61616)
-      user: ${AMQ_USER}
-      password: ${AMQ_PASSWORD}
+      type: activemq-classic
   senders:                     # provider opcional quando só existe um
     pedidos:
       provider: aws
@@ -251,11 +246,10 @@ reschedule` (Service Bus e ActiveMQ), `ack-deadline`, `ordered` e `exactly-once`
 (ActiveMQ e RabbitMQ, padrão 60 s), `routing-key`, `routing-by-ordering-key` e `confirm-timeout`
 (RabbitMQ, padrão 30 s). Cada opção vale só para os provedores listados; uma opção definida num
 provedor que não a aceita derruba o startup (`messaging.receivers.<n>.options.<opção> não se aplica ao
-provedor <tipo>; vale para: ...`). `false`, `abandon` e conjunto vazio contam como não definidos. No RabbitMQ,
-`broker-url` é a URI AMQP (`amqp://host:5672/vhost`); com
+provedor <tipo>; vale para: ...`). `false`, `abandon` e conjunto vazio contam como não definidos. No RabbitMQ, com
 `routing-by-ordering-key: true`, a routing key de cada envio é o `orderingKey` da mensagem, e o
 `deduplicationId`, quando existe, vira o `message-id`; `redelivery: reschedule` é recusado no
-startup. No Artemis, a `broker-url` ganha `consumerWindowSize=0` quando não define a janela.
+startup.
 
 ```java
 @Autowired MessagingDestinations destinations;
@@ -267,37 +261,160 @@ Receivers (`messaging.receivers`) são consumidos pela messaging-inbox: retry em
 idempotência, redrive e métricas. Guia completo, com exemplos de configuração e diagramas, em
 [`messaging-inbox/README.md`](messaging-inbox/README.md).
 
-Cada tipo de provider aceita só os seus campos: `aws` (`region`, `endpoint`, `access-key`, `secret-key`), `azure`
-(`connection-string`), `gcp` (`project`, `emulator-host`), `activemq-classic`, `artemis` e `rabbitmq` (`broker-url`,
-`user`, `password`). `type` é obrigatório. Chave desconhecida em `providers`, `senders`, `receivers` ou
-`receiver-defaults`, ou campo de outro tipo (`region` num provider `rabbitmq`), derruba o startup, assim como as
-chaves removidas `messaging.destinations` e `inbox.*` (ADR-0008 da messaging-inbox; ADR-0010).
+`type` é obrigatório. Chave desconhecida em `providers`, `senders`, `receivers` ou `receiver-defaults`, ou campo de
+outro tipo (`project` num provider `rabbitmq`), derruba o startup, assim como as chaves removidas
+`messaging.destinations` e `inbox.*` (ADR-0008 da messaging-inbox) e as chaves de conexão do provider (`region`,
+`endpoint`, `access-key`, `secret-key`, `connection-string`, `emulator-host`, `broker-url`, `user`, `password`;
+ADR-0011), com a mensagem dizendo qual bean declarar no lugar.
 
-No ActiveMQ, o starter abre uma conexão por provider no startup e a fecha no shutdown. A lib não
-recria a conexão: a reconexão vem da URL. Com `broker-url`, o `JmsDialect` cuida disso:
-- no Classic, embrulha a URL em `failover:(...)`, salvo `failover:` e `vm:`;
-- no Artemis, acrescenta `reconnectAttempts=-1`;
-- nos dois, o startup ainda falha com o broker fora.
+### Clientes nativos
 
-Num bean `ConnectionFactory` próprio, a reconexão é responsabilidade de quem o configura. Se o bean
-`ConnectionFactory` tiver pool por cima (`pooled-jms`, `CachingConnectionFactory`), o health check
-falha, porque o `checkAccess` precisa da `ActiveMQConnection`. Nesse caso, use `broker-url`.
+O starter não cria cliente de provedor: a aplicação declara um bean por provider, e o starter monta sobre ele os
+senders e receivers de cada fila ou tópico (ADR-0011). Região, credenciais, endpoint, timeouts e a URL do broker são
+da aplicação, junto do resto da infraestrutura dela.
+
+| `type` | Bean da aplicação | Obrigatório |
+|---|---|---|
+| `aws` | `software.amazon.awssdk.services.sqs.SqsClient` | Com algum sender ou receiver SQS |
+| `aws` | `software.amazon.awssdk.services.sns.SnsClient` | Com algum sender SNS |
+| `azure` | `com.azure.messaging.servicebus.ServiceBusClientBuilder` | Sim |
+| `gcp` | `com.google.api.gax.core.CredentialsProvider` | Não: sem ele, Application Default Credentials |
+| `gcp` | `com.google.api.gax.rpc.TransportChannelProvider` | Não: sem ele, o canal padrão do SDK |
+| `activemq-classic`, `artemis` | `jakarta.jms.ConnectionFactory` | Sim |
+| `rabbitmq` | `com.rabbitmq.client.ConnectionFactory` | Sim |
+
+No GCP, o starter cria o cliente de administração de tópicos no startup: sem `CredentialsProvider` e sem
+Application Default Credentials na máquina, o startup falha mesmo que o provider ainda não tenha destinos.
+
+Sem o bean obrigatório, o startup falha com a chave do provider e o tipo do bean. Com mais de um bean do mesmo tipo,
+vale o `@Primary`. Só pode haver um provider por tipo de cliente (`activemq-classic` e `artemis` contam como um); um
+provider de outro tipo convive normalmente (AWS e Azure durante uma migração). O starter fecha só o que criou: a
+`Connection` de JMS e RabbitMQ, o `TopicAdminClient` do GCP e os senders e receivers. Os beans são da aplicação.
+
+```java
+@Configuration(proxyBeanMethods = false)
+class MessagingClients {
+
+    @Bean
+    SqsClient sqsClient() {
+        return SqsClient.create();           // região e credenciais da cadeia padrão do SDK
+    }
+
+    @Bean
+    SnsClient snsClient() {                  // só com envio ao SNS
+        return SnsClient.create();
+    }
+
+    @Bean
+    ServiceBusClientBuilder serviceBusClientBuilder(@Value("${SERVICEBUS_CONNECTION_STRING}") String connectionString) {
+        return new ServiceBusClientBuilder().connectionString(connectionString);   // ou .credential(namespace, tokenCredential)
+    }
+
+    @Bean
+    jakarta.jms.ConnectionFactory jmsConnectionFactory() {
+        // reconexão e, no Artemis, consumerWindowSize=0; a factory devolvida é a do cliente do broker
+        org.apache.activemq.artemis.jms.client.ActiveMQConnectionFactory factory =
+                (org.apache.activemq.artemis.jms.client.ActiveMQConnectionFactory)
+                        JmsDialect.ARTEMIS.connectionFactory("tcp://artemis:61616");
+        factory.setUser("...");              // no Classic: org.apache.activemq.ActiveMQConnectionFactory.setUserName
+        factory.setPassword("...");
+        return factory;
+    }
+
+    @Bean
+    com.rabbitmq.client.ConnectionFactory rabbitConnectionFactory() throws Exception {
+        com.rabbitmq.client.ConnectionFactory factory = new com.rabbitmq.client.ConnectionFactory();
+        factory.setUri("amqp://rabbit:5672/vhost");
+        factory.setUsername("...");
+        factory.setPassword("...");
+        return factory;
+    }
+}
+```
+
+Para LocalStack, `SqsClient.builder().endpointOverride(URI.create("http://localhost:4566"))` com região e credenciais
+estáticas. Para o emulator do Pub/Sub, um `TransportChannelProvider` sobre um canal sem TLS
+(`FixedTransportChannelProvider.create(GrpcTransportChannel.create(ManagedChannelBuilder.forTarget("localhost:8085").usePlaintext().build()))`)
+e um `NoCredentialsProvider`.
+
+O que passa a ser da aplicação, e a lib não consegue validar:
+
+- **AWS, read timeout acima do long poll.** O receiver SQS espera até 20 s por mensagem. O padrão do SDK (30 s,
+  conferido no AWS SDK 2.55.6) serve; um `SqsClient` configurado com read ou socket timeout abaixo de 20 s corta o
+  long poll e o receive falha de forma intermitente. O SDK não expõe o timeout de um cliente pronto, então o starter
+  não tem como checar.
+- **JMS, factory sem pool nem cache.** O `checkAccess` precisa da conexão do cliente do broker. Com um
+  `CachingConnectionFactory` (Spring) ou um `JmsPoolConnectionFactory` por cima, o health check falha com
+  `UnsupportedOperationException`, e a checagem de `consumerWindowSize=0` do Artemis é pulada, porque a conexão não é
+  a do cliente do broker. No ActiveMQ Classic, envio e consumo continuam funcionando (rodado com o
+  `CachingConnectionFactory` do Spring 7.0.9 e as propriedades que o Boot aplica por padrão).
+  - O autoconfigure do Spring Boot (ActiveMQ e Artemis, conferido nas fontes do 4.1.1) só declara
+    `jmsConnectionFactory` quando a aplicação **não** declara nenhum `jakarta.jms.ConnectionFactory`
+    (`@ConditionalOnMissingBean`). Declarar o bean da lib, como no exemplo acima, desliga o do Boot: não precisa de
+    `@Primary`.
+  - Sem bean próprio, o starter usaria o do Boot, que por padrão é um `CachingConnectionFactory`
+    (`spring.jms.cache.enabled`, padrão `true`) ou, com `spring.activemq.pool.enabled=true` /
+    `spring.artemis.pool.enabled=true`, um `JmsPoolConnectionFactory`. É o caso acima. Evite: declare a factory da lib.
+  - O bean da lib é o `ConnectionFactory` da aplicação inteira: o resto do código JMS dela (`JmsTemplate`,
+    `@JmsListener`) o usa também.
+- **Artemis, janela do consumer.** A factory precisa de `consumerWindowSize=0`; sem ela, `receiver(nome)` lança
+  `IllegalArgumentException`, desde que a conexão seja a do cliente do broker (com cache ou pool por cima, a checagem
+  é pulada, e o padrão do cliente Artemis é 1 MiB: o broker manda mensagens a mais para o buffer do consumer, presas
+  sem lease; o Boot não define a janela). `JmsDialect.ARTEMIS.connectionFactory(url)` já aplica.
+- **Reconexão e credenciais** de JMS e RabbitMQ são da factory: o starter chama `createConnection()` sem usuário nem senha. `JmsDialect.<X>.connectionFactory(url)` cuida da
+  reconexão: no Classic, embrulha a URL em `failover:(...)`, salvo `failover:` e `vm:`; no Artemis, acrescenta
+  `reconnectAttempts=-1`. Nos dois, o startup ainda falha com o broker fora.
+
+### Migrando do ADR-0010
+
+O starter deixou de criar clientes e de aceitar as chaves de conexão do provider (ADR-0011). Cada uma tem um
+substituto na aplicação:
+
+| Antes (YAML de `messaging.providers.<nome>`) | Agora |
+|---|---|
+| `aws`: `region`, `endpoint`, `access-key`, `secret-key` | Beans `SqsClient` e `SnsClient`, com região, endpoint e credenciais no builder |
+| `azure`: `connection-string` | Bean `ServiceBusClientBuilder` |
+| `gcp`: `emulator-host` | Beans `TransportChannelProvider` (canal sem TLS) e `NoCredentialsProvider` |
+| `gcp`: `project` | Continua no YAML |
+| `activemq-classic`, `artemis`: `broker-url`, `user`, `password` | Bean `jakarta.jms.ConnectionFactory`, com `JmsDialect.<X>.connectionFactory(url)` e as credenciais na factory |
+| `rabbitmq`: `broker-url`, `user`, `password` | Bean `com.rabbitmq.client.ConnectionFactory` |
+| Bean com o nome do provider (`aws`) ou `<provider><Tipo>` (`awsSnsClient`) | Qualquer nome; vale o bean do tipo, e `@Primary` desempata |
+| Bean ignorado com aviso (AWS) ou falha (Azure, JMS, RabbitMQ) | Não existe mais: sem o bean obrigatório, o startup falha |
+| Properties de conexão e bean juntos no AWS derrubavam o startup | Não há properties de conexão, então não há conflito |
+| Dois providers do mesmo tipo (duas contas AWS, `artemis` e `activemq-classic`) | Derruba o startup: um provider por tipo de cliente. Providers de tipos diferentes convivem |
+
+Na API Java, os records de `MessagingProperties` (`AwsProvider`, `AzureProvider`, `GcpProvider`, `JmsProvider`,
+`RabbitProvider`) e os construtores dos `*ProviderConnection` mudaram.
+
+Os erros de startup de `messaging.providers`, todos em português e com a chave completa:
+
+| Mensagem | Quando |
+|---|---|
+| `messaging.providers.<nome>: declare um bean <tipo> (ADR-0011)` | Falta o bean obrigatório da tabela de "Clientes nativos" |
+| `messaging.providers.<nome>: há mais de um bean <tipo>; marque um com @Primary (ADR-0011)` | Dois beans do tipo e nenhum `@Primary` |
+| `messaging.providers: a e b usam o mesmo cliente nativo; um provider por tipo (ADR-0011)` | Dois providers do mesmo grupo (`activemq-classic` e `artemis` contam como um) |
+| `messaging.providers.<nome>.<chave> foi removida (ADR-0011): configure <beans> na aplicação` | O YAML ainda tem `region`, `endpoint`, `access-key`, `secret-key`, `connection-string`, `emulator-host`, `broker-url`, `user` ou `password` |
+
+Chaves removidas, chave desconhecida e campo de outro tipo, de todos os providers, saem juntos na mesma mensagem
+(`Configuração inválida de messaging.providers:`). `type` ausente aborta no primeiro erro.
+
+### Limites conhecidos
+
+- O read timeout de um `SqsClient` da aplicação não é validado: o SDK não o expõe. O padrão (30 s) serve; abaixo de
+  20 s, o long poll é cortado.
+- No GCP, o cliente de administração de tópicos é criado no startup: sem credenciais padrão nem `CredentialsProvider`,
+  o startup falha mesmo sem destinos.
+- Verificado: o read timeout padrão do AWS SDK 2.55.6; as fontes do autoconfigure de JMS do Spring Boot 4.1.1; o
+  ActiveMQ Classic atrás de um `CachingConnectionFactory` (Spring 7.0.9).
+- Não verificado: o Artemis e o `pooled-jms` atrás de cache ou pool (só lido no código), e o efeito, no `JmsTemplate`
+  da aplicação, de usar a factory da lib. Detalhes e pendências no
+  [ADR-0011](docs/adr/0011-clientes-nativos-da-aplicacao.md#implementação-2026-11-15).
+
+### Validação, métricas, tracing e health
 
 - O startup falha listando todos os erros de configuração, e em seguida confere o `require`
   (`ordered-delivery`, `delayed-redelivery`, `native-dead-letter`, `publisher-deduplication`,
   `lease-expired-on-ack`) contra as capabilities dos adapters.
-- Clientes: o starter cria e fecha o cliente de cada provider a partir das properties. Um bean da
-  aplicação (`SqsClient`/`SnsClient`, `ServiceBusClientBuilder`, `jakarta.jms.ConnectionFactory`,
-  `com.rabbitmq.client.ConnectionFactory`) vale no lugar dele quando o provider não define os campos de
-  conexão, e o starter não o fecha. O bean é o do tipo, qualquer que seja o nome, só quando nenhum outro provider
-  usa o mesmo tipo de cliente (`activemq-classic` e `artemis` contam como um); com vários, só vale o bean com o
-  nome do provider (`aws`) ou `<provider><Tipo>` (`awsSnsClient`; um provider AWS tem dois clientes). No AWS,
-  os dois beans (`SqsClient` e `SnsClient`) junto com `region`, `endpoint` ou credenciais derrubam o startup (as
-  properties não configurariam cliente nenhum); com um bean só, as properties configuram o outro cliente. No AWS,
-  um bean que o starter não usa (há mais de um provider `aws` e ele não tem o nome de nenhum) gera um aviso no log.
-  No Azure, JMS e RabbitMQ, `connection-string` e `broker-url` vencem o bean, e a mensagem de "defina ... ou declare
-  um bean" diz como nomeá-lo. No GCP não há bean: credenciais padrão do Google, ou
-  `emulator-host` para o emulator.
 - Métricas (com `MeterRegistry`; referência completa em [docs/metricas.md](docs/metricas.md)): timers `messaging.send.duration`, `messaging.receive.duration`, `messaging.ack.duration`,
   `messaging.nack.duration`, `messaging.dead.letter.duration` com `provider`, `destination`, `exception` (nome simples da classe lançada, ou `none`) e `outcome`
   (`success`, `error` e, em lote com falha parcial, `partial`; `send` e `ack` têm também `batch`), a

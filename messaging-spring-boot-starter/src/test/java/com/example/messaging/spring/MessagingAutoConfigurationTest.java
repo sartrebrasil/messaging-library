@@ -5,12 +5,22 @@ import com.example.messaging.MessageSender;
 import com.example.messaging.aws.SnsMessageSender;
 import com.example.messaging.spring.MessagingProperties.Endpoint;
 import com.example.messaging.spring.MessagingProperties.Options;
+import com.azure.messaging.servicebus.ServiceBusClientBuilder;
+import com.google.api.gax.core.CredentialsProvider;
+import com.google.api.gax.core.NoCredentialsProvider;
+import com.google.api.gax.rpc.TransportChannelProvider;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
 import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import software.amazon.awssdk.services.sns.SnsClient;
+import software.amazon.awssdk.services.sqs.SqsClient;
 
+import java.net.URI;
 import java.time.Duration;
+import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -27,8 +37,14 @@ class MessagingAutoConfigurationTest {
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(MessagingAutoConfiguration.class,
                     MessagingHealthAutoConfiguration.class))
-            .withPropertyValues(AWS + "type=aws", AWS + "region=us-east-1", AWS + "endpoint=http://localhost:4566",
-                    AWS + "access-key=test", AWS + "secret-key=test");
+            .withPropertyValues(AWS + "type=aws")
+            .withBean(SqsClient.class, () -> TestAwsClients.sqs(URI.create("http://localhost:4566")))
+            .withBean(SnsClient.class, () -> TestAwsClients.sns(URI.create("http://localhost:4566")));
+
+    /** Sem o provider {@code aws} do {@link #runner}: os testes de nome de provider declaram o único provider AWS. */
+    private final ApplicationContextRunner bare = new ApplicationContextRunner()
+            .withConfiguration(AutoConfigurations.of(MessagingAutoConfiguration.class,
+                    MessagingHealthAutoConfiguration.class));
 
     private static Endpoint queue(String url) {
         return new Endpoint(url, null, null, null);
@@ -143,7 +159,7 @@ class MessagingAutoConfigurationTest {
 
     @Test
     void environmentVariableFormsOfTheRootsAreAccepted() {
-        runner.withInitializer(c -> c.getEnvironment().getPropertySources().addFirst(
+        bare.withInitializer(c -> c.getEnvironment().getPropertySources().addFirst(
                         new org.springframework.core.env.SystemEnvironmentPropertySource("env", java.util.Map.of(
                                 "MESSAGING_RECEIVERDEFAULTS_POLLWAIT", "1s", "MESSAGING_RECEIVERSENABLED", "true"))))
                 .run(context -> assertThat(context).hasNotFailed());
@@ -185,11 +201,10 @@ class MessagingAutoConfigurationTest {
 
     @Test
     void azureAndGcpRulesAreValidated() {
-        runner.withPropertyValues(
-                        "messaging.providers.azure.type=azure",
-                        "messaging.providers.azure.connection-string=" + AZURE,
-                        "messaging.providers.gcp.type=gcp",
-                        "messaging.providers.gcp.emulator-host=localhost:8085")
+        runner.withPropertyValues("messaging.providers.azure.type=azure", "messaging.providers.gcp.type=gcp")
+                .withBean(ServiceBusClientBuilder.class, () -> new ServiceBusClientBuilder().connectionString(AZURE))
+                .withBean(TransportChannelProvider.class, () -> TestGcpClients.provider(TestGcpClients.plaintext("localhost:8085")))
+                .withBean(CredentialsProvider.class, NoCredentialsProvider::create)
                 .run(context -> {
                     MessagingDestinations destinations = context.getBean(MessagingDestinations.class);
                     assertThat(destinations.validate("messaging.receivers.sb", "azure", new Endpoint("pedidos", null,
@@ -208,8 +223,8 @@ class MessagingAutoConfigurationTest {
     void azureDeadLetterQueueIsReceiveOnly() {
         ApplicationContextRunner azure = new ApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(MessagingAutoConfiguration.class))
-                .withPropertyValues("messaging.providers.azure.type=azure",
-                        "messaging.providers.azure.connection-string=" + AZURE);
+                .withBean(ServiceBusClientBuilder.class, () -> new ServiceBusClientBuilder().connectionString(AZURE))
+                .withPropertyValues("messaging.providers.azure.type=azure");
         Options dlq = new Options(null, null, null, null, null, null, null, true, null, null, null, null);
         Options sessionsDlq = new Options(null, true, null, null, null, null, null, true, null, null, null, null);
 
@@ -240,8 +255,9 @@ class MessagingAutoConfigurationTest {
 
     @Test
     void durationOptionsBind() {
-        runner.withPropertyValues("messaging.providers.gcp.type=gcp", "messaging.providers.gcp.project=p",
-                        "messaging.providers.gcp.emulator-host=localhost:8085",
+        runner.withBean(TransportChannelProvider.class, () -> TestGcpClients.provider(TestGcpClients.plaintext("localhost:8085")))
+                .withBean(CredentialsProvider.class, NoCredentialsProvider::create)
+                .withPropertyValues("messaging.providers.gcp.type=gcp", "messaging.providers.gcp.project=p",
                         "messaging.senders.pedidos.provider=gcp", "messaging.senders.pedidos.destination=pedidos",
                         "messaging.senders.pedidos.options.ack-deadline=5s")
                 .run(context -> assertThat(context.getBean(MessagingProperties.class).senders().get("pedidos")
@@ -250,9 +266,9 @@ class MessagingAutoConfigurationTest {
 
     @Test
     void providerFieldOfAnotherTypeFails() {
-        runner.withPropertyValues("messaging.providers.r.type=rabbitmq", "messaging.providers.r.region=us-east-1")
+        runner.withPropertyValues("messaging.providers.r.type=rabbitmq", "messaging.providers.r.project=p")
                 .run(context -> assertThat(context).getFailure().rootCause()
-                        .hasMessageContaining("messaging.providers.r.region"));
+                        .hasMessageContaining("messaging.providers.r.project"));
     }
 
     @Test
@@ -264,27 +280,72 @@ class MessagingAutoConfigurationTest {
 
     @Test
     void providerNamesWithUppercaseAndUnderscoreBind() {
-        runner.withPropertyValues("messaging.providers.Aws_Prod.type=aws", "messaging.providers.Aws_Prod.region=sa-east-1")
-                .run(context -> assertThat(context.getBean(MessagingProperties.class).providers().values())
-                        .filteredOn(p -> p instanceof MessagingProperties.AwsProvider aws
-                                && "sa-east-1".equals(aws.region()))
-                        .hasSize(1));
+        bare.withPropertyValues("messaging.providers.Aws_Prod.type=aws")
+                .run(context -> assertThat(context.getBean(MessagingProperties.class).providers().get("Aws_Prod"))
+                        .isInstanceOf(MessagingProperties.AwsProvider.class));
     }
 
     @Test
     void typedProviderBindsFromEnvironmentVariables() {
-        runner.withInitializer(c -> c.getEnvironment().getPropertySources().addFirst(
+        bare.withInitializer(c -> c.getEnvironment().getPropertySources().addFirst(
                         new org.springframework.core.env.SystemEnvironmentPropertySource("test-systemEnvironment", java.util.Map.of(
-                                "MESSAGING_PROVIDERS_ENVAWS_TYPE", "aws", "MESSAGING_PROVIDERS_ENVAWS_REGION", "us-west-2"))))
+                                "MESSAGING_PROVIDERS_ENVAWS_TYPE", "aws"))))
                 .run(context -> assertThat(context.getBean(MessagingProperties.class).providers().get("envaws"))
-                        .isInstanceOfSatisfying(MessagingProperties.AwsProvider.class,
-                                aws -> assertThat(aws.region()).isEqualTo("us-west-2")));
+                        .isInstanceOf(MessagingProperties.AwsProvider.class));
     }
 
     @Test
     void providerNameWithADotBinds() {
-        runner.withPropertyValues("messaging.providers[a.b].type=aws", "messaging.providers[a.b].region=sa-east-1")
+        bare.withPropertyValues("messaging.providers[a.b].type=aws")
                 .run(context -> assertThat(context.getBean(MessagingProperties.class).providers())
                         .containsKey("a.b"));
+    }
+
+    @Test
+    void removedKeysAreReportedTogether() {
+        bare.withPropertyValues("messaging.providers.aws.type=aws", "messaging.providers.aws.region=sa-east-1",
+                        "messaging.providers.r.type=rabbitmq", "messaging.providers.r.broker-url=amqp://x",
+                        "messaging.providers.r.user=u")
+                .run(context -> assertThat(context).getFailure().rootCause()
+                        .hasMessageContaining("messaging.providers.aws.region foi removida (ADR-0011): "
+                                + "configure o bean SqsClient (e o SnsClient, se enviar ao SNS) na aplicação")
+                        .hasMessageContaining("messaging.providers.r.broker-url foi removida (ADR-0011): "
+                                + "configure o bean com.rabbitmq.client.ConnectionFactory na aplicação")
+                        .hasMessageContaining("messaging.providers.r.user foi removida (ADR-0011)"));
+    }
+
+    @Test
+    void gcpProjectStillBinds() {
+        Binder binder = new Binder(new MapConfigurationPropertySource(Map.of(
+                "messaging.providers.gcp.type", "gcp", "messaging.providers.gcp.project", "p")));
+
+        assertThat(MessagingProperties.bind(binder).providers().get("gcp"))
+                .isEqualTo(new MessagingProperties.GcpProvider(MessagingProperties.Type.GCP, "p"));
+    }
+
+    @Test
+    void removedKeyDoesNotHideAnotherProvidersProblems() {
+        bare.withPropertyValues("messaging.providers.aws.type=aws", "messaging.providers.aws.region=sa-east-1",
+                        "messaging.providers.r.type=rabbitmq", "messaging.providers.r.project=p")
+                .run(context -> assertThat(context).getFailure().rootCause()
+                        .hasMessageContaining("messaging.providers.aws.region foi removida (ADR-0011)")
+                        .hasMessageContaining("messaging.providers.r.project"));
+    }
+
+    @Test
+    void removedKeyOnProviderNameWithADotIsReported() {
+        bare.withPropertyValues("messaging.providers[a.b].type=aws", "messaging.providers[a.b].region=sa-east-1")
+                .run(context -> assertThat(context).getFailure().rootCause()
+                        .hasMessageContaining("messaging.providers.a.b.region foi removida (ADR-0011)"));
+    }
+
+    @Test
+    void removedKeyFromEnvironmentVariableIsReported() {
+        bare.withInitializer(c -> c.getEnvironment().getPropertySources().addFirst(
+                        new org.springframework.core.env.SystemEnvironmentPropertySource("test-systemEnvironment", Map.of(
+                                "MESSAGING_PROVIDERS_ENVR_TYPE", "rabbitmq",
+                                "MESSAGING_PROVIDERS_ENVR_BROKERURL", "amqp://x"))))
+                .run(context -> assertThat(context).getFailure().rootCause()
+                        .hasMessageContaining("messaging.providers.envr.broker-url foi removida (ADR-0011)"));
     }
 }

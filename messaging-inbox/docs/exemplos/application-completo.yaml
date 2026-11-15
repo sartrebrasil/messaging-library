@@ -7,20 +7,16 @@ messaging:
   # false: nenhum receiver sobe (útil para desligar o consumo por ambiente). Padrão: true.
   receivers-enabled: ${RECEIVERS_ENABLED:true}
 
-  # Conexões. O nome (aws, rabbit, azure) é usado em "provider" dos receivers.
+  # Providers. O nome (aws, rabbit, azure) é usado em "provider" dos receivers. Só o tipo fica aqui: o cliente de cada
+  # um (SqsClient e SnsClient, com.rabbitmq.client.ConnectionFactory, ServiceBusClientBuilder) é um bean da aplicação
+  # (ADR-0011), com região, endpoint, credenciais e URL do broker. Um provider por tipo de cliente.
   providers:
     aws:
       type: aws
-      region: sa-east-1
-      # endpoint: http://localhost:4566     # LocalStack
     rabbit:
       type: rabbitmq
-      broker-url: amqp://rabbit:5672/vhost
-      user: ${RABBIT_USER}
-      password: ${RABBIT_PASSWORD}
     azure:
       type: azure
-      connection-string: ${SERVICEBUS_CONNECTION_STRING}
 
   # Valem para todos os receivers; cada receiver pode sobrescrever chave por chave.
   # NÃO aceita: destination, subscription, dead-letter, failed, enabled, options, retry.delayed.queues.

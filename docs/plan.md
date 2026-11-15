@@ -23,7 +23,7 @@ lib: desde 2026-11-05, o módulo `messaging-inbox` deste repo, que consome pelo
 | Confirmação | `ack`, `nack(delay)`, `extendLease`, `deadLetter` com fallback explícito | [0005](adr/0005-ack-nack-lease-dead-letter.md) |
 | Ordem e duplicidade | `orderingKey` e `deduplicationId` opcionais; garantia informada por capability; sessions do Service Bus na v1 | [0006](adr/0006-ordenacao-e-deduplicacao.md) |
 | Capabilities e erros | `Capabilities` por receiver/sender; hierarquia `MessagingException` | [0007](adr/0007-capabilities-e-erros.md) |
-| Spring e observabilidade | Starter monta clientes e destinos por nome; métricas e tracing como decorators | [0008](adr/0008-spring-boot-e-observabilidade.md) |
+| Spring e observabilidade | Starter monta destinos por nome sobre os clientes nativos da aplicação; métricas e tracing como decorators | [0008](adr/0008-spring-boot-e-observabilidade.md), [0011](adr/0011-clientes-nativos-da-aplicacao.md) |
 | Coordenadas | `com.example:messaging-*`, pacote `com.example.messaging`, Java 21, Spring Boot 4.x | este plano |
 | Distribuição | Igual à storage-lib: `mvn install` local; publicação decidida depois | este plano |
 | SDKs | SDK oficial de cada provedor, sem Spring Cloud AWS/Azure/GCP/OCI | [0001](adr/0001-escopo.md) |
@@ -134,6 +134,7 @@ Exceções: `MessagingException` > `DestinationNotFoundException`,
 | F7 | `messaging-jms` para ActiveMQ Classic ([spike](spikes/f7-activemq-classic.md), ADR-0009) | Contrato verde contra `apache/activemq-classic:6.2.0` | Concluída: 26 testes verdes no contrato (2 pulados: destino inexistente, por causa do auto-create; envio sem `orderingKey` aceito) e 3 em `JmsErrorsTest`. Starter com o tipo `activemq-classic`: 4 testes com broker embutido (`vm://`) |
 | F8 | Artemis no `messaging-jms` ([spike](spikes/f8-activemq-artemis.md), ADR-0009) | Contrato verde contra `apache/activemq-artemis:2.40.0` sem auto-create | Concluída: `JmsDialect` com Classic e Artemis. 28 testes verdes no contrato do Artemis (1 pulado: envio sem `orderingKey` aceito), inclusive destino inexistente, `_AMQ_DUPL_ID`, multicast por FQQN e conexão com janela recusada. Starter com o tipo `artemis`: 2 testes com container |
 | F9 | `messaging-rabbitmq` ([spike](spikes/f9-rabbitmq.md), ADR-0009) | Contrato verde contra `rabbitmq:4.1-management-alpine` | Concluída: receiver por `basicGet` (pull, sem consumer). 24 testes verdes no contrato (4 pulados: `nack` com atraso e ordem), inclusive destino inexistente; fanout e classic queue em testes próprios. Starter com o tipo `rabbitmq`: 3 testes com container |
+| F10 | Starter com clientes nativos da aplicação ([plano](superpowers/plans/2026-11-15-clientes-nativos-da-aplicacao.md), ADR-0011) | Starter sem criar `SqsClient`, `SnsClient`, `ServiceBusClientBuilder`, canal do GCP nem `ConnectionFactory` | Concluída: bean por tipo (`@Primary` com vários), um provider por tipo de cliente, YAML do provider só com `type` (e `project` no GCP), chaves de conexão removidas falham com mensagem de migração. 173 testes no starter, com Docker. Pendências no ADR-0011 |
 
 Depois da v1, sem data: `messaging-oci` (Queue; mocks e contrato manual em fila
 real), streaming pull no Pub/Sub atrás da mesma API, envio com atraso

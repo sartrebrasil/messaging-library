@@ -10,12 +10,18 @@ import com.example.messaging.spring.MessagingProperties.Endpoint;
 import com.example.messaging.spring.MessagingProperties.Options;
 import com.example.messaging.spring.MessagingProperties.Redelivery;
 import com.example.messaging.MessageSender;
+import com.example.messaging.jms.JmsDialect;
+import jakarta.jms.Connection;
+import jakarta.jms.ConnectionFactory;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.boot.health.contributor.Status;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
@@ -29,11 +35,16 @@ class ActiveMqAutoConfigurationTest {
     private static final String PEDIDOS = "messaging.senders.pedidos.";
 
     // um broker por teste: o vm:// para quando a última conexão fecha
-    private final ApplicationContextRunner runner = new ApplicationContextRunner()
+    private final String vm = "vm://" + UUID.randomUUID() + "?broker.persistent=false&broker.useJmx=false";
+
+    private final ApplicationContextRunner base = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(MessagingAutoConfiguration.class,
                     MessagingHealthAutoConfiguration.class))
-            .withPropertyValues(AMQ + "type=activemq-classic",
-                    AMQ + "broker-url=vm://" + UUID.randomUUID() + "?broker.persistent=false&broker.useJmx=false");
+            .withPropertyValues(AMQ + "type=activemq-classic");
+
+    /** O {@code ConnectionFactory} que a aplicação declararia (ADR-0011). */
+    private final ApplicationContextRunner runner = base
+            .withBean(ConnectionFactory.class, () -> JmsDialect.ACTIVEMQ_CLASSIC.connectionFactory(vm));
 
     private static Endpoint queue(String name) {
         return new Endpoint(name, null, null, null);
@@ -109,9 +120,46 @@ class ActiveMqAutoConfigurationTest {
     void unreachableBrokerFailsStartup() {
         new ApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(MessagingAutoConfiguration.class))
-                .withPropertyValues(AMQ + "type=activemq-classic",
-                        AMQ + "broker-url=tcp://localhost:1?connectionTimeout=500",
-                        PEDIDOS + "destination=pedidos")
+                .withBean(ConnectionFactory.class, () -> JmsDialect.ACTIVEMQ_CLASSIC
+                        .connectionFactory("tcp://localhost:1?connectionTimeout=500"))
+                .withPropertyValues(AMQ + "type=activemq-classic", PEDIDOS + "destination=pedidos")
                 .run(context -> assertThat(context).getFailure().hasStackTraceContaining("não conectou ao broker"));
+    }
+
+    /** Um pool entrega conexões que não são a do cliente do broker: aqui, proxies sobre a conexão de verdade. */
+    private static ConnectionFactory pooled(ConnectionFactory real) {
+        return (ConnectionFactory) Proxy.newProxyInstance(ConnectionFactory.class.getClassLoader(),
+                new Class<?>[]{ConnectionFactory.class}, (proxy, method, args) -> {
+                    Object result = invoke(real, method, args);
+                    return method.getName().equals("createConnection")
+                            ? Proxy.newProxyInstance(Connection.class.getClassLoader(), new Class<?>[]{Connection.class},
+                            (p, m, a) -> invoke(result, m, a))
+                            : result;
+                });
+    }
+
+    private static Object invoke(Object target, Method method, Object[] args) throws Throwable {
+        try {
+            return method.invoke(target, args);
+        } catch (InvocationTargetException e) {
+            throw e.getCause();
+        }
+    }
+
+    @Test
+    void connectionFactoryWithAPoolFailsOnlyTheHealthCheck() {
+        base.withBean(ConnectionFactory.class, () -> pooled(JmsDialect.ACTIVEMQ_CLASSIC.connectionFactory(vm)))
+                .withPropertyValues(PEDIDOS + "destination=pedidos", "management.health.messaging.enabled=true")
+                .run(context -> {
+                    MessagingDestinations destinations = context.getBean(MessagingDestinations.class);
+                    destinations.sender("pedidos").send(OutgoingMessage.ofText("pedido"));
+                    try (MessageReceiver receiver = destinations.receiver("pedidos", null, queue("pedidos"), null)) {
+                        assertThat(receiver.receive(1, Duration.ofSeconds(5))).hasSize(1);
+                    }
+                    var health = context.getBean(HealthIndicator.class).health();
+                    assertThat(health.getStatus()).isEqualTo(Status.DOWN);
+                    assertThat(health.getDetails().get("pedidos").toString())
+                            .startsWith("UnsupportedOperationException");
+                });
     }
 }

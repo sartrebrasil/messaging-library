@@ -1,6 +1,6 @@
 # ADR-0010: Configuração tipada dos providers no starter
 
-- Status: aceito
+- Status: aceito; a seção 1 ("Uma regra única para o bean da aplicação") foi substituída pelo [ADR-0011](0011-clientes-nativos-da-aplicacao.md)
 - Data: 2026-11-14
 - Relacionada: [ADR-0008](0008-spring-boot-e-observabilidade.md), [ADR-0009](0009-activemq-e-rabbitmq.md)
 
@@ -116,7 +116,10 @@ implementação:
 
 ### Pendências conhecidas
 
-Achados de revisão deixados de fora, nenhum é regressão em relação ao comportamento anterior, exceto onde indicado:
+Achados de revisão deixados de fora, nenhum é regressão em relação ao comportamento anterior, exceto onde indicado.
+Atualização de 2026-11-15 ([ADR-0011](0011-clientes-nativos-da-aplicacao.md)): a regra do bean e os campos de conexão
+saíram do starter; o item de `type` ausente continua, e `aws-prod`/`awsprod` agora falham no startup quando têm o mesmo
+tipo de cliente.
 
 - Variável de ambiente de provider sem `type` aponta o nome errado na mensagem (`MESSAGING_PROVIDERS_AWS_PROD_TYPE`
   vira `aws.prod`). Regressão de mensagem; o comportamento é o mesmo.

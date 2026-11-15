@@ -6,11 +6,13 @@ import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.bind.handler.NoUnboundElementsBindHandler;
 import org.springframework.boot.context.properties.source.ConfigurationPropertyName;
 
-import java.net.URI;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * {@code messaging.providers.<nome>} e {@code messaging.senders.<nome>} (ADR-0008). Os receivers
@@ -70,6 +72,22 @@ public record MessagingProperties(Map<String, Provider> providers, Map<String, S
                 binder.bind("messaging.senders", Bindable.mapOf(String.class, Sender.class), strict).orElse(null));
     }
 
+    /** Chaves de conexão que o ADR-0011 tirou do YAML, sem hífen e em minúsculas, com o nome como se escreve. */
+    private static final Map<String, String> REMOVED = Map.of("region", "region", "endpoint", "endpoint",
+            "accesskey", "access-key", "secretkey", "secret-key", "connectionstring", "connection-string",
+            "emulatorhost", "emulator-host", "brokerurl", "broker-url", "user", "user", "password", "password");
+
+    /** O que a aplicação declara no lugar das chaves removidas de cada tipo. */
+    private static String replacement(Type type) {
+        return switch (type) {
+            case AWS -> "o bean SqsClient (e o SnsClient, se enviar ao SNS)";
+            case AZURE -> "o bean ServiceBusClientBuilder";
+            case GCP -> "os beans TransportChannelProvider e CredentialsProvider";
+            case ACTIVEMQ_CLASSIC, ARTEMIS -> "o bean jakarta.jms.ConnectionFactory";
+            case RABBITMQ -> "o bean com.rabbitmq.client.ConnectionFactory";
+        };
+    }
+
     /** Só para listar os providers e ler o {@code type} de cada um; o resto é de {@link #bindProviders}. */
     record TypeOnly(Type type) {
     }
@@ -77,6 +95,7 @@ public record MessagingProperties(Map<String, Provider> providers, Map<String, S
     /** Lê {@code type} de cada provider e liga o resto ao record daquele tipo, em modo estrito. */
     private static Map<String, Provider> bindProviders(Binder binder, BindHandler strict) {
         Map<String, Provider> providers = new LinkedHashMap<>();
+        List<String> problems = new ArrayList<>();
         Map<String, TypeOnly> types = binder.bind("messaging.providers", Bindable.mapOf(String.class, TypeOnly.class))
                 .orElse(Map.of());
         // os nomes vêm de um mapa sem tipo de valor: um provider sem type não aparece em types
@@ -92,14 +111,41 @@ public record MessagingProperties(Map<String, Provider> providers, Map<String, S
                     ConfigurationPropertyName node = name.contains(".")
                             ? ConfigurationPropertyName.of("messaging.providers[" + name + "]")
                             : ConfigurationPropertyName.adapt("messaging.providers." + name, '.');
-                    providers.put(name, switch (typeOnly.type()) {
-                        case AWS -> binder.bind(node, Bindable.of(AwsProvider.class), strict).get();
-                        case AZURE -> binder.bind(node, Bindable.of(AzureProvider.class), strict).get();
-                        case GCP -> binder.bind(node, Bindable.of(GcpProvider.class), strict).get();
-                        case ACTIVEMQ_CLASSIC, ARTEMIS -> binder.bind(node, Bindable.of(JmsProvider.class), strict).get();
-                        case RABBITMQ -> binder.bind(node, Bindable.of(RabbitProvider.class), strict).get();
-                    });
+                    // a chave removida seria "desconhecida" no binding estrito: aqui a mensagem diz o que fazer
+                    int before = problems.size();
+                    new TreeSet<>(binder.bind(node, Bindable.mapOf(String.class, Object.class)).orElse(Map.of()).keySet())
+                            .forEach(key -> {
+                                String known = REMOVED.get(key.replace("-", "").toLowerCase(java.util.Locale.ROOT));
+                                if (known != null) {
+                                    problems.add("messaging.providers." + name + "." + known + " foi removida (ADR-0011): "
+                                            + "configure " + replacement(typeOnly.type()) + " na aplicação");
+                                }
+                            });
+                    if (problems.size() > before) {
+                        return;
+                    }
+                    try {
+                        providers.put(name, switch (typeOnly.type()) {
+                            case AWS -> binder.bind(node, Bindable.of(AwsProvider.class), strict).get();
+                            case AZURE -> binder.bind(node, Bindable.of(AzureProvider.class), strict).get();
+                            case GCP -> binder.bind(node, Bindable.of(GcpProvider.class), strict).get();
+                            case ACTIVEMQ_CLASSIC, ARTEMIS ->
+                                    binder.bind(node, Bindable.of(JmsProvider.class), strict).get();
+                            case RABBITMQ -> binder.bind(node, Bindable.of(RabbitProvider.class), strict).get();
+                        });
+                    } catch (RuntimeException e) {
+                        // junto dos outros problemas: o usuário corrige tudo de uma vez
+                        Throwable root = e;
+                        while (root.getCause() != null) {
+                            root = root.getCause();
+                        }
+                        problems.add(root.getMessage());
+                    }
                 });
+        if (!problems.isEmpty()) {
+            throw new IllegalStateException("Configuração inválida de messaging.providers:\n - "
+                    + String.join("\n - ", problems));
+        }
         return providers;
     }
 
@@ -123,46 +169,31 @@ public record MessagingProperties(Map<String, Provider> providers, Map<String, S
         Type type();
     }
 
-    /**
-     * @param region    região; sem ela, a cadeia padrão do SDK
-     * @param endpoint  endpoint alternativo (LocalStack)
-     * @param accessKey credencial estática; sem ela, a cadeia padrão do SDK
-     * @param secretKey par de {@code accessKey}
-     */
-    public record AwsProvider(Type type, String region, URI endpoint, String accessKey, String secretKey)
-            implements Provider {
+    /** AWS: os clientes {@code SqsClient} e {@code SnsClient} são beans da aplicação (ADR-0011). */
+    public record AwsProvider(Type type) implements Provider {
     }
 
-    /** @param connectionString connection string do namespace; sem ela, um bean {@code ServiceBusClientBuilder} */
-    public record AzureProvider(Type type, String connectionString) implements Provider {
+    /** Azure: o {@code ServiceBusClientBuilder} é um bean da aplicação (ADR-0011). */
+    public record AzureProvider(Type type) implements Provider {
     }
 
     /**
-     * @param project      projeto, usado para completar nomes curtos de tópico e subscription
-     * @param emulatorHost {@code host:porta} do emulator (canal sem TLS e sem credenciais)
-     */
-    public record GcpProvider(Type type, String project, String emulatorHost) implements Provider {
-    }
-
-    /**
-     * ActiveMQ Classic ({@code activemq-classic}) ou Artemis ({@code artemis}).
+     * GCP: {@code TransportChannelProvider} e {@code CredentialsProvider} são beans opcionais da aplicação (ADR-0011).
      *
-     * @param brokerUrl URL do broker ({@code tcp://...}, {@code failover:(...)} no Classic); sem ela, o bean
-     *                  {@code jakarta.jms.ConnectionFactory} da aplicação, sem pool por cima. No Artemis, ganha
-     *                  {@code consumerWindowSize=0} quando não define a janela
-     * @param user      usuário da conexão
-     * @param password  senha de {@code user}
+     * @param project projeto, usado para completar nomes curtos de tópico e subscription
      */
-    public record JmsProvider(Type type, String brokerUrl, String user, String password) implements Provider {
+    public record GcpProvider(Type type, String project) implements Provider {
     }
 
     /**
-     * @param brokerUrl URI AMQP ({@code amqp://host:5672/vhost}); sem ela, o bean
-     *                  {@code com.rabbitmq.client.ConnectionFactory}
-     * @param user      usuário da conexão
-     * @param password  senha de {@code user}
+     * ActiveMQ Classic ({@code activemq-classic}) ou Artemis ({@code artemis}): o {@code jakarta.jms.ConnectionFactory}
+     * é um bean da aplicação (ADR-0011). No Artemis, a factory precisa de {@code consumerWindowSize=0}.
      */
-    public record RabbitProvider(Type type, String brokerUrl, String user, String password) implements Provider {
+    public record JmsProvider(Type type) implements Provider {
+    }
+
+    /** RabbitMQ: o {@code com.rabbitmq.client.ConnectionFactory} é um bean da aplicação (ADR-0011). */
+    public record RabbitProvider(Type type) implements Provider {
     }
 
     /** Capacidades que um destino pode exigir no startup ({@code options.require}). */

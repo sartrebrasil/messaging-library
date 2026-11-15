@@ -96,13 +96,15 @@ Use o `messaging-bom` (com o BOM do Spring Boot 4) e adicione o starter, a inbox
 messaging:
   providers:
     aws:
-      type: aws
-      region: sa-east-1
+      type: aws                    # o SqsClient (e o SnsClient, se enviar ao SNS) é um bean da aplicação
   receivers:
     billing-orders:
       destination: orders          # nome ou URL da fila
       failed: orders-failed        # obrigatória
 ```
+
+O `SqsClient` é declarado pela aplicação, com região e credenciais dela (`SqsClient.create()` usa a cadeia padrão do
+SDK); veja [Clientes nativos](../README.md#clientes-nativos) no README da raiz.
 
 As filas `orders` e `orders-failed` precisam existir: a lib não cria recursos (crie com Terraform ou com o
 `localstack-init.sh`).

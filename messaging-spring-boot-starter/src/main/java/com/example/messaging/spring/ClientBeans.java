@@ -1,34 +1,34 @@
 package com.example.messaging.spring;
 
 import org.springframework.beans.factory.ListableBeanFactory;
+import org.springframework.beans.factory.NoUniqueBeanDefinitionException;
 
 /**
- * Onde a conexão de um provider procura o cliente nativo da aplicação (ADR-0010). Um provider usa, nesta ordem:
- * o bean chamado como ele ({@code aws}) ou {@code <provider><TipoSimples>} ({@code awsSnsClient}, porque um provider
- * AWS tem dois clientes e dois beans não têm o mesmo nome); senão, só quando nenhum outro provider é do mesmo grupo,
- * o bean do tipo, qualquer que seja o nome.
+ * Onde a conexão de um provider procura o objeto raiz que a aplicação declara (ADR-0011): o bean do tipo, ou o
+ * {@code @Primary} quando há mais de um. O starter nunca cria nem fecha esses beans.
  */
 public final class ClientBeans {
 
     private ClientBeans() {
     }
 
-    /** Para as mensagens de "defina X ou declare um bean": o bean que existe e não casa precisa de um destes nomes. */
-    public static String namingHint(String providerName, Class<?> type) {
-        return "com mais de um provider do mesmo tipo, o bean precisa se chamar '" + providerName + "' ou '"
-                + providerName + type.getSimpleName() + "'";
+    /** @throws IllegalStateException sem bean, ou com vários e nenhum {@code @Primary} */
+    public static <T> T require(ListableBeanFactory beans, Class<T> type, String providerName) {
+        T bean = optional(beans, type, providerName);
+        if (bean == null) {
+            throw new IllegalStateException("messaging.providers." + providerName + ": declare um bean "
+                    + type.getName() + " (ADR-0011)");
+        }
+        return bean;
     }
 
-    /**
-     * @param onlyOfItsType nenhum outro provider usa este tipo de cliente
-     * @return o bean, ou {@code null} quando o starter deve criar o cliente
-     */
-    public static <T> T find(ListableBeanFactory beans, Class<T> type, String providerName, boolean onlyOfItsType) {
-        for (String name : new String[]{providerName, providerName + type.getSimpleName()}) {
-            if (beans.containsBean(name) && beans.isTypeMatch(name, type)) {
-                return beans.getBean(name, type);
-            }
+    /** @return o bean, ou {@code null} sem bean; vários sem {@code @Primary} lançam {@link IllegalStateException} */
+    public static <T> T optional(ListableBeanFactory beans, Class<T> type, String providerName) {
+        try {
+            return beans.getBeanProvider(type).getIfAvailable();
+        } catch (NoUniqueBeanDefinitionException e) {
+            throw new IllegalStateException("messaging.providers." + providerName + ": há mais de um bean "
+                    + type.getName() + "; marque um com @Primary (ADR-0011)", e);
         }
-        return onlyOfItsType ? beans.getBeanProvider(type).getIfAvailable() : null;
     }
 }
