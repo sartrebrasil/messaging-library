@@ -26,15 +26,13 @@ public final class RabbitProviderConnection implements ProviderConnection {
 
     private final Connection connection;
 
-    public RabbitProviderConnection(String providerName, MessagingProperties.RabbitProvider provider, ListableBeanFactory beans,
-                                    boolean onlyOfItsType) {
+    public RabbitProviderConnection(String providerName, MessagingProperties.RabbitProvider provider, ListableBeanFactory beans) {
         ConnectionFactory factory = provider.brokerUrl() != null
                 ? new ConnectionFactory()
-                : ClientBeans.find(beans, ConnectionFactory.class, providerName, onlyOfItsType);
+                : ClientBeans.optional(beans, ConnectionFactory.class, providerName);
         if (factory == null) {
             throw new IllegalStateException("messaging.providers." + providerName
-                    + ": defina broker-url ou declare um bean com.rabbitmq.client.ConnectionFactory ("
-                    + ClientBeans.namingHint(providerName, ConnectionFactory.class) + ")");
+                    + ": defina broker-url ou declare um bean com.rabbitmq.client.ConnectionFactory");
         }
         try {
             if (provider.brokerUrl() != null) {

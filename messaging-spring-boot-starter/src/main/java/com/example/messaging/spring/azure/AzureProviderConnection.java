@@ -21,16 +21,14 @@ public final class AzureProviderConnection implements ProviderConnection {
 
     private final ServiceBusClientBuilder builder;
 
-    public AzureProviderConnection(String providerName, MessagingProperties.AzureProvider provider, ListableBeanFactory beans,
-                                   boolean onlyOfItsType) {
+    public AzureProviderConnection(String providerName, MessagingProperties.AzureProvider provider, ListableBeanFactory beans) {
         if (provider.connectionString() != null) {
             builder = new ServiceBusClientBuilder().connectionString(provider.connectionString());
         } else {
-            builder = ClientBeans.find(beans, ServiceBusClientBuilder.class, providerName, onlyOfItsType);
+            builder = ClientBeans.optional(beans, ServiceBusClientBuilder.class, providerName);
             if (builder == null) {
                 throw new IllegalStateException("messaging.providers." + providerName
-                        + ": defina connection-string ou declare um bean ServiceBusClientBuilder ("
-                        + ClientBeans.namingHint(providerName, ServiceBusClientBuilder.class) + ")");
+                        + ": defina connection-string ou declare um bean ServiceBusClientBuilder");
             }
         }
     }

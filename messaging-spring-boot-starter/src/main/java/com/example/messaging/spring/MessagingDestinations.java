@@ -30,6 +30,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
@@ -342,23 +343,24 @@ public final class MessagingDestinations implements AutoCloseable {
                         + BROKER_CLIENTS.get(provider.type())[1]);
             }
         });
+        // um provider por tipo de cliente nativo: activemq-classic e artemis dividem o jakarta.jms.ConnectionFactory
+        Map<String, List<String>> groups = new TreeMap<>();
+        properties.providers().forEach((name, provider) ->
+                groups.computeIfAbsent(MODULES.get(provider.type()), m -> new ArrayList<>()).add(name));
+        groups.values().stream().filter(names -> names.size() > 1).forEach(names -> problems.add(
+                "messaging.providers: " + String.join(" e ", names.stream().sorted().toList())
+                        + " usam o mesmo cliente nativo; um provider por tipo (ADR-0011)"));
     }
 
     private void connect(ListableBeanFactory beans) {
         // as classes de cada provedor só são carregadas aqui, depois da checagem do adapter em validateProviders
         properties.providers().forEach((name, provider) -> connections.put(name, switch (provider) {
-            case AwsProvider p -> new AwsProviderConnection(name, p, beans, onlyOfItsType(p));
-            case AzureProvider p -> new AzureProviderConnection(name, p, beans, onlyOfItsType(p));
+            case AwsProvider p -> new AwsProviderConnection(name, p, beans);
+            case AzureProvider p -> new AzureProviderConnection(name, p, beans);
             case GcpProvider p -> new GcpProviderConnection(name, p);
-            case JmsProvider p -> new JmsProviderConnection(name, p, beans, onlyOfItsType(p));
-            case RabbitProvider p -> new RabbitProviderConnection(name, p, beans, onlyOfItsType(p));
+            case JmsProvider p -> new JmsProviderConnection(name, p, beans);
+            case RabbitProvider p -> new RabbitProviderConnection(name, p, beans);
         }));
-    }
-
-    /** Nenhum outro provider usa o mesmo módulo (e, portanto, o mesmo tipo de cliente nativo). */
-    private boolean onlyOfItsType(Provider provider) {
-        return properties.providers().values().stream()
-                .filter(p -> MODULES.get(p.type()).equals(MODULES.get(provider.type()))).count() == 1;
     }
 
     /** Um sender não tem como provar capacidade do lado de quem recebe: essas exigências são de receiver. */

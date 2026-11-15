@@ -30,6 +30,11 @@ class MessagingAutoConfigurationTest {
             .withPropertyValues(AWS + "type=aws", AWS + "region=us-east-1", AWS + "endpoint=http://localhost:4566",
                     AWS + "access-key=test", AWS + "secret-key=test");
 
+    /** Sem o provider {@code aws} do {@link #runner}: os testes de nome de provider declaram o único provider AWS. */
+    private final ApplicationContextRunner bare = new ApplicationContextRunner()
+            .withConfiguration(AutoConfigurations.of(MessagingAutoConfiguration.class,
+                    MessagingHealthAutoConfiguration.class));
+
     private static Endpoint queue(String url) {
         return new Endpoint(url, null, null, null);
     }
@@ -143,7 +148,7 @@ class MessagingAutoConfigurationTest {
 
     @Test
     void environmentVariableFormsOfTheRootsAreAccepted() {
-        runner.withInitializer(c -> c.getEnvironment().getPropertySources().addFirst(
+        bare.withInitializer(c -> c.getEnvironment().getPropertySources().addFirst(
                         new org.springframework.core.env.SystemEnvironmentPropertySource("env", java.util.Map.of(
                                 "MESSAGING_RECEIVERDEFAULTS_POLLWAIT", "1s", "MESSAGING_RECEIVERSENABLED", "true"))))
                 .run(context -> assertThat(context).hasNotFailed());
@@ -264,7 +269,7 @@ class MessagingAutoConfigurationTest {
 
     @Test
     void providerNamesWithUppercaseAndUnderscoreBind() {
-        runner.withPropertyValues("messaging.providers.Aws_Prod.type=aws", "messaging.providers.Aws_Prod.region=sa-east-1")
+        bare.withPropertyValues("messaging.providers.Aws_Prod.type=aws", "messaging.providers.Aws_Prod.region=sa-east-1")
                 .run(context -> assertThat(context.getBean(MessagingProperties.class).providers().values())
                         .filteredOn(p -> p instanceof MessagingProperties.AwsProvider aws
                                 && "sa-east-1".equals(aws.region()))
@@ -273,7 +278,7 @@ class MessagingAutoConfigurationTest {
 
     @Test
     void typedProviderBindsFromEnvironmentVariables() {
-        runner.withInitializer(c -> c.getEnvironment().getPropertySources().addFirst(
+        bare.withInitializer(c -> c.getEnvironment().getPropertySources().addFirst(
                         new org.springframework.core.env.SystemEnvironmentPropertySource("test-systemEnvironment", java.util.Map.of(
                                 "MESSAGING_PROVIDERS_ENVAWS_TYPE", "aws", "MESSAGING_PROVIDERS_ENVAWS_REGION", "us-west-2"))))
                 .run(context -> assertThat(context.getBean(MessagingProperties.class).providers().get("envaws"))
@@ -283,7 +288,7 @@ class MessagingAutoConfigurationTest {
 
     @Test
     void providerNameWithADotBinds() {
-        runner.withPropertyValues("messaging.providers[a.b].type=aws", "messaging.providers[a.b].region=sa-east-1")
+        bare.withPropertyValues("messaging.providers[a.b].type=aws", "messaging.providers[a.b].region=sa-east-1")
                 .run(context -> assertThat(context.getBean(MessagingProperties.class).providers())
                         .containsKey("a.b"));
     }

@@ -31,17 +31,15 @@ public final class JmsProviderConnection implements ProviderConnection {
     private final JmsDialect dialect;
     private final Connection connection;
 
-    public JmsProviderConnection(String providerName, MessagingProperties.JmsProvider provider, ListableBeanFactory beans,
-                                 boolean onlyOfItsType) {
+    public JmsProviderConnection(String providerName, MessagingProperties.JmsProvider provider, ListableBeanFactory beans) {
         this.dialect = provider.type() == MessagingProperties.Type.ARTEMIS
                 ? JmsDialect.ARTEMIS : JmsDialect.ACTIVEMQ_CLASSIC;
         ConnectionFactory factory = provider.brokerUrl() != null
                 ? dialect.connectionFactory(provider.brokerUrl())
-                : ClientBeans.find(beans, ConnectionFactory.class, providerName, onlyOfItsType);
+                : ClientBeans.optional(beans, ConnectionFactory.class, providerName);
         if (factory == null) {
             throw new IllegalStateException("messaging.providers." + providerName
-                    + ": defina broker-url ou declare um bean jakarta.jms.ConnectionFactory ("
-                    + ClientBeans.namingHint(providerName, ConnectionFactory.class) + ")");
+                    + ": defina broker-url ou declare um bean jakarta.jms.ConnectionFactory");
         }
         try {
             connection = provider.user() != null
