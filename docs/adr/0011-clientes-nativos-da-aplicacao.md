@@ -126,3 +126,62 @@ código Java. Significa que a aplicação declara o objeto raiz.
   tabela da seção 1.
 - Uma pendência do ADR-0010 vira erro explícito: `aws-prod` (YAML) e `awsprod` (variável de ambiente) eram dois
   providers em silêncio. Com o mesmo `type`, agora falham pela seção 3.
+
+## Implementação (2026-11-15)
+
+Entregue em `feat/clientes-da-aplicacao`, com testes escritos antes do código e uma revisão final independente (dois
+achados Important e cinco Minor, todos corrigidos). O starter tem hoje 173 testes, com Docker
+(LocalStack, Artemis e RabbitMQ). Diferenças em relação ao texto acima, decididas na implementação:
+
+- `AwsProviderConnection`, `AzureProviderConnection` e `RabbitProviderConnection` não recebem mais o record do
+  provider, que ficou sem campos. `JmsProviderConnection` o mantém por causa de `type()` (escolhe o dialeto) e
+  `GcpProviderConnection` por causa de `project`.
+- No AWS, cada cliente é resolvido no primeiro sender ou receiver que o usa, sem lock: duas threads podem resolver ao
+  mesmo tempo e recebem o mesmo singleton.
+- A mensagem de chave removida diz o que declarar por tipo: AWS, "o bean SqsClient (e o SnsClient, se enviar ao
+  SNS)"; Azure, `ServiceBusClientBuilder`; GCP, `TransportChannelProvider` e `CredentialsProvider`; JMS,
+  `jakarta.jms.ConnectionFactory`; RabbitMQ, `com.rabbitmq.client.ConnectionFactory`.
+- Os problemas de `messaging.providers` (chaves removidas, chave desconhecida, campo de outro tipo) saem juntos em
+  `Configuração inválida de messaging.providers:`, um por linha. `type` ausente continua abortando no primeiro erro.
+- A `Connection` JMS é fechada se `start()` lança. Antes ela vazava.
+- O teste de "GCP sem beans usa o padrão do SDK" ficou de fora: depende de Application Default Credentials da
+  máquina e não é determinístico.
+
+### Verificado
+
+- **Read timeout do AWS.** O padrão do AWS SDK 2.55.6 é 30 s (`SdkHttpConfigurationOption.READ_TIMEOUT`), acima dos
+  20 s do long poll. Só um `SqsClient` configurado abaixo de 20 s causa o problema.
+- **Autoconfigure de JMS do Spring Boot 4.1.1** (fontes de `spring-boot-activemq` e `spring-boot-artemis`): a
+  `jmsConnectionFactory` do Boot só existe quando a aplicação não declara nenhum `ConnectionFactory`
+  (`@ConditionalOnMissingBean`). Por padrão é um `CachingConnectionFactory` (`spring.jms.cache.enabled`, padrão
+  `true`); com `spring.activemq.pool.enabled` ou `spring.artemis.pool.enabled`, um `JmsPoolConnectionFactory`. Declarar
+  a factory da lib desliga a do Boot; `@Primary` não é necessário.
+- **ActiveMQ Classic atrás de um `CachingConnectionFactory`** (Spring 7.0.9, com as propriedades padrão do Boot,
+  rodado fora do repositório): envio e consumo funcionam, e o `checkAccess` falha com `UnsupportedOperationException`
+  nos dois lados.
+- **Artemis, janela do consumer.** O padrão do cliente Artemis 2.40.0 é 1 MiB
+  (`ActiveMQClient.DEFAULT_CONSUMER_WINDOW_SIZE`) e o Boot não define a janela.
+
+### Não verificado
+
+- **Artemis atrás de cache ou pool.** Pelo código, `ArtemisSupport.requireNoWindow` só confere a janela quando a
+  conexão é um `ActiveMQConnection`, então um cache ou pool pula a checagem e o receiver pré-busca mensagens sem
+  lease. Não foi rodado contra um broker.
+- **`pooled-jms` (`JmsPoolConnectionFactory`)** não foi exercitado, só o `CachingConnectionFactory`. Espera-se o mesmo
+  efeito no health check.
+- **Spring Cloud AWS.** A afirmação de que o `SqsClient` dele serve como bean deste ADR vem da API, não de um teste.
+- **O resto da aplicação.** O bean da lib vira o `ConnectionFactory` único, então `JmsTemplate` e `@JmsListener`
+  também o usam. Não se mediu o efeito de uma factory sem cache nesse código.
+
+### Pendências conhecidas
+
+- O `TopicAdminClient` do GCP é criado no construtor: sem credenciais padrão nem bean de credenciais, o startup falha
+  mesmo sem destinos.
+- Um `SqsClient` com read timeout abaixo de 20 s não é detectado; o SDK não expõe o timeout de um cliente pronto.
+- Falta um teste que prove que o starter nunca fecha o canal gRPC da aplicação: com um provider de canal fixo, o
+  único caminho para fechá-lo é o próprio SDK.
+- `type` ausente em um provider aborta o bind no primeiro erro, e a API Java ainda aceita um record com `type`
+  inconsistente (`new AwsProvider(Type.GCP)`), pendências herdadas do ADR-0010.
+- Quebra de compilação para quem usa os records de `MessagingProperties` e os construtores dos `*ProviderConnection`.
+  Quebra de configuração para quem tinha `region`, `broker-url` e as outras chaves no YAML: ver "Migrando do ADR-0010"
+  no README.
