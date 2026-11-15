@@ -62,8 +62,19 @@ class RabbitAutoConfigurationTest {
         return new ApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(MessagingAutoConfiguration.class,
                         MessagingHealthAutoConfiguration.class))
-                .withPropertyValues(RMQ + "type=rabbitmq", RMQ + "broker-url=" + url(), RMQ + "user=guest",
-                        RMQ + "password=guest");
+                .withBean(ConnectionFactory.class, RabbitAutoConfigurationTest::factory)
+                .withPropertyValues(RMQ + "type=rabbitmq");
+    }
+
+    /** O que a aplicação declararia (ADR-0011): a URI do broker; usuário e senha padrão (guest). */
+    private static ConnectionFactory factory() {
+        ConnectionFactory factory = new ConnectionFactory();
+        try {
+            factory.setUri(url());
+        } catch (java.net.URISyntaxException | java.security.GeneralSecurityException e) {
+            throw new IllegalStateException(e);
+        }
+        return factory;
     }
 
     @Test

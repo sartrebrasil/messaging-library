@@ -14,15 +14,14 @@ import jakarta.jms.JMSException;
 import org.springframework.beans.factory.ListableBeanFactory;
 
 /**
- * ActiveMQ Classic e Artemis (ADR-0009). Uma {@link Connection} por provider, compartilhada pelos
- * senders e receivers, criada com {@code broker-url} ou com o bean {@link ConnectionFactory} da
- * aplicação (regra de {@link ClientBeans}). A conexão é aberta no startup e fechada no {@link #close()}.
+ * ActiveMQ Classic e Artemis (ADR-0009). Uma {@link Connection} por provider, compartilhada pelos senders e
+ * receivers, criada pelo bean {@link ConnectionFactory} da aplicação (ADR-0011): endereço do broker, credenciais e
+ * reconexão são da factory. A conexão é aberta no startup e fechada no {@link #close()}; a factory é da aplicação.
  *
  * <ul>
- *   <li>No Artemis, {@code broker-url} ganha {@code consumerWindowSize=0} quando não define a
- *       janela; um bean com janela faz o {@code receiver(nome)} lançar
- *       {@link IllegalArgumentException}.</li>
- *   <li>O {@code checkAccess} precisa da conexão do cliente do broker: um bean com pool por cima
+ *   <li>No Artemis, a factory precisa de {@code consumerWindowSize=0} ({@code JmsDialect.ARTEMIS.connectionFactory(url)}
+ *       já aplica); sem a janela, o {@code receiver(nome)} lança {@link IllegalArgumentException}.</li>
+ *   <li>O {@code checkAccess} precisa da conexão do cliente do broker: uma factory com pool por cima
  *       ({@code pooled-jms}, {@code CachingConnectionFactory}) derruba o health check.</li>
  * </ul>
  */
@@ -34,17 +33,9 @@ public final class JmsProviderConnection implements ProviderConnection {
     public JmsProviderConnection(String providerName, MessagingProperties.JmsProvider provider, ListableBeanFactory beans) {
         this.dialect = provider.type() == MessagingProperties.Type.ARTEMIS
                 ? JmsDialect.ARTEMIS : JmsDialect.ACTIVEMQ_CLASSIC;
-        ConnectionFactory factory = provider.brokerUrl() != null
-                ? dialect.connectionFactory(provider.brokerUrl())
-                : ClientBeans.optional(beans, ConnectionFactory.class, providerName);
-        if (factory == null) {
-            throw new IllegalStateException("messaging.providers." + providerName
-                    + ": defina broker-url ou declare um bean jakarta.jms.ConnectionFactory");
-        }
+        ConnectionFactory factory = ClientBeans.require(beans, ConnectionFactory.class, providerName);
         try {
-            connection = provider.user() != null
-                    ? factory.createConnection(provider.user(), provider.password())
-                    : factory.createConnection();
+            connection = factory.createConnection();
             // com failover:, o Classic só conecta no primeiro uso; o start faz o startup falhar com o broker fora
             connection.start();
         } catch (JMSException e) {

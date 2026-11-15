@@ -13,9 +13,7 @@ import software.amazon.awssdk.services.sqs.model.GetQueueUrlResponse;
 
 import jakarta.jms.Connection;
 import jakarta.jms.ConnectionFactory;
-import jakarta.jms.JMSException;
 
-import java.io.IOException;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.List;
@@ -72,56 +70,6 @@ class ClientBeansTest {
 
     private static final String AZURE = "Endpoint=sb://localhost;SharedAccessKeyName=k;SharedAccessKey=v;"
             + "UseDevelopmentEmulator=true;";
-
-    /** Uma fábrica JMS que falha com {@code failure} ({@code BEAN-USED} na mensagem) ou, sem ela, conecta num stub. */
-    private static ConnectionFactory jms(String failure) {
-        Connection connection = (Connection) Proxy.newProxyInstance(Connection.class.getClassLoader(),
-                new Class<?>[]{Connection.class}, (proxy, method, args) -> null);
-        return (ConnectionFactory) Proxy.newProxyInstance(ConnectionFactory.class.getClassLoader(),
-                new Class<?>[]{ConnectionFactory.class}, (proxy, method, args) -> {
-                    if (failure != null) {
-                        throw new JMSException(failure);
-                    }
-                    return connection;
-                });
-    }
-
-    @Test
-    void jmsBrokerUrlWinsOverAnUnnamedBean() {
-        runner.withPropertyValues("messaging.providers.j.type=activemq-classic",
-                        "messaging.providers.j.broker-url=tcp://localhost:1?connectionTimeout=500")
-                .withBean(ConnectionFactory.class, () -> jms("BEAN-USED"))
-                .run(context -> assertThat(context).getFailure()
-                        .hasStackTraceContaining("não conectou ao broker")
-                        .satisfies(e -> assertThat(e.toString()).doesNotContain("BEAN-USED")));
-    }
-
-    /** Uma fábrica RabbitMQ que falha com {@code failure} ({@code BEAN-USED} na mensagem) ou, sem ela, conecta num stub. */
-    private static com.rabbitmq.client.ConnectionFactory rabbit(String failure) {
-        com.rabbitmq.client.Connection connection = (com.rabbitmq.client.Connection) Proxy.newProxyInstance(
-                com.rabbitmq.client.Connection.class.getClassLoader(),
-                new Class<?>[]{com.rabbitmq.client.Connection.class}, (proxy, method, args) -> null);
-        return new com.rabbitmq.client.ConnectionFactory() {
-            @Override
-            public com.rabbitmq.client.Connection newConnection(String connectionName) throws IOException {
-                if (failure != null) {
-                    throw new IOException(failure);
-                }
-                return connection;
-            }
-        };
-    }
-
-    @Test
-    void rabbitBrokerUrlWinsOverAnUnnamedBean() {
-        runner.withPropertyValues("messaging.providers.r.type=rabbitmq",
-                        "messaging.providers.r.broker-url=amqp://localhost:1")
-                .withBean(com.rabbitmq.client.ConnectionFactory.class, () -> rabbit("BEAN-USED"))
-                .run(context -> assertThat(context).getFailure()
-                        .hasStackTraceContaining("não conectou ao broker")
-                        .satisfies(e -> assertThat(e.toString()).doesNotContain("BEAN-USED"))
-                        .rootCause().hasMessageNotContaining("BEAN-USED"));
-    }
 
 
     private static <T> void register(DefaultListableBeanFactory factory, String name, Class<T> type, T bean,
@@ -198,5 +146,61 @@ class ClientBeansTest {
                 .run(context -> assertThat(context).getFailure().rootCause().hasMessageContaining(
                         "messaging.providers.azure: declare um bean "
                                 + "com.azure.messaging.servicebus.ServiceBusClientBuilder (ADR-0011)"));
+    }
+
+    @Test
+    void jmsWithoutConnectionFactoryFails() {
+        runner.withPropertyValues("messaging.providers.j.type=artemis")
+                .run(context -> assertThat(context).getFailure().rootCause().hasMessageContaining(
+                        "messaging.providers.j: declare um bean jakarta.jms.ConnectionFactory (ADR-0011)"));
+    }
+
+    @Test
+    void rabbitWithoutConnectionFactoryFails() {
+        runner.withPropertyValues("messaging.providers.r.type=rabbitmq")
+                .run(context -> assertThat(context).getFailure().rootCause().hasMessageContaining(
+                        "messaging.providers.r: declare um bean com.rabbitmq.client.ConnectionFactory (ADR-0011)"));
+    }
+
+    @Test
+    void jmsConnectionCreatedByTheStarterIsClosed() {
+        List<String> calls = new CopyOnWriteArrayList<>();
+        Connection connection = (Connection) Proxy.newProxyInstance(Connection.class.getClassLoader(),
+                new Class<?>[]{Connection.class}, (proxy, method, args) -> {
+                    calls.add(method.getName());
+                    return null;
+                });
+        ConnectionFactory factory = (ConnectionFactory) Proxy.newProxyInstance(
+                ConnectionFactory.class.getClassLoader(), new Class<?>[]{ConnectionFactory.class},
+                (proxy, method, args) -> connection);
+
+        runner.withPropertyValues("messaging.providers.j.type=activemq-classic")
+                .withBean(ConnectionFactory.class, () -> factory)
+                .run(context -> assertThat(context).hasNotFailed());
+
+        assertThat(calls).contains("start", "close");
+    }
+
+    @Test
+    void rabbitConnectionCreatedByTheStarterIsClosed() {
+        List<String> calls = new CopyOnWriteArrayList<>();
+        com.rabbitmq.client.Connection connection = (com.rabbitmq.client.Connection) Proxy.newProxyInstance(
+                com.rabbitmq.client.Connection.class.getClassLoader(),
+                new Class<?>[]{com.rabbitmq.client.Connection.class}, (proxy, method, args) -> {
+                    calls.add(method.getName());
+                    return null;
+                });
+        com.rabbitmq.client.ConnectionFactory factory = new com.rabbitmq.client.ConnectionFactory() {
+            @Override
+            public com.rabbitmq.client.Connection newConnection(String connectionName) {
+                return connection;
+            }
+        };
+
+        runner.withPropertyValues("messaging.providers.r.type=rabbitmq")
+                .withBean(com.rabbitmq.client.ConnectionFactory.class, () -> factory)
+                .run(context -> assertThat(context).hasNotFailed());
+
+        assertThat(calls).contains("close");
     }
 }

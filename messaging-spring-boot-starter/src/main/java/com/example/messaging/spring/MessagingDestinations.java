@@ -359,7 +359,7 @@ public final class MessagingDestinations implements AutoCloseable {
             case AzureProvider p -> new AzureProviderConnection(name, beans);
             case GcpProvider p -> new GcpProviderConnection(name, p, beans);
             case JmsProvider p -> new JmsProviderConnection(name, p, beans);
-            case RabbitProvider p -> new RabbitProviderConnection(name, p, beans);
+            case RabbitProvider p -> new RabbitProviderConnection(name, beans);
         }));
     }
 

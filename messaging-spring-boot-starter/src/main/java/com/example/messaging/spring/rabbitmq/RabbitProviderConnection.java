@@ -12,40 +12,21 @@ import com.rabbitmq.client.ConnectionFactory;
 import org.springframework.beans.factory.ListableBeanFactory;
 
 import java.io.IOException;
-import java.net.URISyntaxException;
-import java.security.GeneralSecurityException;
 import java.util.concurrent.TimeoutException;
 
 /**
- * RabbitMQ (ADR-0009). Uma {@link Connection} por provider, compartilhada pelos senders e
- * receivers, criada com {@code broker-url} ({@code amqp://host:5672/vhost}) ou com o bean
- * {@link ConnectionFactory} da aplicação. A conexão é aberta no startup e fechada no
- * {@link #close()}.
+ * RabbitMQ (ADR-0009). Uma {@link Connection} por provider, compartilhada pelos senders e receivers, criada pelo
+ * bean {@link ConnectionFactory} da aplicação (ADR-0011): URI, vhost e credenciais são da factory. A conexão é
+ * aberta no startup e fechada no {@link #close()}; a factory é da aplicação.
  */
 public final class RabbitProviderConnection implements ProviderConnection {
 
     private final Connection connection;
 
-    public RabbitProviderConnection(String providerName, MessagingProperties.RabbitProvider provider, ListableBeanFactory beans) {
-        ConnectionFactory factory = provider.brokerUrl() != null
-                ? new ConnectionFactory()
-                : ClientBeans.optional(beans, ConnectionFactory.class, providerName);
-        if (factory == null) {
-            throw new IllegalStateException("messaging.providers." + providerName
-                    + ": defina broker-url ou declare um bean com.rabbitmq.client.ConnectionFactory");
-        }
+    public RabbitProviderConnection(String providerName, ListableBeanFactory beans) {
+        ConnectionFactory factory = ClientBeans.require(beans, ConnectionFactory.class, providerName);
         try {
-            if (provider.brokerUrl() != null) {
-                factory.setUri(provider.brokerUrl());
-            }
-            if (provider.user() != null) {
-                factory.setUsername(provider.user());
-                factory.setPassword(provider.password());
-            }
             connection = factory.newConnection("messaging-" + providerName);
-        } catch (URISyntaxException | GeneralSecurityException e) {
-            throw new IllegalStateException("messaging.providers." + providerName + ".broker-url inválida: "
-                    + e.getMessage(), e);
         } catch (IOException | TimeoutException e) {
             throw new IllegalStateException("messaging.providers." + providerName + ": não conectou ao broker: "
                     + e.getMessage(), e);
