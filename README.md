@@ -343,13 +343,24 @@ O que passa a ser da aplicação, e a lib não consegue validar:
   conferido no AWS SDK 2.55.6) serve; um `SqsClient` configurado com read ou socket timeout abaixo de 20 s corta o
   long poll e o receive falha de forma intermitente. O SDK não expõe o timeout de um cliente pronto, então o starter
   não tem como checar.
-- **JMS, factory sem pool.** O `checkAccess` precisa da conexão do cliente do broker. Uma factory com pool por cima
-  (`pooled-jms`, `CachingConnectionFactory`) deixa o envio e o consumo funcionarem, mas derruba o health check
-  (`UnsupportedOperationException` no ActiveMQ Classic). Se a aplicação também usa o autoconfigure de JMS do Spring
-  Boot, que pode declarar uma factory com pool, declare a da lib como `@Primary` ou desligue o pool dele; o
-  comportamento do Boot 4.1 aqui não foi verificado.
+- **JMS, factory sem pool nem cache.** O `checkAccess` precisa da conexão do cliente do broker. Com um
+  `CachingConnectionFactory` (Spring) ou um `JmsPoolConnectionFactory` por cima, o health check falha com
+  `UnsupportedOperationException`, e a checagem de `consumerWindowSize=0` do Artemis é pulada, porque a conexão não é
+  a do cliente do broker. No ActiveMQ Classic, envio e consumo continuam funcionando (rodado com o
+  `CachingConnectionFactory` do Spring 7.0.9 e as propriedades que o Boot aplica por padrão).
+  - O autoconfigure do Spring Boot (ActiveMQ e Artemis, conferido nas fontes do 4.1.1) só declara
+    `jmsConnectionFactory` quando a aplicação **não** declara nenhum `jakarta.jms.ConnectionFactory`
+    (`@ConditionalOnMissingBean`). Declarar o bean da lib, como no exemplo acima, desliga o do Boot: não precisa de
+    `@Primary`.
+  - Sem bean próprio, o starter usaria o do Boot, que por padrão é um `CachingConnectionFactory`
+    (`spring.jms.cache.enabled`, padrão `true`) ou, com `spring.activemq.pool.enabled=true` /
+    `spring.artemis.pool.enabled=true`, um `JmsPoolConnectionFactory`. É o caso acima. Evite: declare a factory da lib.
+  - O bean da lib é o `ConnectionFactory` da aplicação inteira: o resto do código JMS dela (`JmsTemplate`,
+    `@JmsListener`) o usa também.
 - **Artemis, janela do consumer.** A factory precisa de `consumerWindowSize=0`; sem ela, `receiver(nome)` lança
-  `IllegalArgumentException`. `JmsDialect.ARTEMIS.connectionFactory(url)` já aplica.
+  `IllegalArgumentException`, desde que a conexão seja a do cliente do broker (com cache ou pool por cima, a checagem
+  é pulada, e o padrão do cliente Artemis é 1 MiB: o broker manda mensagens a mais para o buffer do consumer, presas
+  sem lease; o Boot não define a janela). `JmsDialect.ARTEMIS.connectionFactory(url)` já aplica.
 - **Reconexão e credenciais** de JMS e RabbitMQ são da factory: o starter chama `createConnection()` sem usuário nem senha. `JmsDialect.<X>.connectionFactory(url)` cuida da
   reconexão: no Classic, embrulha a URL em `failover:(...)`, salvo `failover:` e `vm:`; no Artemis, acrescenta
   `reconnectAttempts=-1`. Nos dois, o startup ainda falha com o broker fora.

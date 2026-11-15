@@ -88,11 +88,13 @@ código Java. Significa que a aplicação declara o objeto raiz.
   abaixo de 20 s corta o long poll e aparece como falha intermitente de receive. O SDK não expõe o timeout de um
   cliente já construído, então o starter não tem como validar isso. O README documenta o requisito e dá um exemplo de
   `@Configuration`.
-- **`ConnectionFactory` JMS sem pool.** O `checkAccess` precisa da conexão do cliente do broker. Um
-  `CachingConnectionFactory` ou `pooled-jms` por cima derruba o health check, e o autoconfigure de JMS do Boot cria um
-  `CachingConnectionFactory` por padrão. O README diz como evitar isso.
+- **`ConnectionFactory` JMS sem pool nem cache.** O `checkAccess` precisa da conexão do cliente do broker. Um
+  `CachingConnectionFactory` ou `pooled-jms` por cima derruba o health check. O autoconfigure de JMS do Boot só cria
+  a factory dele (com cache por padrão) quando a aplicação não declara nenhum `ConnectionFactory`: declarar o da lib o
+  desliga (conferido nas fontes do Boot 4.1.1). O README diz isso.
 - **Janela do Artemis.** A `ConnectionFactory` precisa de `consumerWindowSize=0`; o receiver continua conferindo e
-  lança `IllegalArgumentException` sem ela. `JmsDialect.ARTEMIS.connectionFactory(url)` já aplica o valor.
+  lança `IllegalArgumentException` sem ela, salvo quando a conexão não é a do cliente do broker (cache ou pool por cima:
+  a checagem é pulada). `JmsDialect.ARTEMIS.connectionFactory(url)` já aplica o valor.
 - **Reconexão e credenciais** de JMS e RabbitMQ são da factory da aplicação.
 
 ## Alternativas consideradas
