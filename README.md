@@ -291,51 +291,29 @@ vale o `@Primary`. Só pode haver um provider por tipo de cliente (`activemq-cla
 provider de outro tipo convive normalmente (AWS e Azure durante uma migração). O starter fecha só o que criou: a
 `Connection` de JMS e RabbitMQ, o `TopicAdminClient` do GCP e os senders e receivers. Os beans são da aplicação.
 
+Cada provedor tem uma classe de exemplo, compilada e testada, em
+[`messaging-spring-boot-starter/src/test/java/com/example/messaging/spring/exemplos/`](messaging-spring-boot-starter/src/test/java/com/example/messaging/spring/exemplos/),
+com a forma de produção e, onde existe, a de emulador. Os testes de auto-configuração as usam, então o que está lá
+compila e sobe:
+
+| `type` | Exemplo | Produção | Emulador |
+|---|---|---|---|
+| `aws` | [`AwsClientsExample`](messaging-spring-boot-starter/src/test/java/com/example/messaging/spring/exemplos/AwsClientsExample.java) | Credenciais da cadeia padrão, renovadas em segundo plano, num provider só para `SqsClient` e `SnsClient`; read timeout de 30 s | LocalStack em `localhost:4566` |
+| `azure` | [`AzureClientsExample`](messaging-spring-boot-starter/src/test/java/com/example/messaging/spring/exemplos/AzureClientsExample.java) | Entra ID (`DefaultAzureCredential`, exige `azure-identity`) ou connection string | Service Bus Emulator |
+| `gcp` | [`GcpClientsExample`](messaging-spring-boot-starter/src/test/java/com/example/messaging/spring/exemplos/GcpClientsExample.java) | Nenhum bean (Application Default Credentials) | Pub/Sub emulator em `localhost:8085`, canal sem TLS e `NoCredentialsProvider` |
+| `activemq-classic`, `artemis` | [`JmsClientsExample`](messaging-spring-boot-starter/src/test/java/com/example/messaging/spring/exemplos/JmsClientsExample.java) | `JmsDialect.<X>.connectionFactory(url)` e as credenciais na factory | `vm://` (Classic) e Testcontainers (Artemis) nos testes |
+| `rabbitmq` | [`RabbitClientsExample`](messaging-spring-boot-starter/src/test/java/com/example/messaging/spring/exemplos/RabbitClientsExample.java) | `com.rabbitmq.client.ConnectionFactory` com a URI e as credenciais | Testcontainers nos testes |
+
+O essencial do AWS, que é o que mais se erra (o `SnsClient` é igual):
+
 ```java
-@Configuration(proxyBeanMethods = false)
-class MessagingClients {
-
-    @Bean
-    SqsClient sqsClient() {
-        return SqsClient.create();           // região e credenciais da cadeia padrão do SDK
-    }
-
-    @Bean
-    SnsClient snsClient() {                  // só com envio ao SNS
-        return SnsClient.create();
-    }
-
-    @Bean
-    ServiceBusClientBuilder serviceBusClientBuilder(@Value("${SERVICEBUS_CONNECTION_STRING}") String connectionString) {
-        return new ServiceBusClientBuilder().connectionString(connectionString);   // ou .credential(namespace, tokenCredential)
-    }
-
-    @Bean
-    jakarta.jms.ConnectionFactory jmsConnectionFactory() {
-        // reconexão e, no Artemis, consumerWindowSize=0; a factory devolvida é a do cliente do broker
-        org.apache.activemq.artemis.jms.client.ActiveMQConnectionFactory factory =
-                (org.apache.activemq.artemis.jms.client.ActiveMQConnectionFactory)
-                        JmsDialect.ARTEMIS.connectionFactory("tcp://artemis:61616");
-        factory.setUser("...");              // no Classic: org.apache.activemq.ActiveMQConnectionFactory.setUserName
-        factory.setPassword("...");
-        return factory;
-    }
-
-    @Bean
-    com.rabbitmq.client.ConnectionFactory rabbitConnectionFactory() throws Exception {
-        com.rabbitmq.client.ConnectionFactory factory = new com.rabbitmq.client.ConnectionFactory();
-        factory.setUri("amqp://rabbit:5672/vhost");
-        factory.setUsername("...");
-        factory.setPassword("...");
-        return factory;
-    }
+@Bean
+SqsClient sqsClient(AwsCredentialsProvider credentials) {
+    return SqsClient.builder().credentialsProvider(credentials)
+            .httpClientBuilder(ApacheHttpClient.builder().socketTimeout(Duration.ofSeconds(30)))   // acima dos 20 s do long poll
+            .build();                                                                               // região e endpoint: AWS_REGION, AWS_ENDPOINT_URL_SQS
 }
 ```
-
-Para LocalStack, `SqsClient.builder().endpointOverride(URI.create("http://localhost:4566"))` com região e credenciais
-estáticas. Para o emulator do Pub/Sub, um `TransportChannelProvider` sobre um canal sem TLS
-(`FixedTransportChannelProvider.create(GrpcTransportChannel.create(ManagedChannelBuilder.forTarget("localhost:8085").usePlaintext().build()))`)
-e um `NoCredentialsProvider`.
 
 O que passa a ser da aplicação, e a lib não consegue validar:
 
@@ -350,7 +328,7 @@ O que passa a ser da aplicação, e a lib não consegue validar:
   `CachingConnectionFactory` do Spring 7.0.9 e as propriedades que o Boot aplica por padrão).
   - O autoconfigure do Spring Boot (ActiveMQ e Artemis, conferido nas fontes do 4.1.1) só declara
     `jmsConnectionFactory` quando a aplicação **não** declara nenhum `jakarta.jms.ConnectionFactory`
-    (`@ConditionalOnMissingBean`). Declarar o bean da lib, como no exemplo acima, desliga o do Boot: não precisa de
+    (`@ConditionalOnMissingBean`). Declarar o bean da lib, como nos exemplos, desliga o do Boot: não precisa de
     `@Primary`.
   - Sem bean próprio, o starter usaria o do Boot, que por padrão é um `CachingConnectionFactory`
     (`spring.jms.cache.enabled`, padrão `true`) ou, com `spring.activemq.pool.enabled=true` /

@@ -10,7 +10,7 @@ import com.example.messaging.spring.MessagingProperties.Endpoint;
 import com.example.messaging.spring.MessagingProperties.Options;
 import com.example.messaging.spring.MessagingProperties.Redelivery;
 import com.example.messaging.MessageSender;
-import com.example.messaging.jms.JmsDialect;
+import com.example.messaging.spring.exemplos.JmsClientsExample;
 import jakarta.jms.Connection;
 import jakarta.jms.ConnectionFactory;
 import org.junit.jupiter.api.Test;
@@ -44,7 +44,7 @@ class ActiveMqAutoConfigurationTest {
 
     /** O {@code ConnectionFactory} que a aplicação declararia (ADR-0011). */
     private final ApplicationContextRunner runner = base
-            .withBean(ConnectionFactory.class, () -> JmsDialect.ACTIVEMQ_CLASSIC.connectionFactory(vm));
+            .withBean(ConnectionFactory.class, () -> JmsClientsExample.activeMqClassic(vm, null, null));
 
     private static Endpoint queue(String name) {
         return new Endpoint(name, null, null, null);
@@ -120,8 +120,8 @@ class ActiveMqAutoConfigurationTest {
     void unreachableBrokerFailsStartup() {
         new ApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(MessagingAutoConfiguration.class))
-                .withBean(ConnectionFactory.class, () -> JmsDialect.ACTIVEMQ_CLASSIC
-                        .connectionFactory("tcp://localhost:1?connectionTimeout=500"))
+                .withBean(ConnectionFactory.class, () -> JmsClientsExample
+                        .activeMqClassic("tcp://localhost:1?connectionTimeout=500", null, null))
                 .withPropertyValues(AMQ + "type=activemq-classic", PEDIDOS + "destination=pedidos")
                 .run(context -> assertThat(context).getFailure().hasStackTraceContaining("não conectou ao broker"));
     }
@@ -148,7 +148,7 @@ class ActiveMqAutoConfigurationTest {
 
     @Test
     void connectionFactoryWithAPoolFailsOnlyTheHealthCheck() {
-        base.withBean(ConnectionFactory.class, () -> pooled(JmsDialect.ACTIVEMQ_CLASSIC.connectionFactory(vm)))
+        base.withBean(ConnectionFactory.class, () -> pooled(JmsClientsExample.activeMqClassic(vm, null, null)))
                 .withPropertyValues(PEDIDOS + "destination=pedidos", "management.health.messaging.enabled=true")
                 .run(context -> {
                     MessagingDestinations destinations = context.getBean(MessagingDestinations.class);
