@@ -5,10 +5,9 @@ import com.example.messaging.MessageSender;
 import com.example.messaging.aws.SnsMessageSender;
 import com.example.messaging.spring.MessagingProperties.Endpoint;
 import com.example.messaging.spring.MessagingProperties.Options;
-import com.azure.messaging.servicebus.ServiceBusClientBuilder;
-import com.google.api.gax.core.CredentialsProvider;
-import com.google.api.gax.core.NoCredentialsProvider;
-import com.google.api.gax.rpc.TransportChannelProvider;
+import com.example.messaging.spring.exemplos.AwsClientsExample;
+import com.example.messaging.spring.exemplos.AzureClientsExample;
+import com.example.messaging.spring.exemplos.GcpClientsExample;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.context.properties.bind.Binder;
@@ -18,7 +17,6 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import software.amazon.awssdk.services.sns.SnsClient;
 import software.amazon.awssdk.services.sqs.SqsClient;
 
-import java.net.URI;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Set;
@@ -31,15 +29,11 @@ class MessagingAutoConfigurationTest {
 
     private static final String AWS = "messaging.providers.aws.";
     private static final String QUEUE = "http://localhost:4566/000000000000/";
-    private static final String AZURE = "Endpoint=sb://localhost;SharedAccessKeyName=k;SharedAccessKey=v;"
-            + "UseDevelopmentEmulator=true;";
-
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(MessagingAutoConfiguration.class,
                     MessagingHealthAutoConfiguration.class))
             .withPropertyValues(AWS + "type=aws")
-            .withBean(SqsClient.class, () -> TestAwsClients.sqs(URI.create("http://localhost:4566")))
-            .withBean(SnsClient.class, () -> TestAwsClients.sns(URI.create("http://localhost:4566")));
+            .withUserConfiguration(AwsClientsExample.Emulador.class);
 
     /** Sem o provider {@code aws} do {@link #runner}: os testes de nome de provider declaram o único provider AWS. */
     private final ApplicationContextRunner bare = new ApplicationContextRunner()
@@ -202,9 +196,8 @@ class MessagingAutoConfigurationTest {
     @Test
     void azureAndGcpRulesAreValidated() {
         runner.withPropertyValues("messaging.providers.azure.type=azure", "messaging.providers.gcp.type=gcp")
-                .withBean(ServiceBusClientBuilder.class, () -> new ServiceBusClientBuilder().connectionString(AZURE))
-                .withBean(TransportChannelProvider.class, () -> TestGcpClients.provider(TestGcpClients.plaintext("localhost:8085")))
-                .withBean(CredentialsProvider.class, NoCredentialsProvider::create)
+                .withUserConfiguration(AzureClientsExample.Emulador.class)
+                .withUserConfiguration(GcpClientsExample.Emulador.class)
                 .run(context -> {
                     MessagingDestinations destinations = context.getBean(MessagingDestinations.class);
                     assertThat(destinations.validate("messaging.receivers.sb", "azure", new Endpoint("pedidos", null,
@@ -223,7 +216,7 @@ class MessagingAutoConfigurationTest {
     void azureDeadLetterQueueIsReceiveOnly() {
         ApplicationContextRunner azure = new ApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(MessagingAutoConfiguration.class))
-                .withBean(ServiceBusClientBuilder.class, () -> new ServiceBusClientBuilder().connectionString(AZURE))
+                .withUserConfiguration(AzureClientsExample.Emulador.class)
                 .withPropertyValues("messaging.providers.azure.type=azure");
         Options dlq = new Options(null, null, null, null, null, null, null, true, null, null, null, null);
         Options sessionsDlq = new Options(null, true, null, null, null, null, null, true, null, null, null, null);
@@ -255,8 +248,7 @@ class MessagingAutoConfigurationTest {
 
     @Test
     void durationOptionsBind() {
-        runner.withBean(TransportChannelProvider.class, () -> TestGcpClients.provider(TestGcpClients.plaintext("localhost:8085")))
-                .withBean(CredentialsProvider.class, NoCredentialsProvider::create)
+        runner.withUserConfiguration(GcpClientsExample.Emulador.class)
                 .withPropertyValues("messaging.providers.gcp.type=gcp", "messaging.providers.gcp.project=p",
                         "messaging.senders.pedidos.provider=gcp", "messaging.senders.pedidos.destination=pedidos",
                         "messaging.senders.pedidos.options.ack-deadline=5s")

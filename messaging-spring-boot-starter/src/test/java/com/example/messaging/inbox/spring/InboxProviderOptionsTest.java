@@ -1,13 +1,11 @@
 package com.example.messaging.inbox.spring;
 
 import com.example.messaging.spring.MessagingAutoConfiguration;
-import com.example.messaging.spring.TestAwsClients;
+import com.example.messaging.spring.exemplos.AwsClientsExample;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.jackson.autoconfigure.JacksonAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
-import software.amazon.awssdk.services.sns.SnsClient;
-import software.amazon.awssdk.services.sqs.SqsClient;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -19,8 +17,7 @@ class InboxProviderOptionsTest {
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(JacksonAutoConfiguration.class, MessagingAutoConfiguration.class,
                     InboxAutoConfiguration.class))
-            .withBean(SqsClient.class, () -> TestAwsClients.sqs(TestAwsClients.UNREACHABLE))
-            .withBean(SnsClient.class, () -> TestAwsClients.sns(TestAwsClients.UNREACHABLE))
+            .withUserConfiguration(AwsClientsExample.Emulador.class)
             .withPropertyValues("messaging.providers.aws.type=aws",
                     "messaging.receivers.orders.enabled=false", "messaging.receivers.orders.destination=" + Q + "orders",
                     "messaging.receivers.orders.failed=" + Q + "orders-failed",

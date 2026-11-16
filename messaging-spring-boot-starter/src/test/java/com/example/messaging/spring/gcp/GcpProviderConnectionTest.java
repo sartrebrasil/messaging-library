@@ -1,7 +1,7 @@
 package com.example.messaging.spring.gcp;
 
 import com.example.messaging.spring.MessagingAutoConfiguration;
-import com.example.messaging.spring.TestGcpClients;
+import com.example.messaging.spring.exemplos.GcpClientsExample;
 import com.google.api.gax.core.CredentialsProvider;
 import com.google.api.gax.core.NoCredentialsProvider;
 import com.google.api.gax.rpc.TransportChannelProvider;
@@ -40,10 +40,10 @@ class GcpProviderConnectionTest {
 
     @Test
     void gcpAppliesChannelAndCredentialsBeans() {
-        ManagedChannel channel = TestGcpClients.plaintext("localhost:1");
+        ManagedChannel channel = GcpClientsExample.emulatorChannel("localhost:1");
         List<String> calls = new CopyOnWriteArrayList<>();
         try {
-            runner.withBean(TransportChannelProvider.class, () -> spy(TestGcpClients.provider(channel), calls))
+            runner.withBean(TransportChannelProvider.class, () -> spy(GcpClientsExample.channelProvider(channel), calls))
                     .withBean(CredentialsProvider.class, NoCredentialsProvider::create)
                     .run(context -> {
                         assertThat(context).hasNotFailed();

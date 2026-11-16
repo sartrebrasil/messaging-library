@@ -29,6 +29,7 @@
     <junit.version>5.12.2</junit.version>
     <aws.sdk.version>2.44.7</aws.sdk.version>
     <azure.servicebus.version>7.18.0</azure.servicebus.version>
+    <azure.identity.version>1.18.4</azure.identity.version>
     <gcp.libraries.version>26.90.0</gcp.libraries.version>
     <testcontainers.version>2.0.5</testcontainers.version>
     <jakarta.jms.version>3.1.0</jakarta.jms.version>
@@ -78,6 +79,11 @@
         <groupId>com.azure</groupId>
         <artifactId>azure-messaging-servicebus</artifactId>
         <version>${azure.servicebus.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.azure</groupId>
+        <artifactId>azure-identity</artifactId>
+        <version>${azure.identity.version}</version>
       </dependency>
       <dependency>
         <groupId>jakarta.jms</groupId>

@@ -14,6 +14,7 @@ import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
 import org.junit.jupiter.api.BeforeAll;
+import com.example.messaging.spring.exemplos.RabbitClientsExample;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.health.contributor.HealthIndicator;
@@ -68,13 +69,7 @@ class RabbitAutoConfigurationTest {
 
     /** O que a aplicação declararia (ADR-0011): a URI do broker; usuário e senha padrão (guest). */
     private static ConnectionFactory factory() {
-        ConnectionFactory factory = new ConnectionFactory();
-        try {
-            factory.setUri(url());
-        } catch (java.net.URISyntaxException | java.security.GeneralSecurityException e) {
-            throw new IllegalStateException(e);
-        }
-        return factory;
+        return RabbitClientsExample.connectionFactory(url(), null, null);
     }
 
     @Test

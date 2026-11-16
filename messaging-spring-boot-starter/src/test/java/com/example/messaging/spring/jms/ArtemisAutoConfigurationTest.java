@@ -11,7 +11,7 @@ import com.example.messaging.spring.MessagingProperties.Options;
 import com.example.messaging.spring.MessagingProperties.Redelivery;
 import com.example.messaging.spring.MessagingProperties.Requirement;
 import java.util.Set;
-import com.example.messaging.jms.JmsDialect;
+import com.example.messaging.spring.exemplos.JmsClientsExample;
 import jakarta.jms.Connection;
 import jakarta.jms.ConnectionFactory;
 import jakarta.jms.Session;
@@ -74,10 +74,7 @@ class ArtemisAutoConfigurationTest {
 
     /** O que a aplicação declararia (ADR-0011): URL com reconexão e janela 0, e as credenciais do broker. */
     private static ConnectionFactory factory() {
-        ActiveMQConnectionFactory factory = (ActiveMQConnectionFactory) JmsDialect.ARTEMIS.connectionFactory(url());
-        factory.setUser("artemis");
-        factory.setPassword("artemis");
-        return factory;
+        return JmsClientsExample.artemis(url(), "artemis", "artemis");
     }
 
     @Test

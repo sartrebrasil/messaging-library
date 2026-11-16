@@ -110,7 +110,7 @@ código Java. Significa que a aplicação declara o objeto raiz.
 - **Customizers (`ProviderCustomizer<SqsClientBuilder>`).** Mantêm o starter como dono do cliente, que é o oposto do
   que se quer aqui.
 - **Um factory da lib (`MessagingClients.sqs(region)`)** que já aplica o timeout. Fica para quando um segundo serviço
-  repetir o mesmo `@Configuration`. Hoje um exemplo no README basta.
+  repetir o mesmo `@Configuration`. Hoje um exemplo compilado em `src/test` (`exemplos/`) basta.
 
 ## Consequências
 
@@ -144,6 +144,10 @@ achados Important e cinco Minor, todos corrigidos). O starter tem hoje 173 teste
 - Os problemas de `messaging.providers` (chaves removidas, chave desconhecida, campo de outro tipo) saem juntos em
   `Configuração inválida de messaging.providers:`, um por linha. `type` ausente continua abortando no primeiro erro.
 - A `Connection` JMS é fechada se `start()` lança. Antes ela vazava.
+- Os exemplos de cada provedor (`AwsClientsExample`, `AzureClientsExample`, `GcpClientsExample`, `JmsClientsExample` e
+  `RabbitClientsExample`) ficam compilados em `messaging-spring-boot-starter/src/test/java/.../exemplos/`, com a forma de
+  produção e, onde existe, a de emulador, e os testes de auto-configuração os usam (2026-11-16). Substituem o
+  `@Configuration` solto que estava no README, como na storage-library.
 - O teste de "GCP sem beans usa o padrão do SDK" ficou de fora: depende de Application Default Credentials da
   máquina e não é determinístico.
 

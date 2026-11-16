@@ -178,6 +178,12 @@
       <version>${opentelemetry.version}</version>
       <scope>test</scope>
     </dependency>
+    <!-- só o exemplo de produção do Azure (DefaultAzureCredential, src/test/.../exemplos) usa -->
+    <dependency>
+      <groupId>com.azure</groupId>
+      <artifactId>azure-identity</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
   <build>
     <plugins>
