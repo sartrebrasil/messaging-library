@@ -52,7 +52,7 @@ Use o `messaging-bom` (com o BOM do Spring Boot 4) e adicione o starter, a inbox
   <dependencies>
     <!-- o BOM do Spring Boot vem antes dos BOMs dos SDKs (ADR-0008 da messaging-lib) -->
     <dependency>
-      <groupId>com.example</groupId>
+      <groupId>com.example.messaging</groupId>
       <artifactId>messaging-bom</artifactId>
       <version>0.1.0-SNAPSHOT</version>
       <type>pom</type>
@@ -63,15 +63,15 @@ Use o `messaging-bom` (com o BOM do Spring Boot 4) e adicione o starter, a inbox
 
 <dependencies>
   <dependency>
-    <groupId>com.example</groupId>
+    <groupId>com.example.messaging</groupId>
     <artifactId>messaging-spring-boot-starter</artifactId>
   </dependency>
   <dependency>
-    <groupId>com.example</groupId>
+    <groupId>com.example.messaging</groupId>
     <artifactId>messaging-inbox</artifactId>
   </dependency>
   <dependency>
-    <groupId>com.example</groupId>
+    <groupId>com.example.messaging</groupId>
     <artifactId>messaging-aws</artifactId>   <!-- ou messaging-azure, -gcp, -jms, -rabbitmq -->
   </dependency>
   <dependency>

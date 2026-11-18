@@ -12,8 +12,8 @@
 
 Esta seção vence o resto do ADR onde os dois divergem.
 
-- Coordenadas: `com.example:messaging-inbox` e
-  `com.example:messaging-inbox-spring-boot-starter`, versão da
+- Coordenadas: `com.example.messaging:messaging-inbox` e
+  `com.example.messaging:messaging-inbox-spring-boot-starter`, versão da
   messaging-library (`0.1.0-SNAPSHOT`), ambos no `messaging-bom`.
 - Pacote base `com.example.messaging.inbox` (starter em
   `com.example.messaging.inbox.spring`). O código portado da inbox-library
@@ -40,7 +40,7 @@ Esta seção vence o resto do ADR onde os dois divergem.
   resultado. O código portado de lá muda de pacote para `com.example.inbox`,
   e os headers `x-acme-*` dão lugar aos atributos `inbox_*` (ADR-0002).
 - Baseline: Java 21, Spring Boot 4.x (Spring Framework 7, Jackson 3,
-  spring-kafka 4.x) e a messaging-lib (`com.example:messaging-bom`) na mesma
+  spring-kafka 4.x) e a messaging-lib (`com.example.messaging:messaging-bom`) na mesma
   linha de Boot (4.1.x). Spring Cloud AWS saiu com a revisão do ADR-0001.
 - O core não importa o BOM do Spring Boot. `inbox-kafka` e o starter
   importam. `inbox-messaging` depende só de `messaging-core` e não importa o

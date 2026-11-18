@@ -16,7 +16,7 @@ falta.
 | Envelope | CloudEvents binário, fallback para body da outbox, fallback raw | [0003](adr/0003-contrato-de-envelope.md) |
 | Idempotência | `IdempotencyStore` da idempotency-multi-store, chave = id do envelope, escopo = receiver (compartilhado com nível 3 e redrive) | [0004](adr/0004-idempotencia.md) |
 | Ordem | `strict`/`relaxed` por receiver, validado pelas `Capabilities` | [0005](adr/0005-ordenacao.md) |
-| Coordenadas | `com.example:messaging-inbox`, pacote `com.example.messaging.inbox`, Java 21, Boot 4, Apache-2.0 | [0006](adr/0006-coordenadas-licenca-publicacao.md) |
+| Coordenadas | `com.example.messaging:messaging-inbox`, pacote `com.example.messaging.inbox`, Java 21, Boot 4, Apache-2.0 | [0006](adr/0006-coordenadas-licenca-publicacao.md) |
 | Observabilidade | Micrometer Observation `inbox.consume`, métricas `inbox_*`, gauge `inbox_last_receive_age_seconds` | [0007](adr/0007-observabilidade.md) |
 | Configuração | `messaging.receivers`, `messaging.receiver-defaults` e `messaging.receivers-enabled`, validados no startup | [0008](adr/0008-configuracao-de-brokers-e-consumers.md) |
 | Loop de polling | Um receiver e uma platform thread por worker, `keepAlive` por entrega, shutdown em quatro passos | [0009](adr/0009-loop-de-polling-sobre-message-receiver.md) |

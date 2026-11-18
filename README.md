@@ -40,7 +40,7 @@ mvn install
 <dependencyManagement>
   <dependencies>
     <dependency>
-      <groupId>com.example</groupId>
+      <groupId>com.example.messaging</groupId>
       <artifactId>messaging-bom</artifactId>
       <version>0.1.0-SNAPSHOT</version>
       <type>pom</type>
@@ -51,11 +51,11 @@ mvn install
 
 <dependencies>
   <dependency>
-    <groupId>com.example</groupId>
+    <groupId>com.example.messaging</groupId>
     <artifactId>messaging-aws</artifactId>
   </dependency>
   <dependency>
-    <groupId>com.example</groupId>
+    <groupId>com.example.messaging</groupId>
     <artifactId>messaging-testkit</artifactId>
     <scope>test</scope>
   </dependency>

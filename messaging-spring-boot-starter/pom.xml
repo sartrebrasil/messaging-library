@@ -4,7 +4,7 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
   <parent>
-    <groupId>com.example</groupId>
+    <groupId>com.example.messaging</groupId>
     <artifactId>messaging-parent</artifactId>
     <version>0.1.0-SNAPSHOT</version>
   </parent>
@@ -27,7 +27,7 @@
 
   <dependencies>
     <dependency>
-      <groupId>com.example</groupId>
+      <groupId>com.example.messaging</groupId>
       <artifactId>messaging-core</artifactId>
     </dependency>
     <dependency>
@@ -47,31 +47,31 @@
     </dependency>
     <!-- A aplicação escolhe os provedores adicionando os adapters -->
     <dependency>
-      <groupId>com.example</groupId>
+      <groupId>com.example.messaging</groupId>
       <artifactId>messaging-aws</artifactId>
       <version>${project.version}</version>
       <optional>true</optional>
     </dependency>
     <dependency>
-      <groupId>com.example</groupId>
+      <groupId>com.example.messaging</groupId>
       <artifactId>messaging-azure</artifactId>
       <version>${project.version}</version>
       <optional>true</optional>
     </dependency>
     <dependency>
-      <groupId>com.example</groupId>
+      <groupId>com.example.messaging</groupId>
       <artifactId>messaging-gcp</artifactId>
       <version>${project.version}</version>
       <optional>true</optional>
     </dependency>
     <dependency>
-      <groupId>com.example</groupId>
+      <groupId>com.example.messaging</groupId>
       <artifactId>messaging-jms</artifactId>
       <version>${project.version}</version>
       <optional>true</optional>
     </dependency>
     <dependency>
-      <groupId>com.example</groupId>
+      <groupId>com.example.messaging</groupId>
       <artifactId>messaging-rabbitmq</artifactId>
       <version>${project.version}</version>
       <optional>true</optional>
@@ -89,7 +89,7 @@
     </dependency>
     <!-- Consumidores inbox.* (InboxAutoConfiguration): só com messaging-inbox e Jackson 3 na aplicação -->
     <dependency>
-      <groupId>com.example</groupId>
+      <groupId>com.example.messaging</groupId>
       <artifactId>messaging-inbox</artifactId>
       <optional>true</optional>
     </dependency>
@@ -144,7 +144,7 @@
       <scope>test</scope>
     </dependency>
     <dependency>
-      <groupId>com.example</groupId>
+      <groupId>com.example.messaging</groupId>
       <artifactId>messaging-testkit</artifactId>
       <scope>test</scope>
     </dependency>
