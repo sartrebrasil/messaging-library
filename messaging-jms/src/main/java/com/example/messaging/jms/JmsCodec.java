@@ -71,9 +71,7 @@ final class JmsCodec {
      * {@code delivery_count}. Sem {@code deduplicationId}: o Artemis descartaria a cópia.
      */
     static BytesMessage copy(Session session, JmsDialect dialect, ReceivedMessage message) throws JMSException {
-        OutgoingMessage outgoing = new OutgoingMessage(message.body(), OutgoingMessage.copiable(message.attributes()),
-                message.contentType(),
-                message.orderingKey(), null, message.traceparent(), message.deadLetter());
+        OutgoingMessage outgoing = OutgoingMessage.copyOf(message).withDeadLetter(message.deadLetter());
         BytesMessage copy = encode(session, dialect, outgoing, Long.MAX_VALUE);
         copy.setStringProperty(ReservedAttributes.DELIVERY_COUNT,
                 Integer.toString(message.deliveryCount().orElse(1)));

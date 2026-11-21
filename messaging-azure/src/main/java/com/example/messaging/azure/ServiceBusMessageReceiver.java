@@ -140,10 +140,10 @@ public final class ServiceBusMessageReceiver implements MessageReceiver {
         ensureOpen();
         validate(maxMessages, maxWait);
         try {
-            Instant receivedAt = Instant.now();
             List<ReceivedMessage> result = new ArrayList<>();
             for (ServiceBusReceivedMessage message : receiver.receiveMessages(maxMessages, positive(maxWait))) {
-                result.add(ServiceBusCodec.decode(message, receivedAt, new Handle(this, message)));
+                // o instante é o da entrega (a iteração bloqueia até a mensagem chegar), não o do início da espera
+                result.add(ServiceBusCodec.decode(message, Instant.now(), new Handle(this, message)));
             }
             return result;
         } catch (RuntimeException e) {

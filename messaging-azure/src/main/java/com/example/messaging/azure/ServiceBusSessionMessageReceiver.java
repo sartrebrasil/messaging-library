@@ -124,13 +124,12 @@ public final class ServiceBusSessionMessageReceiver implements MessageReceiver {
             if (session == null) {
                 return List.of();
             }
-            Instant receivedAt = Instant.now();
             List<ReceivedMessage> result = new ArrayList<>();
             try {
                 for (ServiceBusReceivedMessage message : session.client.receiveMessages(maxMessages,
                         ServiceBusMessageReceiver.positive(maxWait))) {
                     session.outstanding.incrementAndGet();
-                    result.add(ServiceBusCodec.decode(message, receivedAt, new Handle(this, session, message)));
+                    result.add(ServiceBusCodec.decode(message, Instant.now(), new Handle(this, session, message)));
                 }
             } catch (RuntimeException e) {
                 MessagingException mapped = AzureErrors.map("receiveMessages (session)", e);

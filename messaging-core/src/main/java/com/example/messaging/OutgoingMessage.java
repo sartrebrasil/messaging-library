@@ -48,6 +48,8 @@ public record OutgoingMessage(byte[] body,
 
     private static final Pattern KEY = Pattern.compile("[a-z_][a-z0-9_]*");
     private static final Pattern PRINTABLE = Pattern.compile("[\\x20-\\x7E]*");
+    /** Corpo das cópias de uma mensagem recebida vazia, que os provedores não aceitam. */
+    private static final byte[] EMPTY_BODY_PLACEHOLDER = "(empty)".getBytes(StandardCharsets.UTF_8);
     private static final Pattern ID = Pattern.compile("[\\x21-\\x7E]+");
     private static final Pattern TRACEPARENT = Pattern.compile("[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}");
 
@@ -85,10 +87,17 @@ public record OutgoingMessage(byte[] body,
      * {@code deadLetter} ficam vazios; cada chamador decide os seus com {@code with*}.
      */
     public static OutgoingMessage copyOf(ReceivedMessage message) {
-        return new OutgoingMessage(message.body(), copiable(message.attributes()), message.contentType(),
-                message.orderingKey(), null,
-                message.traceparent() != null && TRACEPARENT.matcher(message.traceparent()).matches()
-                        ? message.traceparent() : null, null);
+        // uma cópia nunca falha por campo que só vinha de fora da lib: corpo vazio, orderingKey, contentType e
+        // traceparent inválidos são trocados ou descartados, senão a mensagem não sairia nunca do destino
+        byte[] body = message.body().length == 0 ? EMPTY_BODY_PLACEHOLDER : message.body();
+        String contentType = message.contentType() != null && !message.contentType().isBlank()
+                && PRINTABLE.matcher(message.contentType()).matches() ? message.contentType() : null;
+        String orderingKey = message.orderingKey() != null && message.orderingKey().length() <= MAX_ID_LENGTH
+                && ID.matcher(message.orderingKey()).matches() ? message.orderingKey() : null;
+        String traceparent = message.traceparent() != null && TRACEPARENT.matcher(message.traceparent()).matches()
+                ? message.traceparent() : null;
+        return new OutgoingMessage(body, copiable(message.attributes()), contentType, orderingKey, null, traceparent,
+                null);
     }
 
     /**
