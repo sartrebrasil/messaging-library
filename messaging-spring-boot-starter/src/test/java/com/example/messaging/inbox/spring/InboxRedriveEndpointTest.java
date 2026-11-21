@@ -146,7 +146,7 @@ class InboxRedriveEndpointTest {
     @Test
     void concurrent() {
         InboxRedriveEndpoint endpoint = endpoint(request -> {
-            throw new IllegalStateException("a redrive of failed of receiver billing-orders is in progress");
+            throw new com.example.messaging.inbox.redrive.RedriveInProgressException("a redrive of failed of receiver billing-orders is in progress");
         });
 
         WebEndpointResponse<Object> response = post(endpoint, "failed", "main");

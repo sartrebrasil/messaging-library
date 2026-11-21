@@ -137,6 +137,15 @@ final class InboxConfig {
         Duration pollWait = first(c.getPollWait(), d.getPollWait(), Duration.ofSeconds(20));
         Duration maxProcessing = first(c.getMaxProcessing(), d.getMaxProcessing(), Duration.ofMinutes(15));
         Duration shutdownTimeout = first(c.getShutdownTimeout(), d.getShutdownTimeout(), Duration.ofSeconds(30));
+        if (pollWait.isNegative()) {
+            problems.add(prefix + ".poll-wait must not be negative");
+        }
+        positive(problems, prefix + ".max-processing", maxProcessing);
+        positive(problems, prefix + ".shutdown-timeout", shutdownTimeout);
+        positive(problems, prefix + ".idempotency.ttl", completedTtl);
+        if (reservationTtl != null) {
+            positive(problems, prefix + ".idempotency.reservation-ttl", reservationTtl);
+        }
         if (problems.size() > before) {
             return null;
         }
@@ -251,5 +260,11 @@ final class InboxConfig {
             }
         }
         return null;
+    }
+
+    private static void positive(List<String> problems, String key, Duration value) {
+        if (value.isNegative() || value.isZero()) {
+            problems.add(key + " must be positive");
+        }
     }
 }

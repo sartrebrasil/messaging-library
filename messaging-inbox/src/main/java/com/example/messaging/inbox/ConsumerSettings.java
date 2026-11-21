@@ -53,8 +53,9 @@ public record ConsumerSettings(String consumer,
         if (maxProcessing.isNegative() || maxProcessing.isZero()) {
             throw new IllegalArgumentException("maxProcessing must be positive: " + maxProcessing);
         }
-        if (pollWait.isNegative() || shutdownTimeout.isNegative()) {
-            throw new IllegalArgumentException("negative pollWait or shutdownTimeout");
+        if (pollWait.isNegative() || shutdownTimeout.isNegative() || shutdownTimeout.isZero()) {
+            // com shutdownTimeout zero o pollWait seria limitado a zero e o receive viraria um laço sem espera
+            throw new IllegalArgumentException("pollWait must not be negative and shutdownTimeout must be positive");
         }
         Objects.requireNonNull(deadLetterInterval, "deadLetterInterval");
         if (deadLetterInterval.isNegative() || deadLetterInterval.isZero() || deadLetterMaxPerPass < 1) {

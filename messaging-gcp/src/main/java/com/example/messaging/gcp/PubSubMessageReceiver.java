@@ -130,7 +130,6 @@ public final class PubSubMessageReceiver implements MessageReceiver {
         }
         PullRequest request = PullRequest.newBuilder().setSubscription(subscription)
                 .setMaxMessages(Math.min(maxMessages, MAX_PULL)).build();
-        Instant receivedAt = Instant.now();
         PullResponse response;
         try {
             response = stub.pullCallable().call(request, GrpcCallContext.createDefault()
@@ -140,6 +139,7 @@ public final class PubSubMessageReceiver implements MessageReceiver {
         } catch (ApiException e) {
             throw GcpErrors.map("pull " + subscription, e);
         }
+        Instant receivedAt = Instant.now();
         List<ReceivedMessage> result = new ArrayList<>();
         for (com.google.pubsub.v1.ReceivedMessage received : response.getReceivedMessagesList()) {
             result.add(PubSubCodec.decode(received.getMessage(), received.getDeliveryAttempt(), receivedAt,

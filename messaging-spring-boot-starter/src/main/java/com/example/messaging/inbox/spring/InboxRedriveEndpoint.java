@@ -85,7 +85,7 @@ public class InboxRedriveEndpoint {
             return error(e, WebEndpointResponse.STATUS_BAD_REQUEST);
         } catch (NoSuchElementException e) {
             return error(e, WebEndpointResponse.STATUS_NOT_FOUND);
-        } catch (IllegalStateException e) {
+        } catch (com.example.messaging.inbox.redrive.RedriveInProgressException e) {
             return error(e, 409);
         }
     }

@@ -34,8 +34,9 @@ final class Copies {
 
     /**
      * @param failure {@code null} for a retry-queue copy; the DLQ and {@code failed} copies carry it
-     * @throws IllegalArgumentException when the received message breaks the sending rules (empty body, invalid
-     *                                  {@code orderingKey}): it can never be copied
+     * @throws IllegalArgumentException when the received message has more attributes than a message can carry:
+     *                                  it can never be copied (an empty body, an invalid {@code orderingKey} or
+     *                                  {@code contentType} are replaced or dropped by {@code OutgoingMessage.copyOf})
      */
     static Copy build(ReceivedMessage message, AttemptState attempts, Failure failure) {
         Map<String, String> attributes = new HashMap<>();

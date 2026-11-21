@@ -85,6 +85,6 @@ final class ServiceBusCodec {
     static int deliveryCount(ServiceBusReceivedMessage message, Map<String, String> properties) {
         int count = (int) message.getDeliveryCount() + 1;
         String previous = properties.get(ReservedAttributes.DELIVERY_COUNT);
-        return previous == null ? count : count + Integer.parseInt(previous);
+        return previous == null ? count : count + ReservedAttributes.parseCount(previous);
     }
 }

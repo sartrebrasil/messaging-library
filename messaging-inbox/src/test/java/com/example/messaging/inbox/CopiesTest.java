@@ -63,9 +63,25 @@ class CopiesTest {
     }
 
     @Test
-    void aMessageThatBreaksTheSendingRulesCannotBeCopied() {
+    void aMessageWithMoreAttributesThanAMessageCanCarryCannotBeCopied() {
         assertThrows(IllegalArgumentException.class,
-                () -> Copies.build(received("m", Map.of(), "key with spaces"), AttemptState.initial(), null));
+                () -> Copies.build(received("m", tooManyAttributes(), null), AttemptState.initial(), null));
+    }
+
+    /** O orderingKey inválido de um produtor de fora da lib fica de fora da cópia, que sai. */
+    @Test
+    void anInvalidOrderingKeyIsLeftOutOfTheCopy() {
+        var copy = Copies.build(received("m", Map.of(), "key with spaces"), AttemptState.initial(), null);
+
+        assertNull(copy.message().orderingKey());
+    }
+
+    static Map<String, String> tooManyAttributes() {
+        Map<String, String> attributes = new java.util.HashMap<>();
+        for (int i = 0; i <= com.example.messaging.OutgoingMessage.MAX_ATTRIBUTES; i++) {
+            attributes.put("k" + i, "v");
+        }
+        return attributes;
     }
 
     @Test

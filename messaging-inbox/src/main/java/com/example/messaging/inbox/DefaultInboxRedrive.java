@@ -69,7 +69,7 @@ public final class DefaultInboxRedrive implements InboxRedrive {
         MessageSender target = target(request, route);
         String key = request.consumer() + "/" + request.source();
         if (!running.add(key)) {
-            throw new IllegalStateException("a redrive of " + request.source().name().toLowerCase() + " of receiver "
+            throw new com.example.messaging.inbox.redrive.RedriveInProgressException("a redrive of " + request.source().name().toLowerCase() + " of receiver "
                     + request.consumer() + " is in progress");
         }
         try {

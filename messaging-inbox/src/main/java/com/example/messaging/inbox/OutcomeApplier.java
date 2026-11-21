@@ -125,6 +125,10 @@ final class OutcomeApplier {
         } catch (IllegalArgumentException e) {
             return impossible(receiver, message, e);
         }
+        if (effect == Effect.DEAD_LETTERED && copy.attemptsDropped() && attempts.deadLetter() > 0) {
+            // sem o contador l3 a cópia voltaria à DLQ com l3=0 e o handler reexecutaria para sempre
+            return send(receiver, message, destinations.failed(), copy, Effect.FAILED, retrySkipped);
+        }
         return send(receiver, message, target, copy, effect, retrySkipped);
     }
 

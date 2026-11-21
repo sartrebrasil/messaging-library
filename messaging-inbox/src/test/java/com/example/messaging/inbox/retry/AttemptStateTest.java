@@ -34,4 +34,9 @@ class AttemptStateTest {
     void unreadableAttributeCountsAsZero() {
         assertEquals(new AttemptState(0, 1), AttemptState.from("l2=x;l3=1;garbage", 0));
     }
+
+    @Test
+    void fromIgnoresARedriveIdItCannotCarry() {
+        assertEquals(new AttemptState(1, 0), AttemptState.from("l2=1;redrive=a=b", 0));
+    }
 }

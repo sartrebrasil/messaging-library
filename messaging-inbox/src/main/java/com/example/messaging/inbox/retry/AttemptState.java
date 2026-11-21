@@ -58,7 +58,7 @@ public record AttemptState(int delayed, int deadLetter, String redrive) {
                 switch (key) {
                     case "l2" -> l2 = parseCount(value);
                     case "l3" -> l3 = parseCount(value);
-                    case "redrive" -> redrive = value.isEmpty() ? null : value;
+                    case "redrive" -> redrive = value.isEmpty() || value.indexOf('=') >= 0 ? null : value;
                     default -> {
                     }
                 }

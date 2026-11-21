@@ -86,7 +86,6 @@ public final class SqsMessageReceiver implements MessageReceiver {
         Duration lease = visibilityTimeout();
         int waitSeconds = (int) Math.min(MAX_WAIT_SECONDS, ceilSeconds(maxWait));
         try {
-            Instant receivedAt = Instant.now();
             List<Message> messages = sqs.receiveMessage(b -> b
                     .queueUrl(queueUrl)
                     .maxNumberOfMessages(Math.min(maxMessages, SqsMessageSender.MAX_BATCH))
@@ -97,6 +96,7 @@ public final class SqsMessageReceiver implements MessageReceiver {
                             MessageSystemAttributeName.SENT_TIMESTAMP,
                             MessageSystemAttributeName.MESSAGE_GROUP_ID))
                     .messages();
+            Instant receivedAt = Instant.now(); // depois do long poll: a visibilidade corre desde a entrega
             return messages.stream().map(message -> toReceived(message, receivedAt, lease)).toList();
         } catch (SdkException e) {
             throw AwsErrors.map("ReceiveMessage " + queueUrl, e);

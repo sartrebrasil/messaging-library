@@ -124,8 +124,8 @@ public class InboxAutoConfiguration {
             private InboxDestinations required() {
                 InboxDestinations d = provider.getIfAvailable();
                 if (d == null) {
-                    throw new IllegalStateException("messaging.receivers need the messaging-lib starter (messaging.providers) "
-                            + "starter) or an InboxDestinations bean");
+                    throw new IllegalStateException("messaging.receivers precisa de messaging.providers (o starter de mensageria) "
+                            + "ou de um bean InboxDestinations");
                 }
                 return d;
             }
