@@ -91,6 +91,10 @@ public final class ServiceBusMessageSender implements MessageSender {
                 } catch (MessagingException e) {
                     failures.put(i, e);
                     continue;
+                } catch (IllegalArgumentException e) {
+                    // mensagem inválida (sessions sem orderingKey) falha só a sua posição, não o lote
+                    failures.put(i, new MessagingException(AzureErrors.PROVIDER, e.getMessage(), e, false));
+                    continue;
                 }
                 if (batch == null) {
                     batch = sender.createMessageBatch();

@@ -108,6 +108,8 @@ public final class RabbitMessageSender implements MessageSender {
         try {
             ensureOpen();
             Channel open = channel();
+            // um basic.return de um envio anterior cujo confirm falhou não vale para este (mesmo id no reenvio)
+            returned.remove(id);
             open.basicPublish(exchange, key, mandatory, encoded.properties(), encoded.body());
             // o basic.return chega antes do confirm (F9)
             if (!awaitConfirm(open)) {

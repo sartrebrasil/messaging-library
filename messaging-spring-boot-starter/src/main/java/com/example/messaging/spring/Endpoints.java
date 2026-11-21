@@ -100,7 +100,11 @@ public final class Endpoints {
         switch (type) {
             case AWS -> {
                 notApplicable(key, problems, "subscription", e.subscription());
-                if (!receive && SNS_ARN_ANY_PARTITION.matcher(dest).matches()) {
+                if (receive && SNS_ARN_ANY_PARTITION.matcher(dest).matches()) {
+                    problems.add(key + ".destination: um ARN de tópico SNS só serve para enviar; para receber use a "
+                            + "fila SQS assinada no tópico");
+                    queue = dest;
+                } else if (!receive && SNS_ARN_ANY_PARTITION.matcher(dest).matches()) {
                     topicArn = dest;
                 } else if (!receive && e.kind() == Kind.TOPIC) {
                     problems.add(key + ".kind: topic exige um ARN do SNS (" + SNS_ARN + "...)");

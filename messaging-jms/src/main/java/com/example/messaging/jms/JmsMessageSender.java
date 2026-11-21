@@ -41,8 +41,9 @@ public final class JmsMessageSender implements MessageSender {
     private final boolean topic;
     private final long maxMessageBytes;
     private final ReentrantLock lock = new ReentrantLock();
-    private Session session;
+    private volatile Session session;
     private MessageProducer producer;
+    private static final Duration CLOSE_WAIT = Duration.ofSeconds(5);
     private volatile boolean closed;
 
     private JmsMessageSender(Connection connection, JmsDialect dialect, String name, boolean topic,
@@ -98,7 +99,25 @@ public final class JmsMessageSender implements MessageSender {
     @Override
     public void close() {
         closed = true;
-        lock.lock();
+        boolean locked = false;
+        try {
+            // um send preso no broker (produtor bloqueado) segura o lock; sem espera o shutdown travaria junto
+            locked = lock.tryLock(CLOSE_WAIT.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        if (!locked) {
+            // fechar a session de outra thread é permitido e solta o send preso, que então lança e solta o lock
+            Session stuck = session;
+            if (stuck != null) {
+                try {
+                    stuck.close();
+                } catch (JMSException ignored) {
+                    // a session já pode ter caído com a conexão
+                }
+            }
+            return;
+        }
         try {
             reset();
         } finally {
