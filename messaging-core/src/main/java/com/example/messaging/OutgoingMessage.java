@@ -86,7 +86,9 @@ public record OutgoingMessage(byte[] body,
      */
     public static OutgoingMessage copyOf(ReceivedMessage message) {
         return new OutgoingMessage(message.body(), copiable(message.attributes()), message.contentType(),
-                message.orderingKey(), null, message.traceparent(), null);
+                message.orderingKey(), null,
+                message.traceparent() != null && TRACEPARENT.matcher(message.traceparent()).matches()
+                        ? message.traceparent() : null, null);
     }
 
     /**

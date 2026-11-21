@@ -71,7 +71,7 @@ final class ServiceBusCodec {
             deadLetter = DeadLetterInfo.fromAttributeValue(properties.get(ReservedAttributes.DEAD_LETTER));
         }
         return new ReceivedMessage(message.getMessageId(), message.getBody().toBytes(),
-                AttributeCodec.fromNative(properties), message.getContentType(), message.getSessionId(),
+                AttributeCodec.fromNativeLenient(properties), message.getContentType(), message.getSessionId(),
                 OptionalInt.of(deliveryCount(message, properties)),
                 message.getEnqueuedTime() == null ? null : message.getEnqueuedTime().toInstant(), receivedAt,
                 message.getLockedUntil() == null ? receivedAt : message.getLockedUntil().toInstant(),

@@ -47,6 +47,20 @@ public final class AttributeCodec {
         return result;
     }
 
+    /**
+     * Como {@link #fromNative}, mas um pacote inválido (outro produtor usando o nome {@code attributes}) não lança:
+     * os atributos saem sem os reservados e sem o pacote, para a mensagem não travar o consumidor.
+     */
+    public static Map<String, String> fromNativeLenient(Map<String, String> nativeAttributes) {
+        try {
+            return fromNative(nativeAttributes);
+        } catch (IllegalArgumentException e) {
+            Map<String, String> result = new HashMap<>(nativeAttributes);
+            result.keySet().removeIf(ReservedAttributes::isReserved);
+            return result;
+        }
+    }
+
     /** JSON com as chaves em ordem, para o resultado ser estável. */
     public static String pack(Map<String, String> attributes) {
         StringBuilder json = new StringBuilder("{");

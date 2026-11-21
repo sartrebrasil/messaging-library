@@ -26,6 +26,7 @@ public final class Endpoints {
 
     private static final String VIRTUAL_TOPIC = "VirtualTopic.";
     private static final String SNS_ARN = "arn:aws:sns:";
+    private static final java.util.regex.Pattern SNS_ARN_ANY_PARTITION = java.util.regex.Pattern.compile("^arn:aws[a-z-]*:sns:.*");
 
     /**
      * Opção ({@code options.<nome>}, em kebab-case) → provedores que a aceitam. Opção definida fora da lista derruba o
@@ -99,7 +100,7 @@ public final class Endpoints {
         switch (type) {
             case AWS -> {
                 notApplicable(key, problems, "subscription", e.subscription());
-                if (!receive && dest.startsWith(SNS_ARN)) {
+                if (!receive && SNS_ARN_ANY_PARTITION.matcher(dest).matches()) {
                     topicArn = dest;
                 } else if (!receive && e.kind() == Kind.TOPIC) {
                     problems.add(key + ".kind: topic exige um ARN do SNS (" + SNS_ARN + "...)");

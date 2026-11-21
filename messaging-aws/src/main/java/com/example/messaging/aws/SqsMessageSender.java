@@ -80,6 +80,10 @@ public final class SqsMessageSender implements MessageSender {
             } catch (MessagingException e) {
                 failures.put(i, e);
                 continue;
+            } catch (IllegalArgumentException e) {
+                // mensagem inválida (FIFO sem orderingKey, texto não UTF-8) falha só a sua posição
+                failures.put(i, new MessagingException("aws", e.getMessage(), e, false));
+                continue;
             }
             if (batch.size() == MAX_BATCH || batchBytes + encoded.size() > MAX_MESSAGE_BYTES) {
                 flush(batch, sent, failures);
