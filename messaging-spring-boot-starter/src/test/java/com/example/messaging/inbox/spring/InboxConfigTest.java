@@ -197,4 +197,16 @@ class InboxConfigTest {
     private static List<InboxConfig.Consumer> resolve(Map<String, String> values) {
         return InboxConfig.resolve(bind(values), InboxConfigTest.class.getClassLoader());
     }
+
+    @Test
+    void invalidDurations() {
+        assertThatThrownBy(() -> resolve(Map.of(C + "destination", "orders", C + "failed", "f",
+                C + "poll-wait", "-1s", C + "max-processing", "0s", C + "shutdown-timeout", "0s",
+                C + "idempotency.ttl", "0s", C + "idempotency.reservation-ttl", "-5s")))
+                .hasMessageContaining(C + "poll-wait must not be negative")
+                .hasMessageContaining(C + "max-processing must be positive")
+                .hasMessageContaining(C + "shutdown-timeout must be positive")
+                .hasMessageContaining(C + "idempotency.ttl must be positive")
+                .hasMessageContaining(C + "idempotency.reservation-ttl must be positive");
+    }
 }

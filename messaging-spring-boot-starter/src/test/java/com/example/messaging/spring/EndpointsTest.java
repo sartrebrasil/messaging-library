@@ -232,4 +232,13 @@ class EndpointsTest {
         assertThat(d.topicArn()).isEqualTo(arn);
         assertThat(d.queue()).isNull();
     }
+
+    @Test
+    void gcpAckDeadlineOutsideTheSubscriptionRangeIsRejected() {
+        Endpoint tooShort = new Endpoint("s", "s", null, new Options(null, null, null, null, Duration.ofSeconds(5),
+                null, null, null, null, null, null, null));
+        Endpoints.resolve(KEY, "p", provider(Type.GCP), tooShort, true, problems);
+
+        assertThat(problems).anyMatch(p -> p.contains("ack-deadline precisa estar entre 10s e 600s"));
+    }
 }
