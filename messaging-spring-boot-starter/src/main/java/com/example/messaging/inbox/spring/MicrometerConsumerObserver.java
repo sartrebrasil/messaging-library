@@ -304,6 +304,11 @@ final class MicrometerConsumerObserver implements ConsumerObserver {
     }
 
     private static String exception(Throwable cause) {
-        return cause == null ? "none" : ExceptionClassifier.rootCause(cause).getClass().getSimpleName();
+        if (cause == null) {
+            return "none";
+        }
+        Class<?> type = ExceptionClassifier.rootCause(cause).getClass();
+        // classe anônima tem nome simples vazio, e uma tag vazia some dos painéis
+        return type.getSimpleName().isEmpty() ? type.getName() : type.getSimpleName();
     }
 }

@@ -82,7 +82,10 @@ public final class InMemoryMessaging {
     private final Map<String, List<String>> topics = new ConcurrentHashMap<>();
 
     public void createQueue(String name, QueueOptions options) {
-        queues.put(name, new Queue(name, options));
+        if (queues.putIfAbsent(name, new Queue(name, options)) != null) {
+            // sobrescrever descartaria as mensagens da fila em silêncio
+            throw new IllegalStateException("Fila já existe: " + name);
+        }
     }
 
     public void createTopic(String name) {
@@ -96,7 +99,9 @@ public final class InMemoryMessaging {
         if (subscribers == null) {
             throw new DestinationNotFoundException(PROVIDER, "Tópico não encontrado: " + topic, null);
         }
-        subscribers.add(queue);
+        if (!subscribers.contains(queue)) {
+            subscribers.add(queue);
+        }
     }
 
     public void deleteQueue(String name) {
@@ -121,7 +126,12 @@ public final class InMemoryMessaging {
             if (subscribers == null) {
                 throw new DestinationNotFoundException(PROVIDER, "Tópico não encontrado: " + topic, null);
             }
-            return new Target(subscribers.stream().map(this::queue).toList(), false, TOPIC_MAX_MESSAGE_BYTES);
+            List<Queue> targets = subscribers.stream().map(this::queue).toList();
+            // como o SNS FIFO e o limite do tópico: vale o mais restritivo entre ele e as filas inscritas
+            boolean ordered = targets.stream().anyMatch(q -> q.options.ordered());
+            long limit = targets.stream().mapToLong(q -> q.options.maxMessageBytes())
+                    .min().orElse(TOPIC_MAX_MESSAGE_BYTES);
+            return new Target(targets, ordered, Math.min(limit, TOPIC_MAX_MESSAGE_BYTES));
         });
     }
 
@@ -141,7 +151,9 @@ public final class InMemoryMessaging {
     static long sizeOf(OutgoingMessage message) {
         long size = message.body().length;
         for (Map.Entry<String, String> attribute : message.attributes().entrySet()) {
-            size += attribute.getKey().length() + attribute.getValue().length();
+            // bytes, como os codecs dos provedores: com acento o tamanho em caracteres ficaria abaixo do real
+            size += attribute.getKey().getBytes(java.nio.charset.StandardCharsets.UTF_8).length
+                    + attribute.getValue().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
         }
         return size;
     }
@@ -170,7 +182,8 @@ public final class InMemoryMessaging {
     }
 
     /** Handle opaco: dono, entrada e o token da entrega, que muda a cada receive. */
-    private record Handle(Receiver owner, Entry entry, long token) {
+    /** {@code deliveries} e {@code leaseUntil} são o retrato desta entrega, tirado com o lock da fila. */
+    private record Handle(Receiver owner, Entry entry, long token, int deliveries, Instant leaseUntil) {
     }
 
     private static final class Queue {
@@ -233,7 +246,7 @@ public final class InMemoryMessaging {
                             entry.deliveries++;
                             entry.token = ++tokens;
                             entry.visibleAt = now.plus(options.lease());
-                            taken.add(new Handle(owner, entry, entry.token));
+                            taken.add(new Handle(owner, entry, entry.token, entry.deliveries, entry.visibleAt));
                         }
                     }
                     if (!taken.isEmpty()) {
@@ -343,10 +356,9 @@ public final class InMemoryMessaging {
             }
             Queue queue = queue(queueName);
             try {
-                Instant receivedAt = Instant.now();
-                return queue.take(this, Math.min(maxMessages, 10), maxWait).stream()
-                        .map(handle -> toReceived(handle, receivedAt))
-                        .toList();
+                List<Handle> taken = queue.take(this, Math.min(maxMessages, 10), maxWait);
+                Instant receivedAt = Instant.now(); // depois da espera: a mensagem pode ter chegado durante ela
+                return taken.stream().map(handle -> toReceived(handle, receivedAt)).toList();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return List.of();
@@ -357,8 +369,8 @@ public final class InMemoryMessaging {
             Entry entry = handle.entry();
             OutgoingMessage message = entry.message;
             return new ReceivedMessage(entry.id, message.body(), message.attributes(), message.contentType(),
-                    message.orderingKey(), OptionalInt.of(entry.deliveries), entry.enqueuedAt, receivedAt,
-                    entry.visibleAt, message.traceparent(), entry.deadLetter, handle);
+                    message.orderingKey(), OptionalInt.of(handle.deliveries()), entry.enqueuedAt, receivedAt,
+                    handle.leaseUntil(), message.traceparent(), entry.deadLetter, handle);
         }
 
         @Override
@@ -372,6 +384,7 @@ public final class InMemoryMessaging {
         @Override
         public void nack(ReceivedMessage message, Duration redeliverAfter) {
             Handle handle = own(message);
+            java.util.Objects.requireNonNull(redeliverAfter, "redeliverAfter");
             if (redeliverAfter.isNegative() || redeliverAfter.compareTo(MAX_REDELIVERY_DELAY) > 0) {
                 throw new IllegalArgumentException("Atraso fora de 0.." + MAX_REDELIVERY_DELAY + ": " + redeliverAfter);
             }
@@ -382,6 +395,9 @@ public final class InMemoryMessaging {
         @Override
         public void extendLease(ReceivedMessage message, Duration lease) {
             Handle handle = own(message);
+            if (lease.isNegative() || lease.isZero()) {
+                throw new IllegalArgumentException("lease precisa ser positivo: " + lease);
+            }
             queue(queueName).withLease(handle, () -> handle.entry().visibleAt = Instant.now().plus(lease));
         }
 

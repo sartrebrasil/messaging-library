@@ -323,8 +323,11 @@ public abstract class MessagingContract {
         MessageReceiver receiver = receiver();
         sender().send(own(OutgoingMessage.ofText("x")));
         ReceivedMessage received = awaitOwn(receiver, 1).getFirst();
-        receiver.keepAlive(received, lease());
+        receiver.keepAlive(received, lease().multipliedBy(2));
 
+        // renovou além do lease original (senão o keep-alive nunca teria feito nada) ...
+        assertNoneOwn(receiver(), lease().multipliedBy(3).dividedBy(2));
+        // ... e parou em maxTotal: a mensagem volta
         ReceivedMessage redelivered = awaitOwn(receiver(), 1, lease().multipliedBy(3).plus(settle())).getFirst();
         assertEquals(received.messageId(), redelivered.messageId());
     }
@@ -419,6 +422,49 @@ public abstract class MessagingContract {
         }
         assertEquals(List.of("a1", "a2", "a3"), byKey.get(keyA));
         assertEquals(List.of("b1", "b2", "b3"), byKey.get(keyB));
+    }
+
+    /** O que a ordenação garante: com a1 entregue e sem confirmação, a2 não vai a ninguém. */
+    @Test
+    void orderedKeyWaitsForThePreviousMessageToBeSettled() {
+        MessageSender sender = track(newOrderedSender());
+        MessageReceiver receiver = track(newOrderedReceiver());
+        assumeTrue(sender != null && receiver != null, "sem par ordenado");
+        String key = "k-" + run;
+        // corpos próprios: a FIFO deduplica por conteúdo, e outros testes já enviaram "a1"
+        String firstBody = "ordem-1-" + run;
+        String second = "ordem-2-" + run;
+        sender.send(own(OutgoingMessage.ofText(firstBody).withOrderingKey(key)));
+        sender.send(own(OutgoingMessage.ofText(second).withOrderingKey(key)));
+
+        List<ReceivedMessage> first = awaitOwn(receiver, 1);
+        assertEquals(List.of(firstBody), first.stream().map(ReceivedMessage::bodyAsString).toList());
+        MessageReceiver other = track(newOrderedReceiver());
+        assertNoneOwn(other, lease().dividedBy(2));
+
+        receiver.ack(first.getFirst());
+        // a2 vai a quem tiver o grupo ou a sessão (no JMS, o consumer que o abriu), então os dois podem recebê-la
+        List<ReceivedMessage> next = new ArrayList<>();
+        MessageReceiver owner = null;
+        long deadline = System.nanoTime() + settle().toNanos();
+        while (next.isEmpty() && System.nanoTime() < deadline) {
+            for (MessageReceiver candidate : List.of(receiver, other)) {
+                for (ReceivedMessage message : candidate.receive(1, maxWait())) {
+                    if (isOwn(message)) {
+                        next.add(message);
+                        owner = candidate;
+                    } else {
+                        ackQuietly(candidate, message);
+                    }
+                }
+                if (!next.isEmpty()) {
+                    break; // outro receive seguraria a thread além do lease antes do ack
+                }
+            }
+        }
+        assertEquals(1, next.size(), "a2 depois do ack de a1");
+        assertEquals(second, next.getFirst().bodyAsString());
+        owner.ack(next.getFirst());
     }
 
     @Test

@@ -101,8 +101,11 @@ public final class PubSubMessageSender implements MessageSender {
                 PubsubMessage wire = PubSubCodec.encode(messages.get(i));
                 wires.add(wire);
                 futures.add(publisher.publish(wire));
-            } catch (MessagingException e) {
-                failures.put(i, e);
+            } catch (RuntimeException e) {
+                // inválida (IllegalArgumentException) ou publisher encerrado: falha só a sua posição, e as
+                // já publicadas ainda são aguardadas e reportadas
+                failures.put(i, e instanceof MessagingException m ? m
+                        : new MessagingException(GcpErrors.PROVIDER, e.getMessage(), e, false));
                 wires.add(null);
                 futures.add(null);
             }
