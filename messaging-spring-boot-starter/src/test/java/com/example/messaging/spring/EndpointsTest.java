@@ -241,4 +241,20 @@ class EndpointsTest {
 
         assertThat(problems).anyMatch(p -> p.contains("ack-deadline precisa estar entre 10s e 600s"));
     }
+
+    @Test
+    void awsSnsTopicArnCannotBeReceivedFrom() {
+        receive(Type.AWS, "arn:aws-us-gov:sns:us-gov-west-1:1:t", null);
+
+        assertThat(problems).anyMatch(p -> p.contains("só serve para enviar"));
+    }
+
+    @Test
+    void nonPositiveMaxMessageBytesIsRejected() {
+        Endpoint endpoint = new Endpoint("t", null, Kind.TOPIC, new Options(null, null, null, 0L, null, null, null,
+                null, null, null, null, null));
+        Endpoints.resolve(KEY, "p", provider(Type.AWS), endpoint, false, problems);
+
+        assertThat(problems).anyMatch(p -> p.contains("max-message-bytes precisa ser positivo"));
+    }
 }

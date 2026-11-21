@@ -131,7 +131,15 @@ public final class RabbitMessageReceiver implements MessageReceiver {
                     if (response == null) {
                         break;
                     }
-                    result.add(take(response));
+                    try {
+                        result.add(take(response));
+                    } catch (RuntimeException e) {
+                        if (result.isEmpty()) {
+                            throw e;
+                        }
+                        // as já retiradas seguem; esta fica pendente e volta à fila quando o lease vencer
+                        return result;
+                    }
                 }
             } catch (IOException | ShutdownSignalException e) {
                 if (!result.isEmpty()) {
