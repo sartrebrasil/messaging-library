@@ -106,4 +106,22 @@ class CodecTest {
     void binaryContentTypeWithNonBase64BodyIsRejected() {
         assertThrows(IllegalArgumentException.class, () -> BodyCodec.fromText("não é base64!", "application/avro"));
     }
+
+    /** Outro produtor pode usar o nome {@code attributes} para outra coisa: o consumidor não pode travar nisso. */
+    @Test
+    void fromNativeLenientIgnoresAPackThatIsNotAJsonObject() {
+        Map<String, String> nativeAttributes = new HashMap<>();
+        nativeAttributes.put(ReservedAttributes.ATTRIBUTES, "foo");
+        nativeAttributes.put(ReservedAttributes.CONTENT_TYPE, "text/plain");
+        nativeAttributes.put("Header-Externo", "x");
+
+        assertThrows(IllegalArgumentException.class, () -> AttributeCodec.fromNative(nativeAttributes));
+        assertEquals(Map.of("Header-Externo", "x"), AttributeCodec.fromNativeLenient(nativeAttributes));
+    }
+
+    @Test
+    void fromNativeLenientStillUnpacksAValidPack() {
+        assertEquals(Map.of("tenant", "acme"), AttributeCodec.fromNativeLenient(
+                Map.of(ReservedAttributes.ATTRIBUTES, "{\"tenant\":\"acme\"}")));
+    }
 }

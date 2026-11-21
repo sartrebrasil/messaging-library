@@ -92,7 +92,7 @@ final class JmsCodec {
         }
         String deadLetter = properties.get(ReservedAttributes.DEAD_LETTER);
         long timestamp = message.getJMSTimestamp();
-        return new ReceivedMessage(message.getJMSMessageID(), body(message), AttributeCodec.fromNative(properties),
+        return new ReceivedMessage(message.getJMSMessageID(), body(message), AttributeCodec.fromNativeLenient(properties),
                 properties.get(ReservedAttributes.CONTENT_TYPE), message.getStringProperty(GROUP_ID),
                 OptionalInt.of(deliveryCount(message, properties)),
                 timestamp == 0 ? null : Instant.ofEpochMilli(timestamp), receivedAt, leaseExpiresAt,

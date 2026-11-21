@@ -63,7 +63,7 @@ final class PubSubCodec {
         Map<String, String> attributes = message.getAttributesMap();
         String deadLetter = attributes.get(ReservedAttributes.DEAD_LETTER);
         return new ReceivedMessage(message.getMessageId(), message.getData().toByteArray(),
-                AttributeCodec.fromNative(attributes), attributes.get(ReservedAttributes.CONTENT_TYPE),
+                AttributeCodec.fromNativeLenient(attributes), attributes.get(ReservedAttributes.CONTENT_TYPE),
                 message.getOrderingKey().isEmpty() ? null : message.getOrderingKey(),
                 deliveryAttempt > 0 ? OptionalInt.of(deliveryAttempt) : OptionalInt.empty(),
                 message.hasPublishTime()

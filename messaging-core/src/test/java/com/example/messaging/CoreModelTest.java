@@ -109,4 +109,15 @@ class CoreModelTest {
 
         assertEquals(Map.of("order_id", "o-1"), copy.attributes());
     }
+
+    /** Um produtor de fora pode mandar {@code traceparent} fora do formato W3C: a cópia o deixa de fora, sem falhar. */
+    @Test
+    void copyOfDropsAMalformedTraceparent() {
+        var now = java.time.Instant.parse("2026-11-05T10:00:00Z");
+        var received = new ReceivedMessage("m-1", "body".getBytes(), Map.of(), null, null,
+                java.util.OptionalInt.of(1), now, now, now.plusSeconds(30),
+                "00-0AF7651916CD43DD8448EB211C80319C-B7AD6B7169203331-01", null, new Object());
+
+        assertNull(OutgoingMessage.copyOf(received).traceparent());
+    }
 }

@@ -222,4 +222,14 @@ class EndpointsTest {
             assertThat(Endpoints.ACCEPTED).as(kebab).containsKey(kebab);
         }
     }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"arn:aws-cn:sns:cn-north-1:1:t",
+            "arn:aws-us-gov:sns:us-gov-west-1:1:t"})
+    void awsTopicArnInAnyPartitionIsATopic(String arn) {
+        Destination d = send(Type.AWS, arn, null);
+        assertThat(problems).isEmpty();
+        assertThat(d.topicArn()).isEqualTo(arn);
+        assertThat(d.queue()).isNull();
+    }
 }

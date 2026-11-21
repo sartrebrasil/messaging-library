@@ -82,9 +82,15 @@ public final class InboxLifecycle implements SmartLifecycle, SmartInitializingSi
             built.forEach(InboxConsumer::stop);
             throw e;
         }
-        for (InboxConsumer consumer : built) {
-            current.get(consumer.settings().consumer()).set(consumer);
-            consumer.start();
+        try {
+            for (InboxConsumer consumer : built) {
+                current.get(consumer.settings().consumer()).set(consumer);
+                consumer.start();
+            }
+        } catch (RuntimeException e) {
+            // running ainda é false: sem isso destroy() não pararia os que já subiram
+            built.forEach(InboxConsumer::stop);
+            throw e;
         }
         running = true;
     }

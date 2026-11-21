@@ -85,7 +85,7 @@ final class RabbitCodec {
                 : firstDeathReason != null ? new DeadLetterInfo(null, firstDeathReason.toString()) : null;
         // mensagem de outro produtor pode vir sem message-id
         String messageId = properties.getMessageId() != null ? properties.getMessageId() : UUID.randomUUID().toString();
-        return new ReceivedMessage(messageId, delivery.getBody(), AttributeCodec.fromNative(headers),
+        return new ReceivedMessage(messageId, delivery.getBody(), AttributeCodec.fromNativeLenient(headers),
                 properties.getContentType(), null, deliveryCount(delivery, deliveryCount),
                 properties.getTimestamp() == null ? null : properties.getTimestamp().toInstant(), receivedAt,
                 leaseExpiresAt, headers.get(ReservedAttributes.TRACEPARENT), deadLetterInfo, handle);
