@@ -24,6 +24,15 @@ public final class ReservedAttributes {
     private ReservedAttributes() {
     }
 
+    /** Número de entregas gravado por outro produtor ou pela lib; valor ilegível conta como 0. */
+    public static int parseCount(String value) {
+        try {
+            return Math.max(0, Integer.parseInt(value.trim()));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
     public static boolean isReserved(String key) {
         return ALL.contains(key);
     }

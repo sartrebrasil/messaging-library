@@ -155,7 +155,7 @@ public record MessagingProperties(Map<String, Provider> providers, Map<String, S
 
         /** The value of the {@code provider} tag of the meters and the {@code messaging.system} of the spans. */
         public String tag() {
-            return name().toLowerCase().replace('_', '-');
+            return name().toLowerCase(java.util.Locale.ROOT).replace('_', '-');
         }
     }
 

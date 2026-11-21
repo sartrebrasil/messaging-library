@@ -67,7 +67,7 @@ class OutcomeApplierTest {
 
     @Test
     void aMessageThatCannotBeCopiedIsReleasedNotAcked() {
-        var applied = applier(DelayedStrategy.BROKER_DELAY).apply(receiver, received(OptionalInt.of(1), "key with spaces"),
+        var applied = applier(DelayedStrategy.BROKER_DELAY).apply(receiver, received(OptionalInt.of(1), null, CopiesTest.tooManyAttributes()),
                 new Outcome.Failed(Outcome.FailureReason.NON_RETRYABLE, AttemptState.initial(), new IllegalArgumentException(), null));
 
         assertEquals(Effect.COPY_IMPOSSIBLE, applied.effect());
@@ -116,7 +116,12 @@ class OutcomeApplierTest {
     }
 
     private static ReceivedMessage received(OptionalInt deliveryCount, String orderingKey) {
-        return new ReceivedMessage("m-1", "body".getBytes(StandardCharsets.UTF_8), Map.of(), null, orderingKey,
+        return received(deliveryCount, orderingKey, Map.of());
+    }
+
+    private static ReceivedMessage received(OptionalInt deliveryCount, String orderingKey,
+                                            Map<String, String> attributes) {
+        return new ReceivedMessage("m-1", "body".getBytes(StandardCharsets.UTF_8), attributes, null, orderingKey,
                 deliveryCount, NOW, NOW, NOW.plusSeconds(30), null, null, new Object());
     }
 

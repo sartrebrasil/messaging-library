@@ -124,4 +124,11 @@ class CodecTest {
         assertEquals(Map.of("tenant", "acme"), AttributeCodec.fromNativeLenient(
                 Map.of(ReservedAttributes.ATTRIBUTES, "{\"tenant\":\"acme\"}")));
     }
+
+    @Test
+    void parseCountTreatsAnUnreadableValueAsZero() {
+        assertEquals(3, ReservedAttributes.parseCount("3"));
+        assertEquals(0, ReservedAttributes.parseCount("n/a"));
+        assertEquals(0, ReservedAttributes.parseCount("-2"));
+    }
 }

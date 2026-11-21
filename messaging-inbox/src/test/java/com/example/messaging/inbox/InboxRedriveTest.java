@@ -473,21 +473,21 @@ class InboxRedriveTest {
         assertNotNull(main.sent.getFirst().deduplicationId());
     }
 
-    /** A message that cannot be copied (empty body from outside the lib) is an error, not the end of the run (I1). */
+    /** A message that cannot be copied (too many attributes from outside the lib) is an error, not the end of the run (I1). */
     @Test
     void anUncopiableMessageIsAnErrorAndTheRunGoesOn() {
         fail("m-1", new IllegalStateException("down"));
         settle();
-        MessageReceiver emptyBody = new InboxConsumerTest.Delegating(messaging.receiver(FAILED)) {
+        MessageReceiver tooManyAttributes = new InboxConsumerTest.Delegating(messaging.receiver(FAILED)) {
             @Override
             public List<ReceivedMessage> receive(int maxMessages, Duration maxWait) {
                 return super.receive(maxMessages, maxWait).stream().map(m -> new ReceivedMessage(m.messageId(),
-                        new byte[0], m.attributes(), m.contentType(), m.orderingKey(), m.deliveryCount(),
+                        m.body(), CopiesTest.tooManyAttributes(), m.contentType(), m.orderingKey(), m.deliveryCount(),
                         m.enqueuedAt(), m.receivedAt(), m.leaseExpiresAt(), m.traceparent(), m.deadLetter(),
                         m.handle())).toList();
             }
         };
-        RedriveRoutes routes = new RedriveRoutes(() -> emptyBody, messaging.queueSender(FAILED), null, null,
+        RedriveRoutes routes = new RedriveRoutes(() -> tooManyAttributes, messaging.queueSender(FAILED), null, null,
                 messaging.queueSender(MAIN), Map.of());
 
         RedriveReport report = redrive(routes).redrive(failedToMain(Filter.NONE));

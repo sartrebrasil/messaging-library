@@ -162,8 +162,14 @@ public final class JmsMessageReceiver implements MessageReceiver {
         List<ReceivedMessage> result = new ArrayList<>();
         result.add(first);
         while (result.size() < Math.min(maxMessages, maxInFlight)) {
-            Slot next = acquire(0);
-            ReceivedMessage message = next == null ? null : take(next, 0);
+            ReceivedMessage message;
+            try {
+                Slot next = acquire(0);
+                message = next == null ? null : take(next, 0);
+            } catch (RuntimeException e) {
+                // as já retiradas seguem para o handler; o erro volta no próximo receive, se persistir
+                break;
+            }
             if (message == null) {
                 break;
             }

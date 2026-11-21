@@ -112,7 +112,7 @@ final class JmsCodec {
     private static int deliveryCount(Message message, Map<String, String> properties) throws JMSException {
         int count = message.propertyExists(DELIVERY_COUNT) ? message.getIntProperty(DELIVERY_COUNT) : 1;
         String previous = properties.get(ReservedAttributes.DELIVERY_COUNT);
-        return previous == null ? count : count + Integer.parseInt(previous);
+        return previous == null ? count : count + ReservedAttributes.parseCount(previous);
     }
 
     /** {@link TextMessage} vem de produtores sem a lib; vira UTF-8. */

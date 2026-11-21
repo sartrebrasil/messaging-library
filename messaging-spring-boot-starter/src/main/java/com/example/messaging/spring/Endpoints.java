@@ -181,6 +181,9 @@ public final class Endpoints {
             case GCP -> {
                 if (receive && d.ackDeadline() == null) {
                     problems.add(prefix + ".ack-deadline é obrigatório para receber (o ack deadline da subscription)");
+                } else if (receive && d.ackDeadline() != null && (d.ackDeadline().compareTo(java.time.Duration.ofSeconds(10)) < 0
+                        || d.ackDeadline().compareTo(java.time.Duration.ofSeconds(600)) > 0)) {
+                    problems.add(prefix + ".ack-deadline precisa estar entre 10s e 600s");
                 }
             }
             case RABBITMQ -> {
@@ -190,6 +193,9 @@ public final class Endpoints {
             }
             default -> {
             }
+        }
+        if (d.maxMessageBytes() != null && d.maxMessageBytes() <= 0) {
+            problems.add(prefix + ".max-message-bytes precisa ser positivo");
         }
         if (d.lease() != null && (d.lease().isNegative() || d.lease().isZero())) {
             problems.add(prefix + ".lease precisa ser positivo");

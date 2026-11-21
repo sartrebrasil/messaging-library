@@ -134,6 +134,10 @@ public final class RabbitMessageReceiver implements MessageReceiver {
                     result.add(take(response));
                 }
             } catch (IOException | ShutdownSignalException e) {
+                if (!result.isEmpty()) {
+                    // as já retiradas seguem para o handler; o erro volta no próximo receive, se persistir
+                    return result;
+                }
                 throw RabbitErrors.map("basicGet " + queue, e);
             } finally {
                 lock.unlock();
