@@ -213,4 +213,17 @@ class OutcomeApplierTest {
         public void close() {
         }
     }
+
+    /** Sem lugar para inbox_attempts a cópia perderia o contador l3: com l3 > 0 ela vai para failed, não para a DLQ. */
+    @Test
+    void aDeadLetterCopyThatCannotCarryTheCounterGoesToFailed() {
+        var applied = applier(DelayedStrategy.BROKER_DELAY).apply(receiver,
+                received(OptionalInt.empty(), null, CopiesTest.sixteenAttributes()),
+                new Outcome.Retry(Duration.ofSeconds(30), new AttemptState(1, 1), new IllegalStateException(),
+                        Outcome.RetryReason.FAILURE));
+
+        assertEquals(Effect.FAILED, applied.effect());
+        assertEquals(1, failed.sent.size());
+        assertTrue(dlq.sent.isEmpty());
+    }
 }

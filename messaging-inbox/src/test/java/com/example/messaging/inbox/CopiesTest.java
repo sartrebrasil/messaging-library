@@ -123,4 +123,12 @@ class CopiesTest {
         assertFalse(copy.message().attributes().containsKey("orderId"));
         assertFalse(copy.message().attributes().containsKey("note"));
     }
+
+    static Map<String, String> sixteenAttributes() {
+        Map<String, String> attributes = new java.util.HashMap<>();
+        for (int i = 0; i < com.example.messaging.OutgoingMessage.MAX_ATTRIBUTES; i++) {
+            attributes.put("k" + i, "v");
+        }
+        return attributes;
+    }
 }
