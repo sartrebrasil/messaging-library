@@ -120,4 +120,18 @@ class CoreModelTest {
 
         assertNull(OutgoingMessage.copyOf(received).traceparent());
     }
+
+    /** Mensagem de fora da lib com corpo vazio, orderingKey ou contentType que a API não aceita ainda pode ser copiada. */
+    @Test
+    void copyOfReplacesAnEmptyBodyAndDropsInvalidOrderingKeyAndContentType() {
+        var now = java.time.Instant.parse("2026-11-05T10:00:00Z");
+        var received = new ReceivedMessage("m-1", new byte[0], Map.of(), "text/café", "chave com espaço",
+                java.util.OptionalInt.of(1), now, now, now.plusSeconds(30), null, null, new Object());
+
+        OutgoingMessage copy = OutgoingMessage.copyOf(received);
+
+        assertTrue(copy.body().length > 0);
+        assertNull(copy.contentType());
+        assertNull(copy.orderingKey());
+    }
 }
