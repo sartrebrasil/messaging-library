@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.example.messaging</groupId>
+    <artifactId>messaging-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+  <artifactId>messaging-loadtest</artifactId>
+  <name>messaging-loadtest</name>
+  <description>Teste de carga do InboxConsumer sobre brokers reais; só roda com -Ploadtest</description>
+
+  <properties>
+    <module.name>com.example.messaging.loadtest</module.name>
+    <!-- Fora do build normal: só roda com -Ploadtest -->
+    <skipITs>true</skipITs>
+    <loadtest.profiles></loadtest.profiles>
+    <loadtest.profilesDir>${project.basedir}/src/test/resources/profiles</loadtest.profilesDir>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.example.messaging</groupId>
+      <artifactId>messaging-inbox</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.example.messaging</groupId>
+      <artifactId>messaging-testkit</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.example.messaging</groupId>
+      <artifactId>messaging-aws</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.example.messaging</groupId>
+      <artifactId>messaging-rabbitmq</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.example.messaging</groupId>
+      <artifactId>messaging-jms</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <!-- opcional no messaging-jms -->
+    <dependency>
+      <groupId>org.apache.activemq</groupId>
+      <artifactId>activemq-client</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers</artifactId>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <excludes>
+            <exclude>**/*IT.java</exclude>
+          </excludes>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <version>3.5.3</version>
+        <configuration>
+          <skipITs>${skipITs}</skipITs>
+          <systemPropertyVariables>
+            <loadtest.profiles>${loadtest.profiles}</loadtest.profiles>
+            <loadtest.profilesDir>${loadtest.profilesDir}</loadtest.profilesDir>
+            <loadtest.reportDir>${project.build.directory}/loadtest</loadtest.reportDir>
+          </systemPropertyVariables>
+        </configuration>
+        <executions>
+          <execution>
+            <goals>
+              <goal>integration-test</goal>
+              <goal>verify</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <profile>
+      <id>loadtest</id>
+      <properties>
+        <skipITs>false</skipITs>
+      </properties>
+    </profile>
+  </profiles>
+</project>

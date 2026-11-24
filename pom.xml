@@ -21,6 +21,7 @@
     <module>messaging-rabbitmq</module>
     <module>messaging-spring-boot-starter</module>
     <module>messaging-inbox</module>
+    <module>messaging-loadtest</module>
   </modules>
 
   <properties>
